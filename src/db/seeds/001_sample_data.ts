@@ -1,259 +1,401 @@
 import type { Knex } from 'knex';
 import { config } from '../../config';
 import { hashPassword } from '../../services/auth';
+import { addDays } from '../../services/operators';
 
 /**
  * Development data. Wipes the tables it owns and re-inserts a known set, so it
  * is safe to run repeatedly. Refuses to run against NODE_ENV=production.
+ *
+ * The operators are deliberately spread across onboarding states so the
+ * compliance view and the expiry job have something real to chew on.
  */
 export async function seed(knex: Knex): Promise<void> {
   if (config.isProduction) {
     throw new Error('Refusing to run seeds with NODE_ENV=production');
   }
 
-  await knex('inspections').del();
-  await knex('payments').del();
-  await knex('contracts').del();
-  await knex('jobs').del();
+  await knex('properties').del();
   await knex('customers').del();
+  await knex('operator_documents').del();
+  await knex('document_requirements').del();
+  await knex.raw('update branches set manager_user_id = null');
   await knex('users').del();
   await knex('branches').del();
 
+  const today = new Date().toISOString().slice(0, 10);
+
+  // --- Branches -----------------------------------------------------------
   const branches = await knex('branches')
     .insert([
-      { name: 'North Shore', region: 'North' },
-      { name: 'Downtown', region: 'Central' },
+      { name: 'Kingston', province: 'ON', timezone: 'America/Toronto' },
+      { name: 'Halifax', province: 'NS', timezone: 'America/Halifax' },
     ])
     .returning(['id', 'name']);
 
-  const north = branches.find((b) => b.name === 'North Shore');
-  const downtown = branches.find((b) => b.name === 'Downtown');
-  if (!north || !downtown) {
-    throw new Error('Branch seed failed');
-  }
+  const kingston = branches.find((b) => b.name === 'Kingston');
+  const halifax = branches.find((b) => b.name === 'Halifax');
+  if (!kingston || !halifax) throw new Error('Branch seed failed');
 
+  // --- Users --------------------------------------------------------------
   const password_hash = await hashPassword(config.seed.password);
 
   const users = await knex('users')
     .insert([
       {
-        email: 'admin@avcrm.test',
+        email: 'corporate@avcrm.test',
         password_hash,
-        name: 'Ada Admin',
-        role: 'admin',
-        branch_id: north.id,
+        first_name: 'Ada',
+        last_name: 'Corporate',
+        phone: '613-555-0100',
+        role: 'corporate',
+        branch_id: null,
+        onboarding_status: 'approved',
       },
       {
-        email: 'manager.north@avcrm.test',
+        email: 'kingston.manager@avcrm.test',
         password_hash,
-        name: 'Marty Manager',
-        role: 'manager',
-        branch_id: north.id,
+        first_name: 'Marty',
+        last_name: 'Manager',
+        phone: '613-555-0111',
+        role: 'corporate',
+        branch_id: kingston.id,
+        onboarding_status: 'approved',
       },
       {
-        email: 'dispatch.north@avcrm.test',
+        email: 'halifax.manager@avcrm.test',
         password_hash,
-        name: 'Dana Dispatcher',
-        role: 'dispatcher',
-        branch_id: north.id,
+        first_name: 'Dee',
+        last_name: 'Dartmouth',
+        phone: '902-555-0122',
+        role: 'corporate',
+        branch_id: halifax.id,
+        onboarding_status: 'approved',
       },
       {
-        email: 'operator.north@avcrm.test',
+        // Fully compliant: shows up in the assignable pool.
+        email: 'otto@avcrm.test',
         password_hash,
-        name: 'Otto Operator',
+        first_name: 'Otto',
+        last_name: 'Plows',
+        phone: '613-555-0133',
         role: 'operator',
-        branch_id: north.id,
+        branch_id: kingston.id,
+        onboarding_status: 'approved',
       },
       {
-        email: 'manager.downtown@avcrm.test',
+        // Has an abstract expiring inside the 30 day window.
+        email: 'nina@avcrm.test',
         password_hash,
-        name: 'Dee Downtown',
-        role: 'manager',
-        branch_id: downtown.id,
+        first_name: 'Nina',
+        last_name: 'Salter',
+        phone: '613-555-0144',
+        role: 'operator',
+        branch_id: kingston.id,
+        onboarding_status: 'approved',
+      },
+      {
+        // Documents submitted but not reviewed yet.
+        email: 'pat@avcrm.test',
+        password_hash,
+        first_name: 'Pat',
+        last_name: 'Pending',
+        phone: '902-555-0155',
+        role: 'operator',
+        branch_id: halifax.id,
+        onboarding_status: 'pending',
       },
     ])
     .returning(['id', 'email']);
 
-  const operator = users.find((u) => u.email === 'operator.north@avcrm.test');
-  if (!operator) {
-    throw new Error('User seed failed');
-  }
-
-  const customers = await knex('customers')
-    .insert([
-      {
-        branch_id: north.id,
-        name: 'Birchwood Medical Plaza',
-        phone: '902-555-0117',
-        address: '18 Birchwood Ave, Bedford',
-        email: 'facilities@birchwoodplaza.test',
-        contract_status: 'active',
-      },
-      {
-        branch_id: north.id,
-        name: 'Harbour Ridge Condos',
-        phone: '902-555-0142',
-        address: '400 Harbour Ridge Rd, Halifax',
-        email: 'board@harbourridge.test',
-        contract_status: 'active',
-      },
-      {
-        branch_id: north.id,
-        name: 'Sackville Auto Group',
-        phone: '902-555-0188',
-        address: '95 Sackville Dr, Lower Sackville',
-        email: 'ops@sackvilleauto.test',
-        contract_status: 'pending',
-      },
-      {
-        branch_id: north.id,
-        name: 'Fall River Storage',
-        phone: '902-555-0163',
-        address: '2200 Fall River Rd, Fall River',
-        email: null,
-        contract_status: 'none',
-      },
-      {
-        branch_id: downtown.id,
-        name: 'Granville Retail Block',
-        phone: '902-555-0104',
-        address: '1601 Granville St, Halifax',
-        email: 'property@granvilleblock.test',
-        contract_status: 'active',
-      },
-    ])
-    .returning(['id', 'name', 'branch_id']);
-
-  const byName = (name: string) => {
-    const found = customers.find((c) => c.name === name);
-    if (!found) throw new Error(`Customer seed failed: ${name}`);
+  const byEmail = (email: string) => {
+    const found = users.find((u) => u.email === email);
+    if (!found) throw new Error(`User seed failed: ${email}`);
     return found;
   };
 
-  const birchwood = byName('Birchwood Medical Plaza');
-  const harbour = byName('Harbour Ridge Condos');
-  const granville = byName('Granville Retail Block');
+  const kingstonManager = byEmail('kingston.manager@avcrm.test');
+  const halifaxManager = byEmail('halifax.manager@avcrm.test');
+  const corporate = byEmail('corporate@avcrm.test');
+  const otto = byEmail('otto@avcrm.test');
+  const nina = byEmail('nina@avcrm.test');
+  const pat = byEmail('pat@avcrm.test');
 
-  const day = (offset: number) => {
-    const d = new Date();
-    d.setUTCHours(6, 0, 0, 0);
-    d.setUTCDate(d.getUTCDate() + offset);
-    return d;
-  };
+  await knex('branches')
+    .where({ id: kingston.id })
+    .update({ manager_user_id: kingstonManager.id });
+  await knex('branches')
+    .where({ id: halifax.id })
+    .update({ manager_user_id: halifaxManager.id });
 
-  const jobs = await knex('jobs')
-    .insert([
-      {
-        customer_id: birchwood.id,
-        branch_id: north.id,
-        status: 'completed',
-        scheduled_date: day(-2),
-        completed_date: day(-2),
-        notes: 'Full lot plow plus salt. 8cm overnight.',
-      },
-      {
-        customer_id: birchwood.id,
-        branch_id: north.id,
-        status: 'scheduled',
-        scheduled_date: day(1),
-        completed_date: null,
-        notes: 'Salt only unless accumulation exceeds 2cm.',
-      },
-      {
-        customer_id: harbour.id,
-        branch_id: north.id,
-        status: 'in_progress',
-        scheduled_date: day(0),
-        completed_date: null,
-        notes: 'Visitor lot first, then the ramp.',
-      },
-      {
-        customer_id: harbour.id,
-        branch_id: north.id,
-        status: 'cancelled',
-        scheduled_date: day(-1),
-        completed_date: null,
-        notes: 'Called off, storm tracked south.',
-      },
-      {
-        customer_id: granville.id,
-        branch_id: downtown.id,
-        status: 'scheduled',
-        scheduled_date: day(1),
-        completed_date: null,
-        notes: 'Sidewalk crew, 04:00 start.',
-      },
-    ])
-    .returning(['id', 'status']);
+  // --- Document requirements ---------------------------------------------
+  await knex('document_requirements').insert([
+    {
+      code: 'drivers_license',
+      label: "Driver's licence",
+      province: null,
+      is_required: true,
+      expires: true,
+      default_validity_days: 1825,
+    },
+    {
+      code: 'drivers_abstract',
+      label: "Driver's abstract",
+      province: null,
+      is_required: true,
+      expires: true,
+      default_validity_days: 365,
+    },
+    {
+      code: 'insurance_certificate',
+      label: 'Insurance certificate',
+      province: null,
+      is_required: true,
+      expires: true,
+      default_validity_days: 365,
+    },
+    {
+      code: 'vehicle_registration',
+      label: 'Vehicle registration',
+      province: null,
+      is_required: true,
+      expires: true,
+      default_validity_days: 365,
+    },
+    {
+      code: 'contractor_agreement',
+      label: 'Contractor agreement',
+      province: null,
+      is_required: true,
+      expires: false,
+      default_validity_days: null,
+    },
+    {
+      code: 'void_cheque',
+      label: 'Void cheque',
+      province: null,
+      is_required: true,
+      expires: false,
+      default_validity_days: null,
+    },
+    {
+      code: 'tax_form',
+      label: 'Tax form',
+      province: null,
+      is_required: true,
+      expires: false,
+      default_validity_days: null,
+    },
+    {
+      // Ontario's workers' compensation board; NS has its own scheme.
+      code: 'wsib_clearance',
+      label: 'WSIB clearance certificate',
+      province: 'ON',
+      is_required: true,
+      expires: true,
+      default_validity_days: 90,
+    },
+    {
+      code: 'criminal_record_check',
+      label: 'Criminal record check',
+      province: null,
+      is_required: false,
+      expires: true,
+      default_validity_days: 1095,
+    },
+  ]);
 
-  const completedJob = jobs.find((j) => j.status === 'completed');
-  if (!completedJob) {
-    throw new Error('Job seed failed');
-  }
-
-  const season = (year: number) => ({
-    start_date: `${year}-11-01`,
-    end_date: `${year + 1}-04-30`,
+  // --- Operator documents -------------------------------------------------
+  const file = (code: string, userEmail: string) => ({
+    file_url: `private/operator-docs/${userEmail}/${code}.pdf`,
+    file_name: `${code}.pdf`,
+    mime_type: 'application/pdf',
+    file_size: 184_320,
   });
 
-  await knex('contracts').insert([
-    {
-      customer_id: birchwood.id,
-      price: '18500.00',
-      ...season(2025),
-      auto_renew: true,
-      terms: 'Seasonal flat rate. 24h response, unlimited visits.',
-    },
-    {
-      customer_id: harbour.id,
-      price: '12750.00',
-      ...season(2025),
-      auto_renew: false,
-      terms: 'Seasonal flat rate. Sidewalks included, no roof clearing.',
-    },
-    {
-      customer_id: granville.id,
-      price: '9400.00',
-      ...season(2025),
-      auto_renew: true,
-      terms: 'Per-event billing capped at 30 events.',
-    },
-  ]);
+  const approved = (
+    userId: string,
+    email: string,
+    code: string,
+    expiresOn: string | null,
+  ) => ({
+    user_id: userId,
+    requirement_code: code,
+    ...file(code, email),
+    issued_on: expiresOn ? addDays(expiresOn, -365) : null,
+    expires_on: expiresOn,
+    status: 'approved' as const,
+    reviewed_by_user_id: corporate.id,
+    reviewed_at: new Date(),
+  });
 
-  await knex('payments').insert([
-    {
-      customer_id: birchwood.id,
-      amount: '9250.00',
-      status: 'succeeded',
-      method: 'ach',
-      reference: 'mock_ch_seed0000000000000001',
-      date: day(-30),
-    },
-    {
-      customer_id: harbour.id,
-      amount: '6375.00',
-      status: 'succeeded',
-      method: 'card',
-      reference: 'mock_ch_seed0000000000000002',
-      date: day(-25),
-    },
-    {
-      customer_id: granville.id,
-      amount: '4700.00',
-      status: 'pending',
-      method: 'check',
-      reference: null,
-      date: day(-3),
-    },
-  ]);
+  // Otto is fully compliant, everything comfortably in date.
+  const ottoRequired = [
+    'drivers_license',
+    'drivers_abstract',
+    'insurance_certificate',
+    'vehicle_registration',
+    'wsib_clearance',
+  ];
+  const ottoRows = ottoRequired.map((code) =>
+    approved(otto.id, 'otto@avcrm.test', code, addDays(today, 200)),
+  );
+  ottoRows.push(
+    approved(otto.id, 'otto@avcrm.test', 'contractor_agreement', null),
+    approved(otto.id, 'otto@avcrm.test', 'void_cheque', null),
+    approved(otto.id, 'otto@avcrm.test', 'tax_form', null),
+  );
 
-  await knex('inspections').insert([
+  // Nina is compliant today, but her abstract lands inside the 30 day window
+  // so the nightly job has a reminder to send.
+  const ninaRows = [
+    approved(nina.id, 'nina@avcrm.test', 'drivers_license', addDays(today, 400)),
+    approved(nina.id, 'nina@avcrm.test', 'drivers_abstract', addDays(today, 21)),
+    approved(nina.id, 'nina@avcrm.test', 'insurance_certificate', addDays(today, 150)),
+    approved(nina.id, 'nina@avcrm.test', 'vehicle_registration', addDays(today, 150)),
+    approved(nina.id, 'nina@avcrm.test', 'wsib_clearance', addDays(today, 60)),
+    approved(nina.id, 'nina@avcrm.test', 'contractor_agreement', null),
+    approved(nina.id, 'nina@avcrm.test', 'void_cheque', null),
+    approved(nina.id, 'nina@avcrm.test', 'tax_form', null),
+  ];
+
+  // Pat has submitted two documents that nobody has reviewed yet.
+  const patRows = [
     {
-      job_id: completedJob.id,
-      timestamp: day(-2),
-      photo_url: 'https://example.test/mock/inspections/birchwood-lot.jpg',
-      notes: 'Lot clear, salt applied at entrances and the loading bay.',
-      operator_id: operator.id,
+      user_id: pat.id,
+      requirement_code: 'drivers_license',
+      ...file('drivers_license', 'pat@avcrm.test'),
+      issued_on: addDays(today, -30),
+      expires_on: addDays(today, 1795),
+      status: 'submitted' as const,
+    },
+    {
+      user_id: pat.id,
+      requirement_code: 'contractor_agreement',
+      ...file('contractor_agreement', 'pat@avcrm.test'),
+      issued_on: addDays(today, -30),
+      expires_on: null,
+      status: 'submitted' as const,
+    },
+  ];
+
+  await knex('operator_documents').insert([...ottoRows, ...ninaRows, ...patRows]);
+
+  // --- Customers and properties ------------------------------------------
+  const customers = await knex('customers')
+    .insert([
+      {
+        branch_id: kingston.id,
+        first_name: 'Harold',
+        last_name: 'Bell',
+        email: 'harold.bell@example.test',
+        phone: '613-555-0201',
+        preferred_contact: 'both',
+        status: 'active',
+        notes: 'Signed at the door, wants the driveway done before 7am.',
+        created_by_user_id: otto.id,
+      },
+      {
+        branch_id: kingston.id,
+        first_name: 'Priya',
+        last_name: 'Raman',
+        email: 'priya.raman@example.test',
+        phone: '613-555-0202',
+        preferred_contact: 'email',
+        status: 'active',
+        created_by_user_id: nina.id,
+      },
+      {
+        branch_id: kingston.id,
+        first_name: 'Doug',
+        last_name: 'Whitaker',
+        phone: '613-555-0203',
+        preferred_contact: 'sms',
+        status: 'lead',
+        notes: 'Asked us to come back after the first snowfall.',
+        created_by_user_id: otto.id,
+      },
+      {
+        branch_id: kingston.id,
+        first_name: 'Elaine',
+        last_name: 'Fortier',
+        email: 'elaine.fortier@example.test',
+        preferred_contact: 'email',
+        status: 'churned',
+        notes: 'Moved out of the service area in the spring.',
+        created_by_user_id: nina.id,
+      },
+      {
+        branch_id: halifax.id,
+        first_name: 'Sam',
+        last_name: 'Toussaint',
+        email: 'sam.toussaint@example.test',
+        phone: '902-555-0204',
+        preferred_contact: 'both',
+        status: 'active',
+        created_by_user_id: halifaxManager.id,
+      },
+    ])
+    .returning(['id', 'first_name']);
+
+  const customerBy = (firstName: string) => {
+    const found = customers.find((c) => c.first_name === firstName);
+    if (!found) throw new Error(`Customer seed failed: ${firstName}`);
+    return found;
+  };
+
+  await knex('properties').insert([
+    {
+      customer_id: customerBy('Harold').id,
+      address_line1: '212 Johnson St',
+      city: 'Kingston',
+      province: 'ON',
+      postal_code: 'K7L 1Y4',
+      latitude: '44.230500',
+      longitude: '-76.494400',
+      driveway_size_cars: 2,
+      access_notes: 'Pile snow on the left side. Dog in the yard until 8am.',
+      priority_flag: true,
+    },
+    {
+      customer_id: customerBy('Harold').id,
+      address_line1: '9 Barrie St',
+      address_line2: 'Rear lot',
+      city: 'Kingston',
+      province: 'ON',
+      postal_code: 'K7L 3J7',
+      driveway_size_cars: 4,
+      priority_flag: false,
+    },
+    {
+      customer_id: customerBy('Priya').id,
+      address_line1: '1140 Princess St',
+      city: 'Kingston',
+      province: 'ON',
+      postal_code: 'K7M 3E1',
+      latitude: '44.246800',
+      longitude: '-76.526900',
+      driveway_size_cars: 6,
+      access_notes: 'Gate code 4417.',
+      priority_flag: false,
+    },
+    {
+      customer_id: customerBy('Doug').id,
+      address_line1: '47 Country Club Dr',
+      city: 'Kingston',
+      province: 'ON',
+      postal_code: 'K7M 7X4',
+      driveway_size_cars: 3,
+      priority_flag: false,
+    },
+    {
+      customer_id: customerBy('Sam').id,
+      address_line1: '5560 Cornwallis St',
+      city: 'Halifax',
+      province: 'NS',
+      postal_code: 'B3K 1B1',
+      driveway_size_cars: 1,
+      priority_flag: true,
     },
   ]);
 }
