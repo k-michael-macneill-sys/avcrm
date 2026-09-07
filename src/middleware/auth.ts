@@ -1,72 +1,89 @@
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
-import { verifyToken } from '../services/auth';
+import { loadAuthenticatedUser, verifyToken } from '../services/auth';
+import type { BranchScope } from '../types/auth';
 import type { UserRole } from '../types/models';
-import { forbidden, unauthorized } from '../utils/errors';
+import { badRequest, forbidden, unauthorized } from '../utils/errors';
 
 const BEARER = /^Bearer (.+)$/i;
 
+function tokenFrom(req: Request): string | null {
+  const header = req.header('authorization');
+  if (!header) return null;
+  const match = BEARER.exec(header.trim());
+  return match?.[1] ?? null;
+}
+
 /**
- * Reads `Authorization: Bearer <token>` and attaches req.user.
- * Rejects with 401 when the header is missing, malformed, or the token is bad.
+ * Reads `Authorization: Bearer <token>`, then loads the user row.
+ *
+ * The row is read on every request rather than trusted from the token, so a
+ * suspension, deactivation, role change or branch move takes effect at once
+ * instead of whenever the token happens to expire. That costs one indexed
+ * primary-key lookup per request, which is the right trade here.
  */
 export function requireAuth(req: Request, _res: Response, next: NextFunction): void {
-  const header = req.header('authorization');
-  if (!header) {
-    next(unauthorized('Missing Authorization header'));
+  const token = tokenFrom(req);
+  if (!token) {
+    next(unauthorized('Missing or malformed Authorization header'));
     return;
   }
 
-  const match = BEARER.exec(header.trim());
-  if (!match || !match[1]) {
-    next(unauthorized('Authorization header must be "Bearer <token>"'));
-    return;
-  }
-
+  let userId: string;
   try {
-    const payload = verifyToken(match[1]);
-    req.user = {
-      id: payload.sub,
-      email: payload.email,
-      role: payload.role,
-      branch_id: payload.branch_id,
-    };
-    next();
+    userId = verifyToken(token).sub;
   } catch {
     next(unauthorized('Invalid or expired token'));
+    return;
   }
+
+  loadAuthenticatedUser(userId)
+    .then((user) => {
+      if (!user) {
+        next(unauthorized('User no longer exists'));
+        return;
+      }
+      if (!user.is_active) {
+        next(forbidden('This account has been deactivated'));
+        return;
+      }
+      req.user = user;
+      next();
+    })
+    .catch(next);
 }
 
 /**
- * Same as requireAuth, but a missing or invalid token is not an error — it just
- * leaves req.user undefined. Used by /auth/register, where an admin token
- * unlocks extra fields but is not required.
+ * Same as requireAuth, but a missing or invalid token leaves req.user
+ * undefined instead of erroring. Used by /auth/register, where a corporate
+ * token unlocks extra fields but is not required.
  */
 export function optionalAuth(req: Request, _res: Response, next: NextFunction): void {
-  const header = req.header('authorization');
-  const match = header ? BEARER.exec(header.trim()) : null;
-  if (!match || !match[1]) {
+  const token = tokenFrom(req);
+  if (!token) {
     next();
     return;
   }
 
+  let userId: string;
   try {
-    const payload = verifyToken(match[1]);
-    req.user = {
-      id: payload.sub,
-      email: payload.email,
-      role: payload.role,
-      branch_id: payload.branch_id,
-    };
+    userId = verifyToken(token).sub;
   } catch {
-    // Ignored on purpose: an unusable token is treated as no token here.
+    // An unusable token is treated as no token here.
+    next();
+    return;
   }
-  next();
+
+  loadAuthenticatedUser(userId)
+    .then((user) => {
+      if (user?.is_active) {
+        req.user = user;
+      }
+      next();
+    })
+    .catch(next);
 }
 
-/**
- * Route guard for roles. Use after requireAuth:
- *   router.post('/', requireAuth, requireRole('admin', 'manager'), handler)
- */
+/** Route guard for roles. Use after requireAuth. */
 export function requireRole(...roles: UserRole[]): RequestHandler {
   return (req, _res, next) => {
     if (!req.user) {
@@ -81,25 +98,30 @@ export function requireRole(...roles: UserRole[]): RequestHandler {
   };
 }
 
+/** Shorthand for the common case. */
+export const requireCorporate = requireRole('corporate');
+
 /**
- * Every non-admin is pinned to their own branch. Admins may pass ?branch_id= to
- * look at another one. Returns the branch a request is allowed to read/write.
+ * Which branches this request may READ.
+ *
+ * Corporate sees every branch by default, and may narrow to one with
+ * ?branch_id=. An operator is hard-scoped to their own branch and gets a 403
+ * if they ask for another. This is the query-layer enforcement the spec calls
+ * for — services take the scope and never look at the request.
  */
 export function resolveBranchScope(
   req: Request,
   requestedBranchId?: string | null,
-): string {
+): BranchScope {
   const user = req.user;
   if (!user) {
     throw unauthorized();
   }
 
-  if (user.role === 'admin') {
-    const branchId = requestedBranchId ?? user.branch_id;
-    if (!branchId) {
-      throw forbidden('Specify a branch_id; this admin is not assigned to a branch');
-    }
-    return branchId;
+  if (user.role === 'corporate') {
+    return requestedBranchId
+      ? { kind: 'branch', branchId: requestedBranchId }
+      : { kind: 'all' };
   }
 
   if (!user.branch_id) {
@@ -108,5 +130,20 @@ export function resolveBranchScope(
   if (requestedBranchId && requestedBranchId !== user.branch_id) {
     throw forbidden('You may only access your own branch');
   }
-  return user.branch_id;
+  return { kind: 'branch', branchId: user.branch_id };
+}
+
+/**
+ * Which branch this request may WRITE to. A write always lands in exactly one
+ * branch, so corporate must say which one when they are not tied to a branch.
+ */
+export function resolveWriteBranch(
+  req: Request,
+  requestedBranchId?: string | null,
+): string {
+  const scope = resolveBranchScope(req, requestedBranchId);
+  if (scope.kind === 'branch') {
+    return scope.branchId;
+  }
+  throw badRequest('branch_id is required: corporate users must name the branch');
 }

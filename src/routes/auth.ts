@@ -1,8 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { optionalAuth, requireAuth } from '../middleware/auth';
-import { findUserById, login, registerUser } from '../services/auth';
-import { USER_ROLES } from '../types/models';
+import { createUser, findUserById, login } from '../services/auth';
 import { asyncHandler } from '../utils/async';
 import { unauthorized } from '../utils/errors';
 import { parse } from '../utils/validate';
@@ -10,37 +9,39 @@ import { parse } from '../utils/validate';
 export const authRouter = Router();
 
 const registerSchema = z.object({
-  email: z.string().email().max(255),
+  email: z.string().trim().email().max(255),
   password: z.string().min(8).max(200),
-  name: z.string().min(1).max(200),
-  role: z.enum(USER_ROLES).default('operator'),
-  branch_id: z.string().uuid().nullable().default(null),
+  first_name: z.string().trim().min(1).max(100),
+  last_name: z.string().trim().min(1).max(100),
+  phone: z.string().trim().max(40).nullable().default(null),
+  branch_id: z.string().uuid(),
 });
 
 const loginSchema = z.object({
-  email: z.string().email().max(255),
+  email: z.string().trim().email().max(255),
   password: z.string().min(1).max(200),
 });
 
 /**
- * Open registration, but `role` and `branch_id` are only honoured for an admin
- * caller. Without an admin token you get an unassigned operator, which cannot
- * read any branch until an admin assigns one. That keeps the endpoint usable
- * for bootstrapping without making it a privilege-escalation route.
+ * Self-signup for operators only. Role is set on the backend and is never
+ * read from the request, so this endpoint cannot mint a corporate account.
+ * New operators land on onboarding_status 'pending' and stay unassignable
+ * until their documents are approved. Corporate creates staff via POST /users.
  */
 authRouter.post(
   '/register',
   optionalAuth,
   asyncHandler(async (req, res) => {
     const body = parse(registerSchema, req.body);
-    const callerIsAdmin = req.user?.role === 'admin';
 
-    const user = await registerUser({
+    const user = await createUser({
       email: body.email,
       password: body.password,
-      name: body.name,
-      role: callerIsAdmin ? body.role : 'operator',
-      branch_id: callerIsAdmin ? body.branch_id : null,
+      first_name: body.first_name,
+      last_name: body.last_name,
+      phone: body.phone,
+      role: 'operator',
+      branch_id: body.branch_id,
     });
 
     res.status(201).json({ data: user });
@@ -56,7 +57,6 @@ authRouter.post(
   }),
 );
 
-/** Handy for confirming a token works. */
 authRouter.get(
   '/me',
   requireAuth,
