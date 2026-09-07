@@ -1,45 +1,50 @@
 import type { Knex } from 'knex';
 import { db as defaultDb } from '../db/client';
-import type { ContractStatus, Customer } from '../types/models';
+import type { BranchScope } from '../types/auth';
+import type { Customer, CustomerStatus, PreferredContact } from '../types/models';
 import { badRequest, conflict, notFound } from '../utils/errors';
 import { offsetOf, paginated, type Paginated, type Pagination } from '../utils/pagination';
+import { isPgError, PG_CHECK_VIOLATION, PG_UNIQUE_VIOLATION } from '../utils/pg';
+import { applyBranchScope } from '../utils/scope';
 
 export interface CustomerFilters {
-  contract_status?: ContractStatus;
-  /** Case-insensitive match against name, email, address or phone. */
+  status?: CustomerStatus;
+  created_by_user_id?: string;
+  /** Case-insensitive match against name, email or phone. */
   search?: string;
 }
 
 export interface CustomerInput {
-  name: string;
-  phone: string | null;
-  address: string | null;
+  first_name: string;
+  last_name: string;
   email: string | null;
-  contract_status: ContractStatus;
+  phone: string | null;
+  preferred_contact: PreferredContact;
+  notes: string | null;
+  status: CustomerStatus;
 }
 
-/**
- * All reads are scoped to a single branch. The caller (route) decides which
- * branch that is via resolveBranchScope, so services never look at req.
- */
 export async function listCustomers(
-  branchId: string,
+  scope: BranchScope,
   filters: CustomerFilters,
   pagination: Pagination,
   db: Knex = defaultDb,
 ): Promise<Paginated<Customer>> {
-  const base = db('customers').where({ branch_id: branchId });
+  const base = applyBranchScope(db('customers'), 'branch_id', scope);
 
-  if (filters.contract_status) {
-    base.andWhere({ contract_status: filters.contract_status });
+  if (filters.status) {
+    base.andWhere({ status: filters.status });
   }
-
+  if (filters.created_by_user_id) {
+    base.andWhere({ created_by_user_id: filters.created_by_user_id });
+  }
   if (filters.search) {
     const like = `%${filters.search.trim()}%`;
     base.andWhere((qb) => {
-      qb.whereILike('name', like)
+      qb.whereILike('first_name', like)
+        .orWhereILike('last_name', like)
+        .orWhereRaw("(first_name || ' ' || last_name) ilike ?", [like])
         .orWhereILike('email', like)
-        .orWhereILike('address', like)
         .orWhereILike('phone', like);
     });
   }
@@ -59,10 +64,12 @@ export async function listCustomers(
 
 export async function getCustomer(
   id: string,
-  branchId: string,
+  scope: BranchScope,
   db: Knex = defaultDb,
 ): Promise<Customer> {
-  const customer = await db('customers').where({ id, branch_id: branchId }).first();
+  const customer = await applyBranchScope(db('customers'), 'branch_id', scope)
+    .andWhere({ id })
+    .first();
   if (!customer) {
     throw notFound('Customer not found');
   }
@@ -71,6 +78,7 @@ export async function getCustomer(
 
 export async function createCustomer(
   branchId: string,
+  createdByUserId: string,
   input: CustomerInput,
   db: Knex = defaultDb,
 ): Promise<Customer> {
@@ -81,20 +89,24 @@ export async function createCustomer(
 
   try {
     const [customer] = await db('customers')
-      .insert({ branch_id: branchId, ...normalize(input) })
+      .insert({
+        branch_id: branchId,
+        created_by_user_id: createdByUserId,
+        ...normalize(input),
+      })
       .returning('*');
     if (!customer) {
       throw new Error('Insert returned no customer row');
     }
     return customer;
   } catch (err) {
-    throw translateUniqueViolation(err);
+    throw translate(err);
   }
 }
 
 export async function updateCustomer(
   id: string,
-  branchId: string,
+  scope: BranchScope,
   input: Partial<CustomerInput>,
   db: Knex = defaultDb,
 ): Promise<Customer> {
@@ -104,8 +116,8 @@ export async function updateCustomer(
   }
 
   try {
-    const [customer] = await db('customers')
-      .where({ id, branch_id: branchId })
+    const [customer] = await applyBranchScope(db('customers'), 'branch_id', scope)
+      .andWhere({ id })
       .update(patch)
       .returning('*');
     if (!customer) {
@@ -113,35 +125,18 @@ export async function updateCustomer(
     }
     return customer;
   } catch (err) {
-    throw translateUniqueViolation(err);
+    throw translate(err);
   }
 }
 
 export async function deleteCustomer(
   id: string,
-  branchId: string,
+  scope: BranchScope,
   db: Knex = defaultDb,
 ): Promise<void> {
-  const openJobs = await db('jobs')
-    .where({ customer_id: id })
-    .whereNotIn('status', ['completed', 'cancelled'])
-    .first('id');
-  if (openJobs) {
-    throw conflict('Customer has jobs that are not completed or cancelled');
-  }
-
-  let deleted: number;
-  try {
-    deleted = await db('customers').where({ id, branch_id: branchId }).delete();
-  } catch (err) {
-    // Payments reference customers with ON DELETE RESTRICT: billing history is
-    // never removed as a side effect of deleting a customer.
-    if (isPgError(err, '23503')) {
-      throw conflict('Customer has payment history and cannot be deleted');
-    }
-    throw err;
-  }
-
+  const deleted = await applyBranchScope(db('customers'), 'branch_id', scope)
+    .andWhere({ id })
+    .delete();
   if (deleted === 0) {
     throw notFound('Customer not found');
   }
@@ -153,7 +148,7 @@ function normalize<T extends Partial<CustomerInput>>(input: T): T {
   for (const [key, value] of Object.entries(input)) {
     if (value === undefined) continue;
     if (typeof value === 'string') {
-      const trimmed = key === 'email' ? value.trim().toLowerCase() : value.trim();
+      const trimmed = value.trim();
       out[key] = trimmed === '' ? null : trimmed;
     } else {
       out[key] = value;
@@ -162,15 +157,15 @@ function normalize<T extends Partial<CustomerInput>>(input: T): T {
   return out as T;
 }
 
-function translateUniqueViolation(err: unknown): unknown {
-  if (isPgError(err, '23505')) {
-    return conflict('Another customer in this branch already uses that email');
+function translate(err: unknown): unknown {
+  if (isPgError(err, PG_UNIQUE_VIOLATION)) {
+    return conflict('That customer already exists in this branch');
+  }
+  if (isPgError(err, PG_CHECK_VIOLATION)) {
+    // The only check a caller can realistically trip is the contactable one.
+    return badRequest(
+      'The preferred contact method needs a matching email or phone on file',
+    );
   }
   return err;
-}
-
-function isPgError(err: unknown, code: string): boolean {
-  return (
-    typeof err === 'object' && err !== null && (err as { code?: string }).code === code
-  );
 }
