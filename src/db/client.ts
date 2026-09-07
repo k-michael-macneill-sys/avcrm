@@ -1,7 +1,22 @@
 import path from 'node:path';
 import knex, { type Knex } from 'knex';
+import pg from 'pg';
 import { config } from '../config';
 import { logger } from '../utils/logger';
+
+/**
+ * Return DATE columns as plain 'YYYY-MM-DD' strings.
+ *
+ * By default node-postgres turns them into JS Date objects at local midnight,
+ * which drags a timezone into values that have none — a licence expiry is a
+ * calendar date, not an instant. That conversion shifts the day either side of
+ * UTC and quietly breaks date arithmetic. The row types in src/types/models.ts
+ * declare these columns as strings, and this is what makes that true.
+ *
+ * NUMERIC already arrives as a string, which is why money and coordinates are
+ * typed that way too.
+ */
+pg.types.setTypeParser(pg.types.builtins.DATE, (value: string) => value);
 
 /**
  * Single Knex instance for the process. Imported directly by services; there is

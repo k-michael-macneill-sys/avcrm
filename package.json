@@ -16,7 +16,8 @@
     "migrate:make": "tsx node_modules/knex/bin/cli.js --knexfile src/db/knexfile.ts migrate:make -x ts",
     "seed": "tsx node_modules/knex/bin/cli.js --knexfile src/db/knexfile.ts seed:run",
     "knex": "tsx node_modules/knex/bin/cli.js --knexfile src/db/knexfile.ts",
-    "migrate:status": "tsx node_modules/knex/bin/cli.js --knexfile src/db/knexfile.ts migrate:status"
+    "migrate:status": "tsx node_modules/knex/bin/cli.js --knexfile src/db/knexfile.ts migrate:status",
+    "job:document-expiry": "tsx src/jobs/documentExpiry.ts"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",
@@ -33,6 +34,7 @@
     "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.6",
     "@types/node": "^20.14.10",
+    "@types/pg": "^8.23.1",
     "pino-pretty": "^11.2.1",
     "tsx": "^4.16.2",
     "typescript": "^5.5.3"

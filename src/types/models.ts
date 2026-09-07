@@ -1,110 +1,132 @@
 /**
  * Row shapes as they come back from Postgres. These mirror the migrations;
  * update both together.
+ *
+ * Enumerated columns are text plus a CHECK constraint rather than Postgres
+ * enum types, so adding a value later is a constraint swap instead of an
+ * ALTER TYPE. The const tuples below are the single source of truth for both
+ * the TypeScript unions and the Zod schemas in the routes.
  */
 
-export const USER_ROLES = ['admin', 'manager', 'dispatcher', 'operator'] as const;
+export const USER_ROLES = ['corporate', 'operator'] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 
-export const CONTRACT_STATUSES = [
-  'none',
+export const ONBOARDING_STATUSES = [
   'pending',
-  'active',
+  'docs_submitted',
+  'approved',
+  'suspended',
+] as const;
+export type OnboardingStatus = (typeof ONBOARDING_STATUSES)[number];
+
+export const BRANCH_STATUSES = ['active', 'inactive'] as const;
+export type BranchStatus = (typeof BRANCH_STATUSES)[number];
+
+export const DOCUMENT_STATUSES = [
+  'submitted',
+  'approved',
+  'rejected',
   'expired',
-  'cancelled',
 ] as const;
-export type ContractStatus = (typeof CONTRACT_STATUSES)[number];
+export type DocumentStatus = (typeof DOCUMENT_STATUSES)[number];
 
-export const JOB_STATUSES = [
-  'scheduled',
-  'dispatched',
-  'in_progress',
-  'completed',
-  'cancelled',
-] as const;
-export type JobStatus = (typeof JOB_STATUSES)[number];
+export const CUSTOMER_STATUSES = ['lead', 'active', 'churned'] as const;
+export type CustomerStatus = (typeof CUSTOMER_STATUSES)[number];
 
-export const PAYMENT_STATUSES = [
-  'pending',
-  'succeeded',
-  'failed',
-  'refunded',
-] as const;
-export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
-
-export const PAYMENT_METHODS = ['card', 'ach', 'check', 'cash'] as const;
-export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+export const PREFERRED_CONTACTS = ['email', 'sms', 'both'] as const;
+export type PreferredContact = (typeof PREFERRED_CONTACTS)[number];
 
 export interface Branch {
   id: string;
   name: string;
-  region: string;
+  province: string;
+  timezone: string;
+  manager_user_id: string | null;
+  status: BranchStatus;
   created_at: Date;
+  updated_at: Date;
 }
 
 export interface User {
   id: string;
+  branch_id: string | null;
   email: string;
   password_hash: string;
-  name: string;
+  first_name: string;
+  last_name: string;
+  phone: string | null;
   role: UserRole;
-  branch_id: string | null;
+  onboarding_status: OnboardingStatus;
+  is_active: boolean;
   created_at: Date;
+  updated_at: Date;
 }
 
 /** A user as it is safe to return over the API. */
 export type PublicUser = Omit<User, 'password_hash'>;
 
+export interface DocumentRequirement {
+  id: string;
+  code: string;
+  label: string;
+  /** NULL means the requirement applies in every province. */
+  province: string | null;
+  is_required: boolean;
+  expires: boolean;
+  default_validity_days: number | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface OperatorDocument {
+  id: string;
+  user_id: string;
+  requirement_code: string;
+  file_url: string;
+  file_name: string;
+  mime_type: string;
+  file_size: number;
+  /** date columns come back as YYYY-MM-DD strings. */
+  issued_on: string | null;
+  expires_on: string | null;
+  status: DocumentStatus;
+  reviewed_by_user_id: string | null;
+  reviewed_at: Date | null;
+  rejection_reason: string | null;
+  last_reminder_days: number | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
 export interface Customer {
   id: string;
   branch_id: string;
-  name: string;
-  phone: string | null;
-  address: string | null;
+  first_name: string;
+  last_name: string;
   email: string | null;
-  contract_status: ContractStatus;
-  created_at: Date;
-}
-
-export interface Job {
-  id: string;
-  customer_id: string;
-  branch_id: string;
-  status: JobStatus;
-  scheduled_date: Date | null;
-  completed_date: Date | null;
+  phone: string | null;
+  preferred_contact: PreferredContact;
   notes: string | null;
+  status: CustomerStatus;
+  created_by_user_id: string | null;
   created_at: Date;
+  updated_at: Date;
 }
 
-export interface Contract {
+export interface Property {
   id: string;
   customer_id: string;
-  price: string; // numeric(12,2) comes back as a string from pg
-  start_date: string; // date column, returned as YYYY-MM-DD
-  end_date: string;
-  auto_renew: boolean;
-  terms: string | null;
+  address_line1: string;
+  address_line2: string | null;
+  city: string;
+  province: string;
+  postal_code: string;
+  /** numeric columns come back from pg as strings. */
+  latitude: string | null;
+  longitude: string | null;
+  driveway_size_cars: number | null;
+  access_notes: string | null;
+  priority_flag: boolean;
   created_at: Date;
-}
-
-export interface Payment {
-  id: string;
-  customer_id: string;
-  amount: string;
-  date: Date;
-  status: PaymentStatus;
-  method: PaymentMethod;
-  reference: string | null;
-  created_at: Date;
-}
-
-export interface Inspection {
-  id: string;
-  job_id: string;
-  timestamp: Date;
-  photo_url: string | null;
-  notes: string | null;
-  operator_id: string | null;
-  created_at: Date;
+  updated_at: Date;
 }
