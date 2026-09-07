@@ -4,7 +4,12 @@ import type { BranchScope } from '../types/auth';
 import type { Customer, CustomerStatus, PreferredContact } from '../types/models';
 import { badRequest, conflict, notFound } from '../utils/errors';
 import { offsetOf, paginated, type Paginated, type Pagination } from '../utils/pagination';
-import { isPgError, PG_CHECK_VIOLATION, PG_UNIQUE_VIOLATION } from '../utils/pg';
+import {
+  isPgError,
+  PG_CHECK_VIOLATION,
+  PG_FK_VIOLATION,
+  PG_UNIQUE_VIOLATION,
+} from '../utils/pg';
 import { applyBranchScope } from '../utils/scope';
 
 export interface CustomerFilters {
@@ -134,9 +139,19 @@ export async function deleteCustomer(
   scope: BranchScope,
   db: Knex = defaultDb,
 ): Promise<void> {
-  const deleted = await applyBranchScope(db('customers'), 'branch_id', scope)
-    .andWhere({ id })
-    .delete();
+  let deleted: number;
+  try {
+    deleted = await applyBranchScope(db('customers'), 'branch_id', scope)
+      .andWhere({ id })
+      .delete();
+  } catch (err) {
+    // Properties cascade, but contracts on them are RESTRICT: a customer who
+    // has signed cannot be deleted out from under the paperwork.
+    if (isPgError(err, PG_FK_VIOLATION)) {
+      throw conflict('That customer has a signed contract, so they cannot be deleted');
+    }
+    throw err;
+  }
   if (deleted === 0) {
     throw notFound('Customer not found');
   }

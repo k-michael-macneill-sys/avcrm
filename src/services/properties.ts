@@ -4,7 +4,7 @@ import type { BranchScope } from '../types/auth';
 import type { Property } from '../types/models';
 import { badRequest, conflict, notFound } from '../utils/errors';
 import { offsetOf, paginated, type Paginated, type Pagination } from '../utils/pagination';
-import { isPgError, PG_UNIQUE_VIOLATION } from '../utils/pg';
+import { isPgError, PG_FK_VIOLATION, PG_UNIQUE_VIOLATION } from '../utils/pg';
 import { applyBranchScope } from '../utils/scope';
 
 /**
@@ -232,7 +232,15 @@ export async function deleteProperty(
   db: Knex = defaultDb,
 ): Promise<void> {
   await getProperty(id, scope, db);
-  await db('properties').where({ id }).delete();
+  try {
+    await db('properties').where({ id }).delete();
+  } catch (err) {
+    // contracts.property_id is RESTRICT: a signed address stays on the books.
+    if (isPgError(err, PG_FK_VIOLATION)) {
+      throw conflict('That address has a contract on it, so it cannot be deleted');
+    }
+    throw err;
+  }
 }
 
 function normalize<T extends Partial<PropertyInput>>(input: T): Record<string, unknown> {

@@ -1,4 +1,5 @@
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
+import type { AuditActor } from '../services/audit';
 import { loadAuthenticatedUser, verifyToken } from '../services/auth';
 import type { BranchScope } from '../types/auth';
 import type { UserRole } from '../types/models';
@@ -81,6 +82,20 @@ export function optionalAuth(req: Request, _res: Response, next: NextFunction): 
       next();
     })
     .catch(next);
+}
+
+/**
+ * Who to record against a write, and where from. Lives here with the other
+ * request readers so services keep taking values rather than the request.
+ *
+ * The IP is taken from the connection, never the body — that is what makes a
+ * contract's signed_ip evidence. See `trust proxy` in src/app.ts.
+ */
+export function resolveActor(req: Request): AuditActor {
+  if (!req.user) {
+    throw unauthorized();
+  }
+  return { user_id: req.user.id, ip_address: req.ip ?? null };
 }
 
 /** Route guard for roles. Use after requireAuth. */
