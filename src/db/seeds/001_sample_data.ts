@@ -3,6 +3,9 @@ import { config } from '../../config';
 import { hashPassword } from '../../services/auth';
 import { addDays } from '../../services/operators';
 
+/** Mid November to mid April, the season both branches sell. */
+const SEASON_MONTHS = 5;
+
 /**
  * Development data. Wipes the tables it owns and re-inserts a known set, so it
  * is safe to run repeatedly. Refuses to run against NODE_ENV=production.
@@ -15,6 +18,14 @@ export async function seed(knex: Knex): Promise<void> {
     throw new Error('Refusing to run seeds with NODE_ENV=production');
   }
 
+  // audit_log is append-only, and its trigger blocks DELETE. TRUNCATE does not
+  // fire row triggers, which is exactly what a dev reset needs.
+  await knex.raw('truncate table audit_log');
+  await knex('contract_checklist_items').del();
+  await knex('contracts').del();
+  await knex('quotes').del();
+  await knex('checklist_requirements').del();
+  await knex('pricing_guide').del();
   await knex('properties').del();
   await knex('customers').del();
   await knex('operator_documents').del();
@@ -344,58 +355,299 @@ export async function seed(knex: Knex): Promise<void> {
     return found;
   };
 
-  await knex('properties').insert([
+  const properties = await knex('properties')
+    .insert([
+      {
+        customer_id: customerBy('Harold').id,
+        address_line1: '212 Johnson St',
+        city: 'Kingston',
+        province: 'ON',
+        postal_code: 'K7L 1Y4',
+        latitude: '44.230500',
+        longitude: '-76.494400',
+        driveway_size_cars: 2,
+        access_notes: 'Pile snow on the left side. Dog in the yard until 8am.',
+        priority_flag: true,
+      },
+      {
+        customer_id: customerBy('Harold').id,
+        address_line1: '9 Barrie St',
+        address_line2: 'Rear lot',
+        city: 'Kingston',
+        province: 'ON',
+        postal_code: 'K7L 3J7',
+        driveway_size_cars: 4,
+        priority_flag: false,
+      },
+      {
+        customer_id: customerBy('Priya').id,
+        address_line1: '1140 Princess St',
+        city: 'Kingston',
+        province: 'ON',
+        postal_code: 'K7M 3E1',
+        latitude: '44.246800',
+        longitude: '-76.526900',
+        driveway_size_cars: 6,
+        access_notes: 'Gate code 4417.',
+        priority_flag: false,
+      },
+      {
+        customer_id: customerBy('Doug').id,
+        address_line1: '47 Country Club Dr',
+        city: 'Kingston',
+        province: 'ON',
+        postal_code: 'K7M 7X4',
+        driveway_size_cars: 3,
+        priority_flag: false,
+      },
+      {
+        customer_id: customerBy('Sam').id,
+        address_line1: '5560 Cornwallis St',
+        city: 'Halifax',
+        province: 'NS',
+        postal_code: 'B3K 1B1',
+        driveway_size_cars: 1,
+        priority_flag: true,
+      },
+    ])
+    .returning(['id', 'address_line1']);
+
+  const propertyBy = (addressLine1: string) => {
+    const found = properties.find((p) => p.address_line1 === addressLine1);
+    if (!found) throw new Error(`Property seed failed: ${addressLine1}`);
+    return found;
+  };
+
+  // --- Checklist config ---------------------------------------------------
+  // Order and wording match what the rep sees on the signature screen. Only
+  // the required three block a submission; card_on_file is optional because a
+  // seasonal customer may pay upfront by cheque.
+  await knex('checklist_requirements').insert([
+    { code: 'card_on_file', label: 'Card on file', is_required: false, sort_order: 1 },
     {
-      customer_id: customerBy('Harold').id,
-      address_line1: '212 Johnson St',
-      city: 'Kingston',
-      province: 'ON',
-      postal_code: 'K7L 1Y4',
-      latitude: '44.230500',
-      longitude: '-76.494400',
-      driveway_size_cars: 2,
-      access_notes: 'Pile snow on the left side. Dog in the yard until 8am.',
-      priority_flag: true,
+      code: 'terms_reviewed',
+      label: 'Terms and conditions reviewed',
+      is_required: true,
+      sort_order: 2,
     },
     {
-      customer_id: customerBy('Harold').id,
-      address_line1: '9 Barrie St',
-      address_line2: 'Rear lot',
-      city: 'Kingston',
-      province: 'ON',
-      postal_code: 'K7L 3J7',
-      driveway_size_cars: 4,
-      priority_flag: false,
+      code: 'service_window_explained',
+      label: 'Service window explained',
+      is_required: true,
+      sort_order: 3,
     },
     {
-      customer_id: customerBy('Priya').id,
-      address_line1: '1140 Princess St',
-      city: 'Kingston',
-      province: 'ON',
-      postal_code: 'K7M 3E1',
-      latitude: '44.246800',
-      longitude: '-76.526900',
-      driveway_size_cars: 6,
-      access_notes: 'Gate code 4417.',
-      priority_flag: false,
+      code: 'access_notes_captured',
+      label: 'Access notes captured',
+      is_required: false,
+      sort_order: 4,
     },
     {
-      customer_id: customerBy('Doug').id,
-      address_line1: '47 Country Club Dr',
-      city: 'Kingston',
-      province: 'ON',
-      postal_code: 'K7M 7X4',
-      driveway_size_cars: 3,
-      priority_flag: false,
+      code: 'photos_taken',
+      label: 'Property photos taken',
+      is_required: false,
+      sort_order: 5,
     },
     {
-      customer_id: customerBy('Sam').id,
-      address_line1: '5560 Cornwallis St',
-      city: 'Halifax',
-      province: 'NS',
-      postal_code: 'B3K 1B1',
-      driveway_size_cars: 1,
-      priority_flag: true,
+      code: 'contact_confirmed',
+      label: 'Contact details confirmed',
+      is_required: true,
+      sort_order: 6,
+    },
+  ]);
+
+  // --- Pricing guide ------------------------------------------------------
+  // One rate card per branch, indexed by driveway size 1-6. The seasonal
+  // upfront price is the five month total less a tenth for paying at once.
+  const RATE_CARDS: { branchId: string; monthly: number[] }[] = [
+    { branchId: kingston.id, monthly: [89, 109, 129, 159, 189, 229] },
+    { branchId: halifax.id, monthly: [99, 119, 145, 175, 209, 249] },
+  ];
+
+  await knex('pricing_guide').insert(
+    RATE_CARDS.flatMap(({ branchId, monthly }) =>
+      monthly.flatMap((rate, index) => [
+        {
+          branch_id: branchId,
+          driveway_size_cars: index + 1,
+          billing_type: 'monthly' as const,
+          initial_price: rate.toFixed(2),
+        },
+        {
+          branch_id: branchId,
+          driveway_size_cars: index + 1,
+          billing_type: 'seasonal_upfront' as const,
+          initial_price: (rate * SEASON_MONTHS * 0.9).toFixed(2),
+        },
+      ]),
+    ),
+  );
+
+  // --- Quotes -------------------------------------------------------------
+  // The season the branches are currently selling: mid November to mid April.
+  const seasonYear = Number(today.slice(0, 4));
+  const season = {
+    season_start: `${seasonYear}-11-15`,
+    season_end: `${seasonYear + 1}-04-15`,
+  };
+
+  const quotes = await knex('quotes')
+    .insert([
+      {
+        // Signed below.
+        property_id: propertyBy('212 Johnson St').id,
+        created_by_user_id: otto.id,
+        billing_type: 'monthly',
+        initial_price: '109.00',
+        discounted_price: '99.00',
+        ...season,
+        status: 'accepted',
+        notes: 'Ten off for signing at the door.',
+      },
+      {
+        // Priced but not answered yet: this is the follow-up list.
+        property_id: propertyBy('1140 Princess St').id,
+        created_by_user_id: nina.id,
+        billing_type: 'seasonal_upfront',
+        initial_price: '1030.50',
+        discounted_price: '975.00',
+        ...season,
+        status: 'presented',
+      },
+      {
+        // Still being written up.
+        property_id: propertyBy('47 Country Club Dr').id,
+        created_by_user_id: otto.id,
+        billing_type: 'monthly',
+        initial_price: '129.00',
+        discounted_price: '129.00',
+        ...season,
+        status: 'draft',
+      },
+      {
+        // A lost deal, kept for the win rate in build step 7.
+        property_id: propertyBy('9 Barrie St').id,
+        created_by_user_id: nina.id,
+        billing_type: 'monthly',
+        initial_price: '159.00',
+        discounted_price: '149.00',
+        ...season,
+        status: 'declined',
+        notes: 'Going with the neighbour who does it with a plough truck.',
+      },
+      {
+        // Signed below.
+        property_id: propertyBy('5560 Cornwallis St').id,
+        created_by_user_id: halifaxManager.id,
+        billing_type: 'seasonal_upfront',
+        initial_price: '445.50',
+        discounted_price: '425.00',
+        ...season,
+        status: 'accepted',
+      },
+    ])
+    .returning(['id', 'property_id']);
+
+  const quoteFor = (propertyId: string) => {
+    const found = quotes.find((q) => q.property_id === propertyId);
+    if (!found) throw new Error('Quote seed failed');
+    return found;
+  };
+
+  // --- Contracts ----------------------------------------------------------
+  const signedAt = new Date();
+
+  const contracts = await knex('contracts')
+    .insert([
+      {
+        quote_id: quoteFor(propertyBy('212 Johnson St').id).id,
+        customer_id: customerBy('Harold').id,
+        property_id: propertyBy('212 Johnson St').id,
+        signature_image_url: 'private/signatures/harold-bell.png',
+        signed_at: signedAt,
+        signed_ip: '198.51.100.24',
+        signed_lat: '44.230500',
+        signed_lng: '-76.494400',
+        terms_version: '2026-09-01',
+        // A processor token, never card data. last4 and brand are display only.
+        payment_method_token: 'tok_seed_harold_bell',
+        payment_method_last4: '4242',
+        payment_method_brand: 'visa',
+        status: 'active',
+      },
+      {
+        // Paid upfront by cheque, so there is no card on file.
+        quote_id: quoteFor(propertyBy('5560 Cornwallis St').id).id,
+        customer_id: customerBy('Sam').id,
+        property_id: propertyBy('5560 Cornwallis St').id,
+        signature_image_url: 'private/signatures/sam-toussaint.png',
+        signed_at: signedAt,
+        signed_ip: '203.0.113.9',
+        terms_version: '2026-09-01',
+        status: 'active',
+      },
+    ])
+    .returning(['id', 'property_id']);
+
+  const contractFor = (propertyId: string) => {
+    const found = contracts.find((c) => c.property_id === propertyId);
+    if (!found) throw new Error('Contract seed failed');
+    return found;
+  };
+
+  const harold = contractFor(propertyBy('212 Johnson St').id);
+  const sam = contractFor(propertyBy('5560 Cornwallis St').id);
+
+  // Every contract carries a row per checklist item, ticked or not, so the
+  // record shows what the rep did not do as well as what they did.
+  const checklistRow = (contractId: string, itemCode: string, checked: boolean) => ({
+    contract_id: contractId,
+    item_code: itemCode,
+    checked,
+    checked_at: checked ? signedAt : null,
+  });
+
+  await knex('contract_checklist_items').insert([
+    checklistRow(harold.id, 'card_on_file', true),
+    checklistRow(harold.id, 'terms_reviewed', true),
+    checklistRow(harold.id, 'service_window_explained', true),
+    checklistRow(harold.id, 'access_notes_captured', true),
+    checklistRow(harold.id, 'photos_taken', false),
+    checklistRow(harold.id, 'contact_confirmed', true),
+
+    checklistRow(sam.id, 'card_on_file', false),
+    checklistRow(sam.id, 'terms_reviewed', true),
+    checklistRow(sam.id, 'service_window_explained', true),
+    checklistRow(sam.id, 'access_notes_captured', false),
+    checklistRow(sam.id, 'photos_taken', false),
+    checklistRow(sam.id, 'contact_confirmed', true),
+  ]);
+
+  // --- Audit log ----------------------------------------------------------
+  // The trail the API would have written for the two signatures above. The
+  // payment token is deliberately absent: last4 and brand are all the log
+  // ever needs.
+  await knex('audit_log').insert([
+    {
+      user_id: otto.id,
+      action: 'contract.created',
+      entity_type: 'contract',
+      entity_id: harold.id,
+      after_json: JSON.stringify({
+        status: 'active',
+        terms_version: '2026-09-01',
+        payment_method_last4: '4242',
+        payment_method_brand: 'visa',
+      }),
+      ip_address: '198.51.100.24',
+    },
+    {
+      user_id: halifaxManager.id,
+      action: 'contract.created',
+      entity_type: 'contract',
+      entity_id: sam.id,
+      after_json: JSON.stringify({ status: 'active', terms_version: '2026-09-01' }),
+      ip_address: '203.0.113.9',
     },
   ]);
 }

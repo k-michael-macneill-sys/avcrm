@@ -13,13 +13,13 @@ Build order from the spec, and what exists today:
 | --- | --- | --- |
 | 1 | Migrations for branches, users, onboarding, customers, properties + seeds | **done** |
 | 2 | Auth, role middleware, branch scoping | **done** |
-| 3 | Quotes → contracts → checklist, signature and payment token capture | not started |
+| 3 | Quotes → contracts → checklist, signature and payment token capture | **done** |
 | 4 | Work orders, photo upload, completion gate | not started |
 | 5 | Email queue + templates, then review automation | mock only |
 | 6 | Invoicing and payments | not started |
 | 7 | Reporting views | not started |
 
-Steps 3 to 7 mount into the same structure — a migration, a service of plain
+Steps 4 to 7 mount into the same structure — a migration, a service of plain
 functions, a router — without reshaping what is already here.
 
 ## Setup
@@ -42,7 +42,7 @@ Verify:
 
 ```bash
 curl -s localhost:3000/health
-./scripts/test-api.sh   # 78 checks against a running server; safe to re-run
+./scripts/test-api.sh   # 139 checks against a running server; safe to re-run
 ```
 
 The database owner needs to be able to `create extension citext`. It is a
@@ -85,6 +85,11 @@ All seeded users share the password in `SEED_PASSWORD` (default `Password123!`).
 | `otto@avcrm.test` | operator | Kingston | Fully compliant, assignable |
 | `nina@avcrm.test` | operator | Kingston | Abstract expires in 21 days |
 | `pat@avcrm.test` | operator | Halifax | Documents awaiting review |
+
+The seed also lays down a rate card per branch and five quotes spread across
+the lifecycle — two signed into active contracts (one with a card on file, one
+paid upfront by cheque), one presented and waiting, one still a draft, and one
+declined.
 
 ## Auth and permissions
 
@@ -172,7 +177,24 @@ A suspension is only lifted by corporate, never by the automatic refresh.
 | POST | `/properties` | any | 409 with details if the address exists |
 | GET | `/properties/:id` | any | |
 | PATCH | `/properties/:id` | any | |
-| DELETE | `/properties/:id` | any | |
+| DELETE | `/properties/:id` | any | 409 once a contract holds the address |
+| GET | `/pricing-guide` | any | `driveway_size_cars`, `billing_type` |
+| GET | `/pricing-guide/suggest` | any | `?property_id=&billing_type=` pre-fills a quote |
+| GET | `/quotes` | any | `property_id`, `customer_id`, `status`, `billing_type` |
+| POST | `/quotes` | any | Defaults to `draft` |
+| GET | `/quotes/:id` | any | |
+| GET | `/quotes/:id/contract` | any | `null` until it is signed |
+| PATCH | `/quotes/:id` | any | Re-pricing; 409 once the quote is answered |
+| PATCH | `/quotes/:id/status` | any | The lifecycle move |
+| DELETE | `/quotes/:id` | any | Drafts only |
+| GET | `/checklist-requirements` | any | The boxes the signature screen renders |
+| GET | `/contracts` | any | `status`, `customer_id`, `property_id`, `quote_id` |
+| POST | `/contracts` | any | Signature capture; 400 naming any unticked required box |
+| GET | `/contracts/:id` | any | Includes the full checklist |
+| PATCH | `/contracts/:id` | any | `pdf_url` and the payment method |
+| PATCH | `/contracts/:id/status` | any | `active` → `cancelled` or `completed` |
+| PATCH | `/contracts/:id/checklist/:code` | any | Ticking an optional box afterwards |
+| GET | `/audit-log` | corporate | `entity_type`, `entity_id`, `user_id`, `action` |
 
 ### Response shapes
 
@@ -199,14 +221,82 @@ The check spans every branch, because the case it exists for is a second rep
 selling an address another branch already holds. The branch is always named;
 the customer is only identified when the caller can already see that branch.
 
+## Quotes, contracts and the signature gate
+
+A deal is two records. A **quote** is what the rep prices and shows; a
+**contract** is what gets signed. The money lives on the quote, and freezing it
+is what makes the contract mean something.
+
+```
+draft ──► presented ──► accepted
+  │           │            │
+  └──────► declined / expired
+```
+
+Everything past `presented` is final: `PATCH /quotes/:id` returns 409 on an
+answered quote, and a re-price means writing a new one. That keeps a record of
+what was actually offered when a rep disputes a commission later.
+
+`POST /contracts` is the signature. It runs in one transaction and does four
+things or none of them: writes the contract, writes a checklist row for every
+configured item, moves the quote to `accepted`, and writes the audit entry.
+
+Three rules gate it:
+
+- **The quote must have been presented.** Signing a `draft` is a 409 — nobody
+  has seen it yet.
+- **Every required checklist item must be ticked.** A 400 comes back naming the
+  ones that are not, in the usual `details` array. Which items are required is
+  seeded config (`checklist_requirements`), so the office can add one without a
+  migration or a deploy.
+- **`card_on_file` and the payment token move together.** Ticking the box
+  without a token, or sending a token without the box, is a 400 either way.
+
+`contracts_one_active_per_property` is a partial unique index: a driveway can
+only be sold once at a time. Cancelled and completed contracts stay for the
+audit trail and do not block next season.
+
+### Card data
+
+`payment_method_token` is a processor token and nothing else. It is:
+
+- rejected if it looks like a card number — by `assertNotRawCard`, which catches
+  the spaced and dashed forms, and by a `CHECK` constraint on the column as the
+  last line of defence;
+- never returned by the API (`PUBLIC_CONTRACT_COLUMNS`, the same idea as
+  `password_hash` and `PublicUser`);
+- never written to the audit log, which keeps `last4` and `brand` only.
+
+`signed_ip` is taken from the connection, never the request body — that is what
+makes it evidence. Behind a load balancer, set `TRUST_PROXY` or every contract
+is stamped with the proxy's address.
+
+### The audit log
+
+`audit_log` is append-only, and a trigger enforces it: `UPDATE` and `DELETE`
+raise. (`TRUNCATE` does not fire row triggers, which is how the dev seed resets
+it.) Entries are written by the service that made the change, inside the same
+transaction, so the log cannot drift from what happened. Contracts and quote
+pricing are covered today; payments join in build step 6.
+
+### Pricing guide
+
+`pricing_guide` is seeded config keyed on `(branch_id, driveway_size_cars,
+billing_type)`, read-only over the API like `document_requirements`.
+`GET /pricing-guide/suggest?property_id=…&billing_type=…` is what the quote
+screen opens with. It returns a null price rather than an error when the branch
+has no row for that driveway size — an unpriced size is a gap in config, not a
+failed request — and the rep can always override it.
+
 ## What is mocked
 
 - `src/services/notifications.ts` — `sendEmail` / `sendSms` write to the log.
   Build step 5 replaces the bodies with a real queue and templates; callers do
   not change.
 
-Not started: quotes, contracts, work orders, service photos, invoicing,
-payments, reporting, and any frontend.
+Not started: work orders, service photos, invoicing, payments, reporting, and
+any frontend. Contract PDFs are a `pdf_url` column that something else has to
+fill in; nothing generates one yet.
 
 ## Layout
 
@@ -248,7 +338,8 @@ Adding a resource is three steps, no refactor:
 
 `customers` and `properties` are the reference pair. They show filtering,
 pagination, branch scoping, and translating Postgres constraint violations into
-409s and 400s.
+409s and 400s. `quotes` and `contracts` are the pair to copy when a resource
+needs a transaction, a status machine, or an audit entry.
 
 Other conventions worth keeping:
 
@@ -271,10 +362,10 @@ Other conventions worth keeping:
 - No refresh tokens or logout; a JWT is valid until it expires (`JWT_EXPIRES_IN`).
 - No rate limiting on `/auth/login`.
 - No automated test suite. `scripts/test-api.sh` is a smoke test, not a substitute.
-- No `audit_log` yet. The spec puts it alongside contracts, payments and pricing,
-  none of which exist, so it lands with build step 3.
-- File uploads are recorded, not performed: `POST /operators/:id/documents`
-  stores an object key that something else must have already written to a
-  private bucket. No presigned-URL endpoint yet.
+- `audit_log` covers contracts and quote pricing. Payments join it in build
+  step 6; user role changes are not logged yet.
+- File uploads are recorded, not performed: `POST /operators/:id/documents` and
+  `signature_image_url` on a contract store an object key that something else
+  must have already written to a private bucket. No presigned-URL endpoint yet.
 - List endpoints paginate with `OFFSET`, which should become keyset pagination
   before the tables get large.
