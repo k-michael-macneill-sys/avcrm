@@ -36,6 +36,21 @@ export type CustomerStatus = (typeof CUSTOMER_STATUSES)[number];
 export const PREFERRED_CONTACTS = ['email', 'sms', 'both'] as const;
 export type PreferredContact = (typeof PREFERRED_CONTACTS)[number];
 
+export const BILLING_TYPES = ['monthly', 'seasonal_upfront'] as const;
+export type BillingType = (typeof BILLING_TYPES)[number];
+
+export const QUOTE_STATUSES = [
+  'draft',
+  'presented',
+  'accepted',
+  'declined',
+  'expired',
+] as const;
+export type QuoteStatus = (typeof QUOTE_STATUSES)[number];
+
+export const CONTRACT_STATUSES = ['active', 'cancelled', 'completed'] as const;
+export type ContractStatus = (typeof CONTRACT_STATUSES)[number];
+
 export interface Branch {
   id: string;
   name: string;
@@ -129,4 +144,91 @@ export interface Property {
   priority_flag: boolean;
   created_at: Date;
   updated_at: Date;
+}
+
+export interface PricingGuideEntry {
+  id: string;
+  branch_id: string;
+  driveway_size_cars: number;
+  billing_type: BillingType;
+  /** numeric — money is a string all the way through. */
+  initial_price: string;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface Quote {
+  id: string;
+  property_id: string;
+  created_by_user_id: string | null;
+  billing_type: BillingType;
+  initial_price: string;
+  discounted_price: string;
+  season_start: string;
+  season_end: string;
+  status: QuoteStatus;
+  notes: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface ChecklistRequirement {
+  id: string;
+  code: string;
+  label: string;
+  is_required: boolean;
+  sort_order: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface Contract {
+  id: string;
+  quote_id: string;
+  customer_id: string;
+  property_id: string;
+  signature_image_url: string;
+  signed_at: Date;
+  signed_ip: string | null;
+  signed_lat: string | null;
+  signed_lng: string | null;
+  terms_version: string;
+  /** A processor token. Raw card data is never stored. */
+  payment_method_token: string | null;
+  payment_method_last4: string | null;
+  payment_method_brand: string | null;
+  pdf_url: string | null;
+  status: ContractStatus;
+  created_at: Date;
+  updated_at: Date;
+}
+
+/**
+ * A contract as it is safe to return over the API. The processor token can be
+ * used to charge the customer, so it stays server-side; last4 and brand are
+ * what a screen needs. Same idea as PublicUser and password_hash.
+ */
+export type PublicContract = Omit<Contract, 'payment_method_token'>;
+
+export interface ContractChecklistItem {
+  id: string;
+  contract_id: string;
+  item_code: string;
+  checked: boolean;
+  checked_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+/** Append-only: there is no updated_at, and a trigger blocks writes to it. */
+export interface AuditLogEntry {
+  id: string;
+  user_id: string | null;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+  before_json: unknown | null;
+  after_json: unknown | null;
+  ip_address: string | null;
+  created_at: Date;
 }
