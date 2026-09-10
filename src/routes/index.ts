@@ -9,13 +9,14 @@ import { pricingGuideRouter } from './pricing';
 import { propertiesRouter } from './properties';
 import { quotesRouter } from './quotes';
 import { usersRouter } from './users';
+import { workOrdersRouter } from './workOrders';
 
 /**
  * One place to see the whole surface. Adding a resource is: write the service,
  * write the route file, mount it here.
  *
- * Work orders, invoices and payments arrive in build steps 4 to 6 and mount
- * here the same way.
+ * Invoices and payments arrive in build steps 5 and 6 and mount here the
+ * same way.
  */
 export const apiRouter = Router();
 
@@ -30,4 +31,5 @@ apiRouter.use('/pricing-guide', pricingGuideRouter);
 apiRouter.use('/quotes', quotesRouter);
 apiRouter.use('/checklist-requirements', checklistRequirementsRouter);
 apiRouter.use('/contracts', contractsRouter);
+apiRouter.use('/work-orders', workOrdersRouter);
 apiRouter.use('/audit-log', auditLogRouter);
