@@ -21,6 +21,8 @@ export async function seed(knex: Knex): Promise<void> {
   // audit_log is append-only, and its trigger blocks DELETE. TRUNCATE does not
   // fire row triggers, which is exactly what a dev reset needs.
   await knex.raw('truncate table audit_log');
+  await knex('payments').del();
+  await knex('invoices').del();
   await knex('review_requests').del();
   await knex('message_log').del();
   await knex('message_templates').del();
@@ -935,6 +937,36 @@ export async function seed(knex: Knex): Promise<void> {
         'replaced.',
     },
     {
+      code: 'invoice_sent',
+      channel: 'email',
+      branch_id: null,
+      subject: 'Your invoice for {{address_line1}}',
+      body:
+        'Hi {{customer_first_name}},\n\nYour invoice for {{billing_period_start}} ' +
+        'to {{billing_period_end}} at {{address_line1}} comes to ${{amount_due}}, ' +
+        'due {{due_date}}.\n\n— {{branch_name}}',
+    },
+    {
+      code: 'invoice_overdue',
+      channel: 'email',
+      branch_id: null,
+      subject: 'Your {{address_line1}} invoice is past due',
+      body:
+        'Hi {{customer_first_name}},\n\n${{amount_outstanding}} for ' +
+        '{{address_line1}} was due on {{due_date}} and is still outstanding. ' +
+        'Service continues — please settle up when you can.\n\n— {{branch_name}}',
+    },
+    {
+      code: 'payment_failed_internal',
+      channel: 'email',
+      branch_id: null,
+      subject: '[{{branch_name}}] Payment failed for {{customer_name}}',
+      body:
+        '{{method}} payment of ${{amount}} for {{address_line1}} failed: ' +
+        '{{failure_reason}}.\n\nCustomer: {{customer_name}}\n' +
+        'Email: {{customer_email}}\nPhone: {{customer_phone}}',
+    },
+    {
       // A branch override, to show the mechanism works. Halifax signs off
       // differently; everything else falls back to the global rows above.
       code: 'service_complete',
@@ -1014,6 +1046,69 @@ export async function seed(knex: Knex): Promise<void> {
       rating_response: 2,
       routed_to: 'internal_feedback',
       completed_at: hours(-47),
+    },
+  ]);
+
+  // --- Invoices and payments ----------------------------------------------
+  // Both seasonal contracts were billed at signature, which is what the spec
+  // asks for. The monthly contract at 212 Johnson St has no invoice yet: its
+  // season has not started, and `npm run job:billing` raises each period as
+  // it begins. Run it with a date inside the season to watch that happen.
+  const invoices = await knex('invoices')
+    .insert([
+      {
+        // Paid in full, by the cheque the rep took at the door.
+        contract_id: sam.id,
+        customer_id: customerBy('Sam').id,
+        branch_id: halifax.id,
+        billing_period_start: season.season_start,
+        billing_period_end: season.season_end,
+        amount_due: '425.00',
+        amount_paid: '425.00',
+        status: 'paid',
+        due_date: addDays(today, 14),
+        sent_at: signedAt,
+        paid_at: signedAt,
+      },
+      {
+        // Billed a few weeks ago, the card bounced, and nobody has chased it.
+        contract_id: priya.id,
+        customer_id: customerBy('Priya').id,
+        branch_id: kingston.id,
+        billing_period_start: season.season_start,
+        billing_period_end: season.season_end,
+        amount_due: '975.00',
+        amount_paid: '0.00',
+        status: 'overdue',
+        due_date: addDays(today, -6),
+        sent_at: hours(-480),
+      },
+    ])
+    .returning(['id', 'customer_id']);
+
+  const invoiceFor = (customerId: string) => {
+    const found = invoices.find((i) => i.customer_id === customerId);
+    if (!found) throw new Error('Invoice seed failed');
+    return found;
+  };
+
+  await knex('payments').insert([
+    {
+      invoice_id: invoiceFor(customerBy('Sam').id).id,
+      amount: '425.00',
+      method: 'cheque',
+      status: 'succeeded',
+      processed_at: signedAt,
+    },
+    {
+      // The failure that put the invoice above on the manager's list.
+      invoice_id: invoiceFor(customerBy('Priya').id).id,
+      amount: '975.00',
+      method: 'card_on_file',
+      provider_transaction_id: 'txn_seed_declined',
+      status: 'failed',
+      failure_reason: 'Card declined: insufficient funds',
+      processed_at: hours(-479),
     },
   ]);
 

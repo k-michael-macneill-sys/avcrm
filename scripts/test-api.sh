@@ -586,6 +586,129 @@ call 409 POST "/review-requests/$POOR_ID/rating" '{"rating":5}'
 login "$CORPORATE_EMAIL"
 
 echo
+echo "== invoicing: a seasonal contract bills at signature =="
+call 201 POST /properties "{
+  \"customer_id\": \"$CUSTOMER_ID\",
+  \"address_line1\": \"79 Smoke Test Lane $STAMP\",
+  \"city\": \"Kingston\", \"province\": \"ON\", \"postal_code\": \"K7L 9Z7\",
+  \"driveway_size_cars\": 2
+}"
+BILLED_PROPERTY_ID="$(field data.id)"
+
+call 201 POST /quotes "{
+  \"property_id\": \"$BILLED_PROPERTY_ID\",
+  \"billing_type\": \"seasonal_upfront\",
+  \"initial_price\": 535.50, \"discounted_price\": 500,
+  $SEASON, \"status\": \"presented\"
+}"
+SEASONAL_QUOTE_ID="$(field data.id)"
+
+call 201 POST /contracts "{
+  \"quote_id\": \"$SEASONAL_QUOTE_ID\", $SIGN,
+  \"checklist\": $CHECKLIST_OK
+}"
+SEASONAL_CONTRACT_ID="$(field data.id)"
+
+# The spec's rule: seasonal contracts generate one invoice at signature.
+call 200 GET "/invoices?contract_id=$SEASONAL_CONTRACT_ID"
+assert "signing raised exactly one invoice" "$(field meta.total)" "1"
+INVOICE_ID="$(field data.0.id)"
+assert "for the price that was signed" "$(field data.0.amount_due)" "500.00"
+assert "and it starts as a draft" "$(field data.0.status)" "draft"
+
+echo
+echo "== invoicing: send, pay, refund =="
+# A draft has not been put in front of the customer yet.
+call 409 POST "/invoices/$INVOICE_ID/payments" '{"amount":100,"method":"cheque"}'
+call 200 POST "/invoices/$INVOICE_ID/send"
+assert "sent" "$(field data.status)" "sent"
+call 409 POST "/invoices/$INVOICE_ID/send"
+
+call 201 POST "/invoices/$INVOICE_ID/payments" '{"amount":200,"method":"etransfer"}'
+assert "part payment leaves it owing" "$(field data.status)" "sent"
+assert "and totals what was actually paid" "$(field data.amount_paid)" "200.00"
+call 201 POST "/invoices/$INVOICE_ID/payments" '{"amount":300,"method":"cheque"}'
+assert "covering it marks it paid" "$(field data.status)" "paid"
+PAYMENT_ID="$(node -e "
+  const d = JSON.parse(require('fs').readFileSync(process.env.BODY_PATH,'utf8')).data;
+  process.stdout.write(d.payments.find(p => p.amount === '300.00' && p.status === 'succeeded').id);
+")"
+
+# amount_paid is derived from the payments, so a refund cannot leave it drifting.
+call 200 POST "/payments/$PAYMENT_ID/refund"
+assert "a refund pulls the total back" "$(field data.amount_paid)" "200.00"
+assert "and the invoice owes money again" "$(field data.status)" "sent"
+call 409 POST "/payments/$PAYMENT_ID/refund"
+
+echo
+echo "== invoicing: a declined card =="
+call 400 POST "/invoices/$INVOICE_ID/payments" '{"amount":300,"method":"card_on_file","status":"failed"}'
+call 201 POST "/invoices/$INVOICE_ID/payments" "{
+  \"amount\": 300, \"method\": \"card_on_file\", \"status\": \"failed\",
+  \"failure_reason\": \"Card declined: expired\",
+  \"provider_transaction_id\": \"txn-smoke-$STAMP\"
+}"
+assert "a failed charge pays nothing" "$(field data.amount_paid)" "200.00"
+# A replayed webhook must not book the same charge twice.
+call 409 POST "/invoices/$INVOICE_ID/payments" "{
+  \"amount\": 300, \"method\": \"card_on_file\", \"status\": \"failed\",
+  \"failure_reason\": \"replay\",
+  \"provider_transaction_id\": \"txn-smoke-$STAMP\"
+}"
+
+# The spec's rule: a failed card tells the customer and flags the manager.
+call 200 GET "/message-log?customer_id=$CUSTOMER_ID&status=queued"
+FAILURE_NOTICES="$(node -e "
+  const d = JSON.parse(require('fs').readFileSync(process.env.BODY_PATH,'utf8')).data;
+  process.stdout.write(d.map(m => m.template_code).filter(c => c.startsWith('payment_failed')).sort().join(','));
+")"
+assert "a declined card warns both" "$FAILURE_NOTICES" "payment_failed,payment_failed_internal"
+
+echo
+echo "== invoicing: voiding =="
+call 409 POST "/invoices/$INVOICE_ID/void"
+# A manually raised bill, for what the season plan does not cover.
+call 201 POST /invoices "{
+  \"contract_id\": \"$SEASONAL_CONTRACT_ID\",
+  \"billing_period_start\": \"2027-05-01\",
+  \"billing_period_end\": \"2027-05-31\",
+  \"amount_due\": 120,
+  \"due_date\": \"2027-05-15\"
+}"
+EXTRA_INVOICE_ID="$(field data.id)"
+call 409 POST /invoices "{
+  \"contract_id\": \"$SEASONAL_CONTRACT_ID\",
+  \"billing_period_start\": \"2027-05-01\",
+  \"billing_period_end\": \"2027-05-31\",
+  \"amount_due\": 120,
+  \"due_date\": \"2027-05-15\"
+}"
+call 200 POST "/invoices/$EXTRA_INVOICE_ID/void"
+assert "an untouched draft voids cleanly" "$(field data.status)" "void"
+call 409 POST "/invoices/$EXTRA_INVOICE_ID/void"
+# Voiding frees the period, so the same one can be raised again.
+call 201 POST /invoices "{
+  \"contract_id\": \"$SEASONAL_CONTRACT_ID\",
+  \"billing_period_start\": \"2027-05-01\",
+  \"billing_period_end\": \"2027-05-31\",
+  \"amount_due\": 120,
+  \"due_date\": \"2027-05-15\"
+}"
+call 200 POST "$(printf '/invoices/%s/void' "$(field data.id)")"
+
+call 200 GET '/invoices?outstanding=true'
+call 200 GET "/payments?invoice_id=$INVOICE_ID"
+
+echo
+echo "== every payment is audited =="
+call 200 GET '/audit-log?entity_type=payment'
+PAYMENT_ACTIONS="$(node -e "
+  const d = JSON.parse(require('fs').readFileSync(process.env.BODY_PATH,'utf8')).data;
+  process.stdout.write([...new Set(d.map(r => r.action))].sort().join(','));
+")"
+assert "payments are logged both ways" "$PAYMENT_ACTIONS" "payment.recorded,payment.refunded"
+
+echo
 echo "== branch scoping: operator is hard-scoped =="
 # Counts are taken now, against the same data the operator will query.
 call 200 GET /customers
@@ -613,6 +736,11 @@ call 403 GET "/pricing-guide?branch_id=$HALIFAX"
 call 403 GET "/work-orders?branch_id=$HALIFAX"
 call 403 GET "/message-log?branch_id=$HALIFAX"
 call 403 GET "/review-requests?branch_id=$HALIFAX"
+call 403 GET "/invoices?branch_id=$HALIFAX"
+call 403 GET "/payments?branch_id=$HALIFAX"
+# Refunds and manual billing are corporate decisions.
+call 403 POST "/payments/$PAYMENT_ID/refund"
+call 403 POST /invoices "{\"contract_id\":\"$SEASONAL_CONTRACT_ID\",\"billing_period_start\":\"2027-06-01\",\"billing_period_end\":\"2027-06-30\",\"amount_due\":50,\"due_date\":\"2027-06-15\"}"
 call 200 GET /branches
 assert "operator sees only their own branch" "$(field data.1.id)" ""
 

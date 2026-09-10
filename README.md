@@ -16,10 +16,10 @@ Build order from the spec, and what exists today:
 | 3 | Quotes → contracts → checklist, signature and payment token capture | **done** |
 | 4 | Work orders, photo upload, completion gate | **done** |
 | 5 | Email queue + templates, then review automation | **done** |
-| 6 | Invoicing and payments | not started |
+| 6 | Invoicing and payments | **done** |
 | 7 | Reporting views | not started |
 
-Steps 6 and 7 mount into the same structure — a migration, a service of plain
+Step 7 mounts into the same structure — a migration, a service of plain
 functions, a router — without reshaping what is already here.
 
 ## Setup
@@ -42,7 +42,7 @@ Verify:
 
 ```bash
 curl -s localhost:3000/health
-./scripts/test-api.sh   # 205 checks against a running server; safe to re-run
+./scripts/test-api.sh   # 247 checks against a running server; safe to re-run
 ```
 
 The database owner needs to be able to `create extension citext`. It is a
@@ -62,12 +62,30 @@ the dev dependencies present.
 ## Scheduled jobs
 
 ```bash
+npm run job:billing            # raise and send what is due, flag what is late
 npm run job:message-queue      # drain the outbound queue
 npm run job:review-requests    # ask about yesterday's finished visits
 npm run job:document-expiry    # nightly compliance sweep
 ```
 
 Each exits non-zero on failure, so a scheduler can alert on them.
+
+### `job:billing`
+
+The daily billing pass, in two phases: raise and send any invoice a live
+contract owes by today, then mark anything sent, past its date and still short
+as overdue, which queues the reminder. Safe to run twice in a night — a period
+already invoiced is skipped, and a partial unique index backs that up if two
+runs race.
+
+It takes an optional date, which runs the pass as if it were that day:
+
+```bash
+npm run job:billing -- 2027-01-20
+```
+
+That is how you exercise a season that has not started yet, or backfill a
+night the scheduler missed.
 
 ### `job:message-queue`
 
@@ -119,6 +137,11 @@ Two review requests are already answered — five stars routed to the public
 page, two stars routed to the branch manager — and one finished visit is
 deliberately left unasked, so `npm run job:review-requests` has something to
 pick up on a fresh seed.
+
+Both seasonal contracts are already invoiced: one paid by cheque, one overdue
+with a declined card against it. The monthly contract has no invoice yet,
+because its season has not started — run `npm run job:billing -- 2027-01-20`
+to watch the periods get raised.
 
 ## Auth and permissions
 
@@ -237,6 +260,15 @@ A suspension is only lifted by corporate, never by the automatic refresh.
 | GET | `/review-requests/:id` | any | |
 | GET | `/review-requests/:id/rate?rating=N` | **public** | The one-tap link; 302s to the review page on 4-5 |
 | POST | `/review-requests/:id/rating` | **public** | The same action for an API client |
+| GET | `/invoices` | any | `status`, `customer_id`, `contract_id`, `outstanding` |
+| POST | `/invoices` | corporate | A manual bill; raises a draft |
+| GET | `/invoices/:id` | any | Includes its payments |
+| GET | `/invoices/:id/payments` | any | |
+| POST | `/invoices/:id/send` | corporate | draft → sent, and queues the notice |
+| POST | `/invoices/:id/void` | corporate | 409 if money has been taken |
+| POST | `/invoices/:id/payments` | any | Books money, or records a failed charge |
+| GET | `/payments` | any | `status`, `method`, `invoice_id` |
+| POST | `/payments/:id/refund` | corporate | Flips the payment; the invoice recomputes |
 | GET | `/audit-log` | corporate | `entity_type`, `entity_id`, `user_id`, `action` |
 
 ### Response shapes
@@ -436,6 +468,48 @@ a GET and nothing else, and the whole feature is one tap. Tapping the same
 star twice is treated as the same answer rather than an error; tapping a
 different one is a 409.
 
+## Billing
+
+Two rules from the spec, and they differ:
+
+- **A seasonal contract is billed at signature.** `createContract` raises the
+  invoice inside the same transaction as the signature, so the customer never
+  has a contract without a bill.
+- **A monthly contract is billed per period, as each period starts.** Not all
+  five at signature — that way cancelling mid-season simply stops the next one
+  being raised, instead of leaving future invoices to chase and void.
+
+`billingPeriods` splits a season into monthly periods, the last one ending on
+`season_end` rather than running past it: Nov 15 to Apr 15 is five periods.
+Month arithmetic clamps to the end of the target month, so 31 January plus one
+month is 28 February and not 3 March.
+
+```
+draft ──send──► sent ──────► paid
+                 │            ▲
+                 └► overdue ──┘
+   any of the above (unpaid) ──► void
+```
+
+**`amount_paid` is derived, never incremented.** It is recomputed from the
+payments table after every payment write, so a refund cannot leave the total
+drifting from the rows that explain it. A refund flips the original payment to
+`refunded` rather than deleting it or writing a negative row — the history of a
+disputed charge has to stay readable — and if that pulls an invoice back under
+its total, the invoice returns to `sent` or `overdue` on its own.
+
+**A failed card charge tells the customer and flags the branch manager**, per
+the spec. Only a card gets the customer email: its wording is about a declined
+card, and a bounced cheque is a conversation for the office rather than an
+automated notice. The manager hears about either.
+
+`provider_transaction_id` is unique where present, so a replayed processor
+webhook cannot book the same charge twice. As with contracts, no card data
+lands in `payments` — the token stays on the contract and is never copied.
+
+Every payment write is audited, per the spec's list of things you will want
+the first time a charge is disputed.
+
 ## What is mocked
 
 - `src/services/notifications.ts` — the **transport**, and only the transport.
@@ -444,9 +518,10 @@ different one is a 409.
   the log are all wired up, so choosing a provider is a change to these two
   function bodies and nothing else. The queue worker is their only caller.
 
-Not started: invoicing, payments, reporting, and any frontend. Contract PDFs
-are a `pdf_url` column that something else has to fill in; nothing generates
-one yet.
+Not started: reporting and any frontend. Contract and invoice PDFs are a
+`pdf_url` column that something else has to fill in; nothing generates one
+yet, and no payment processor is wired up — `POST /invoices/:id/payments`
+records what a processor (or a rep with a cheque) says happened.
 
 ## Layout
 
@@ -512,8 +587,8 @@ Other conventions worth keeping:
 - No refresh tokens or logout; a JWT is valid until it expires (`JWT_EXPIRES_IN`).
 - No rate limiting on `/auth/login`.
 - No automated test suite. `scripts/test-api.sh` is a smoke test, not a substitute.
-- `audit_log` covers contracts and quote pricing. Payments join it in build
-  step 6; user role changes are not logged yet.
+- `audit_log` covers contracts, quote pricing and payments. User role changes
+  are not logged yet.
 - `message_log.status` never becomes `bounced`: that needs a provider webhook,
   which arrives with the real transport.
 - The internal feedback route returns JSON. A real deployment would redirect a
