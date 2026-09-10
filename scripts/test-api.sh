@@ -249,6 +249,7 @@ call 201 POST /properties "{
   \"customer_id\": \"$CUSTOMER_ID\",
   \"address_line1\": \"78 Smoke Test Lane $STAMP\",
   \"city\": \"Kingston\", \"province\": \"ON\", \"postal_code\": \"K7L 9Z8\",
+  \"latitude\": 44.2305, \"longitude\": -76.4944,
   \"driveway_size_cars\": 2
 }"
 SIGNED_PROPERTY_ID="$(field data.id)"
@@ -336,6 +337,154 @@ SECOND_QUOTE_ID="$(field data.id)"
 call 409 POST /contracts "{\"quote_id\":\"$SECOND_QUOTE_ID\",$SIGN,\"checklist\":$CHECKLIST_OK}"
 
 echo
+echo "== work orders: dispatch =="
+call 200 GET '/operators?assignable=true'
+OTTO_ID="$(node -e "
+  const d = JSON.parse(require('fs').readFileSync(process.env.BODY_PATH,'utf8')).data;
+  process.stdout.write(d.find(u => u.email === 'otto@avcrm.test').id);
+")"
+
+SOON="$(node -e "process.stdout.write(new Date(Date.now() + 7200000).toISOString())")"
+JUST_NOW="$(node -e "process.stdout.write(new Date(Date.now() - 600000).toISOString())")"
+
+# The onboarding gate from build step 2, enforced at dispatch.
+call 403 POST /work-orders "{
+  \"contract_id\": \"$CONTRACT_ID\",
+  \"assigned_user_id\": \"$PAT_ID\",
+  \"scheduled_for\": \"$SOON\",
+  \"service_type\": \"snow_clearing\"
+}"
+# Only an operator drives a truck.
+call 400 POST /work-orders "{
+  \"contract_id\": \"$CONTRACT_ID\",
+  \"assigned_user_id\": \"$CORP_ID\",
+  \"scheduled_for\": \"$SOON\",
+  \"service_type\": \"snow_clearing\"
+}"
+
+call 201 POST /work-orders "{
+  \"contract_id\": \"$CONTRACT_ID\",
+  \"assigned_user_id\": \"$OTTO_ID\",
+  \"scheduled_for\": \"$SOON\",
+  \"service_type\": \"snow_clearing\"
+}"
+WORK_ORDER_ID="$(field data.id)"
+assert "a new visit starts scheduled" "$(field data.status)" "scheduled"
+# The address comes off the contract, never off the request.
+assert "property taken from the contract" "$(field data.property_id)" "$SIGNED_PROPERTY_ID"
+
+call 200 GET "/work-orders?contract_id=$CONTRACT_ID"
+assert "the visit is on the contract" "$(field meta.total)" "1"
+
+echo
+echo "== work orders: only the assigned operator may work it =="
+login nina@avcrm.test
+call 403 PATCH "/work-orders/$WORK_ORDER_ID/status" '{"status":"en_route"}'
+call 403 POST "/work-orders/$WORK_ORDER_ID/photos" "{
+  \"photo_type\": \"before\",
+  \"file_url\": \"private/service-photos/nina-$STAMP.jpg\",
+  \"taken_at\": \"$JUST_NOW\"
+}"
+# Dispatch is corporate work, even on your own visit.
+login otto@avcrm.test
+call 403 POST /work-orders "{
+  \"contract_id\": \"$CONTRACT_ID\",
+  \"scheduled_for\": \"$SOON\",
+  \"service_type\": \"salting\"
+}"
+call 403 PATCH "/work-orders/$WORK_ORDER_ID" '{"service_type":"salting"}'
+
+echo
+echo "== work orders: the completion gate =="
+call 200 PATCH "/work-orders/$WORK_ORDER_ID/status" '{"status":"en_route"}'
+call 200 PATCH "/work-orders/$WORK_ORDER_ID/status" '{"status":"in_progress"}'
+assert "starting stamps started_at" "$(node -e "
+  const d = JSON.parse(require('fs').readFileSync(process.env.BODY_PATH,'utf8')).data;
+  process.stdout.write(String(d.started_at !== null));
+")" "true"
+
+# No photos, no completion. The 400 names which ones are missing.
+call 400 PATCH "/work-orders/$WORK_ORDER_ID/status" '{"status":"completed"}'
+assert "the gate names both photos" "$(node -e "
+  const e = JSON.parse(require('fs').readFileSync(process.env.BODY_PATH,'utf8')).error;
+  process.stdout.write(e.details.map(d => d.path).join(','));
+")" "photos.before,photos.after"
+
+# A photo taken in Ottawa is not proof this Kingston driveway was cleared.
+call 400 POST "/work-orders/$WORK_ORDER_ID/photos" "{
+  \"photo_type\": \"before\",
+  \"file_url\": \"private/service-photos/elsewhere-$STAMP.jpg\",
+  \"taken_at\": \"$JUST_NOW\",
+  \"latitude\": 45.4215, \"longitude\": -75.6972
+}"
+# taken_at is EXIF time, so it cannot be in the future.
+LATER="$(node -e "process.stdout.write(new Date(Date.now() + 3600000).toISOString())")"
+call 400 POST "/work-orders/$WORK_ORDER_ID/photos" "{
+  \"photo_type\": \"before\",
+  \"file_url\": \"private/service-photos/future-$STAMP.jpg\",
+  \"taken_at\": \"$LATER\"
+}"
+
+call 201 POST "/work-orders/$WORK_ORDER_ID/photos" "{
+  \"photo_type\": \"before\",
+  \"file_url\": \"private/service-photos/before-$STAMP.jpg\",
+  \"taken_at\": \"$JUST_NOW\",
+  \"latitude\": 44.2305, \"longitude\": -76.4944
+}"
+# The same file twice is a double upload, not a second photo.
+call 409 POST "/work-orders/$WORK_ORDER_ID/photos" "{
+  \"photo_type\": \"after\",
+  \"file_url\": \"private/service-photos/before-$STAMP.jpg\",
+  \"taken_at\": \"$JUST_NOW\"
+}"
+call 400 PATCH "/work-orders/$WORK_ORDER_ID/status" '{"status":"completed"}'
+assert "still short an after photo" "$(node -e "
+  const e = JSON.parse(require('fs').readFileSync(process.env.BODY_PATH,'utf8')).error;
+  process.stdout.write(e.details.map(d => d.path).join(','));
+")" "photos.after"
+
+call 201 POST "/work-orders/$WORK_ORDER_ID/photos" "{
+  \"photo_type\": \"after\",
+  \"file_url\": \"private/service-photos/after-$STAMP.jpg\",
+  \"taken_at\": \"$JUST_NOW\",
+  \"latitude\": 44.2306, \"longitude\": -76.4945
+}"
+call 200 PATCH "/work-orders/$WORK_ORDER_ID/status" "{
+  \"status\": \"completed\",
+  \"operator_notes\": \"Cleared and salted.\"
+}"
+assert "completed" "$(field data.status)" "completed"
+assert "with both photos attached" "$(node -e "
+  const d = JSON.parse(require('fs').readFileSync(process.env.BODY_PATH,'utf8')).data;
+  process.stdout.write(d.photos.map(p => p.photo_type).sort().join(','));
+")" "after,before"
+
+# A finished visit is a record, not a draft.
+call 409 PATCH "/work-orders/$WORK_ORDER_ID/status" '{"status":"skipped","skip_reason":"changed my mind"}'
+call 409 POST "/work-orders/$WORK_ORDER_ID/photos" "{
+  \"photo_type\": \"issue\",
+  \"file_url\": \"private/service-photos/late-$STAMP.jpg\",
+  \"taken_at\": \"$JUST_NOW\"
+}"
+call 200 GET "/work-orders/$WORK_ORDER_ID/photos"
+
+echo
+echo "== work orders: skipping =="
+login "$CORPORATE_EMAIL"
+call 201 POST /work-orders "{
+  \"contract_id\": \"$CONTRACT_ID\",
+  \"assigned_user_id\": \"$OTTO_ID\",
+  \"scheduled_for\": \"$SOON\",
+  \"service_type\": \"salting\"
+}"
+SKIPPED_ID="$(field data.id)"
+# A skip without a reason is not a record of anything.
+call 400 PATCH "/work-orders/$SKIPPED_ID/status" '{"status":"skipped"}'
+call 200 PATCH "/work-orders/$SKIPPED_ID/status" '{"status":"skipped","skip_reason":"Driveway already cleared by the neighbour."}'
+assert "skipped with a reason" "$(field data.status)" "skipped"
+call 409 PATCH "/work-orders/$SKIPPED_ID" '{"service_type":"ice_removal"}'
+
+echo
 echo "== the checklist after signature =="
 call 200 PATCH "/contracts/$CONTRACT_ID/checklist/photos_taken" '{"checked":true}'
 # A required item is the gate the contract passed to exist.
@@ -349,6 +498,13 @@ call 400 PATCH "/contracts/$CONTRACT_ID" '{"payment_method_token":"4242424242424
 call 200 PATCH "/contracts/$CONTRACT_ID/status" '{"status":"completed"}'
 call 409 PATCH "/contracts/$CONTRACT_ID/status" '{"status":"cancelled"}'
 call 409 PATCH "/contracts/$CONTRACT_ID/checklist/access_notes_captured" '{"checked":true}'
+# A completed contract takes no more visits.
+call 409 POST /work-orders "{
+  \"contract_id\": \"$CONTRACT_ID\",
+  \"assigned_user_id\": \"$OTTO_ID\",
+  \"scheduled_for\": \"$SOON\",
+  \"service_type\": \"salting\"
+}"
 
 echo
 echo "== audit log =="
@@ -391,6 +547,7 @@ call 403 GET "/customers?branch_id=$HALIFAX"
 call 403 GET "/quotes?branch_id=$HALIFAX"
 call 403 GET "/contracts?branch_id=$HALIFAX"
 call 403 GET "/pricing-guide?branch_id=$HALIFAX"
+call 403 GET "/work-orders?branch_id=$HALIFAX"
 call 200 GET /branches
 assert "operator sees only their own branch" "$(field data.1.id)" ""
 

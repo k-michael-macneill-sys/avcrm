@@ -14,12 +14,12 @@ Build order from the spec, and what exists today:
 | 1 | Migrations for branches, users, onboarding, customers, properties + seeds | **done** |
 | 2 | Auth, role middleware, branch scoping | **done** |
 | 3 | Quotes → contracts → checklist, signature and payment token capture | **done** |
-| 4 | Work orders, photo upload, completion gate | not started |
+| 4 | Work orders, photo upload, completion gate | **done** |
 | 5 | Email queue + templates, then review automation | mock only |
 | 6 | Invoicing and payments | not started |
 | 7 | Reporting views | not started |
 
-Steps 4 to 7 mount into the same structure — a migration, a service of plain
+Steps 5 to 7 mount into the same structure — a migration, a service of plain
 functions, a router — without reshaping what is already here.
 
 ## Setup
@@ -42,7 +42,7 @@ Verify:
 
 ```bash
 curl -s localhost:3000/health
-./scripts/test-api.sh   # 139 checks against a running server; safe to re-run
+./scripts/test-api.sh   # 179 checks against a running server; safe to re-run
 ```
 
 The database owner needs to be able to `create extension citext`. It is a
@@ -89,7 +89,10 @@ All seeded users share the password in `SEED_PASSWORD` (default `Password123!`).
 The seed also lays down a rate card per branch and five quotes spread across
 the lifecycle — two signed into active contracts (one with a card on file, one
 paid upfront by cheque), one presented and waiting, one still a draft, and one
-declined.
+declined. Four work orders sit on those contracts: one completed with its
+before and after photos, one on tomorrow's board, one skipped with a reason,
+and one unassigned in Halifax, because that branch has no approved operator
+yet.
 
 ## Auth and permissions
 
@@ -135,7 +138,8 @@ work. Corporate creates staff with `POST /users`, where the role is explicit.
 An operator with `onboarding_status != 'approved'` cannot be assigned work
 orders. `assertOperatorAssignable` (`src/services/operators.ts`) is that rule,
 and `GET /operators?assignable=true` returns the eligible pool the dispatcher
-picks from in build step 4.
+picks from. `POST /work-orders` calls the same gate, so an operator who loses a
+required document overnight cannot be handed tomorrow's route.
 
 Onboarding status moves automatically as documents change:
 
@@ -194,6 +198,13 @@ A suspension is only lifted by corporate, never by the automatic refresh.
 | PATCH | `/contracts/:id` | any | `pdf_url` and the payment method |
 | PATCH | `/contracts/:id/status` | any | `active` → `cancelled` or `completed` |
 | PATCH | `/contracts/:id/checklist/:code` | any | Ticking an optional box afterwards |
+| GET | `/work-orders` | any | `status`, `service_type`, `assigned_user_id`, `scheduled_from`/`_to` |
+| POST | `/work-orders` | corporate | Dispatch; refuses an unapproved operator |
+| GET | `/work-orders/:id` | any | Includes the photo set |
+| PATCH | `/work-orders/:id` | corporate | Reschedule and reassign |
+| PATCH | `/work-orders/:id/status` | assigned operator or corporate | The completion gate lives here |
+| GET | `/work-orders/:id/photos` | any | |
+| POST | `/work-orders/:id/photos` | assigned operator or corporate | Geotag checked against the property |
 | GET | `/audit-log` | corporate | `entity_type`, `entity_id`, `user_id`, `action` |
 
 ### Response shapes
@@ -288,15 +299,70 @@ screen opens with. It returns a null price rather than an error when the branch
 has no row for that driveway size — an unpriced size is a gap in config, not a
 failed request — and the rep can always override it.
 
+## Work orders and the completion gate
+
+A contract is a promise; a work order is one visit against it. The property
+and branch come off the contract, so a visit cannot be filed against an
+address the contract does not cover.
+
+```
+scheduled ──► en_route ──► in_progress ──► completed
+    └─────────────┴──────────────┴────────► skipped
+```
+
+`scheduled` straight to `in_progress` is allowed on purpose — an operator who
+starts clearing before remembering to tap "en route" should not be fighting
+the app. A skip stays available until the job is finished, because the reason
+to skip one is usually found on site, and `skip_reason` is required by a
+`CHECK` constraint, not just by the service.
+
+**Two different questions decide who may do what.** Branch scope says which
+visits you can *see*; the assignment says whose you may *touch*. An operator
+can read their branch's board but only work the visits assigned to them —
+without that, any operator in the branch could complete a colleague's job.
+Dispatch (creating, rescheduling, reassigning) is corporate.
+
+### The completion gate
+
+A visit cannot reach `completed` without at least one `before` and one `after`
+photo. The 400 names which one is missing, in the usual `details` array, so
+the app can say "take an after photo" rather than "something went wrong".
+
+Photos carry `taken_at` **from the image EXIF, not the upload time** — an
+operator with no signal finishes the street and uploads from the truck an hour
+later, and the record has to say when the driveway was actually cleared. A
+future `taken_at` is rejected as a broken clock.
+
+Geotags are checked against the property, within `GEOTAG_RADIUS_M` (500m).
+That is generous on purpose: phone GPS drifts badly between buildings and in
+heavy snow, and a rejected upload strands an operator who did the work. Half a
+kilometre still catches the case the check exists for — a photo taken
+somewhere other than the address being billed. The check only runs when both
+the property and the photo have coordinates; plenty of seeded addresses have
+none, and refusing a photo over a gap in the office's data would punish the
+wrong person.
+
+### On completion
+
+The customer and the branch manager are emailed the photo set, the finish time
+and the operator's name. That send is deliberately **not awaited**: the
+operator's phone should not wait on SMTP, and a failed send must not undo a
+finished job. `sendEmail` is still the mock in `src/services/notifications.ts`
+— build step 5 puts a real queue behind it and `notifyServiceComplete` does not
+change.
+
 ## What is mocked
 
 - `src/services/notifications.ts` — `sendEmail` / `sendSms` write to the log.
   Build step 5 replaces the bodies with a real queue and templates; callers do
   not change.
 
-Not started: work orders, service photos, invoicing, payments, reporting, and
-any frontend. Contract PDFs are a `pdf_url` column that something else has to
-fill in; nothing generates one yet.
+- `notifyServiceComplete` in `src/services/workOrders.ts` builds the real
+  completion email but hands it to that same mock.
+
+Not started: invoicing, payments, reporting, and any frontend. Contract PDFs
+are a `pdf_url` column that something else has to fill in; nothing generates
+one yet.
 
 ## Layout
 
@@ -364,8 +430,8 @@ Other conventions worth keeping:
 - No automated test suite. `scripts/test-api.sh` is a smoke test, not a substitute.
 - `audit_log` covers contracts and quote pricing. Payments join it in build
   step 6; user role changes are not logged yet.
-- File uploads are recorded, not performed: `POST /operators/:id/documents` and
-  `signature_image_url` on a contract store an object key that something else
+- File uploads are recorded, not performed: operator documents, contract
+  signatures and service photos all store an object key that something else
   must have already written to a private bucket. No presigned-URL endpoint yet.
 - List endpoints paginate with `OFFSET`, which should become keyset pagination
   before the tables get large.

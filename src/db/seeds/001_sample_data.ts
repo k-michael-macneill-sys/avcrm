@@ -21,6 +21,8 @@ export async function seed(knex: Knex): Promise<void> {
   // audit_log is append-only, and its trigger blocks DELETE. TRUNCATE does not
   // fire row triggers, which is exactly what a dev reset needs.
   await knex.raw('truncate table audit_log');
+  await knex('service_photos').del();
+  await knex('work_orders').del();
   await knex('contract_checklist_items').del();
   await knex('contracts').del();
   await knex('quotes').del();
@@ -621,6 +623,89 @@ export async function seed(knex: Knex): Promise<void> {
     checklistRow(sam.id, 'access_notes_captured', false),
     checklistRow(sam.id, 'photos_taken', false),
     checklistRow(sam.id, 'contact_confirmed', true),
+  ]);
+
+  // --- Work orders --------------------------------------------------------
+  // A spread across the status range, so the dispatch board, an operator's run
+  // sheet and the completion gate all have something real to show.
+  const now = Date.now();
+  const hours = (n: number) => new Date(now + n * 3_600_000);
+
+  const workOrders = await knex('work_orders')
+    .insert([
+      {
+        // Done yesterday, with the before and after photos that let it close.
+        contract_id: harold.id,
+        property_id: propertyBy('212 Johnson St').id,
+        branch_id: kingston.id,
+        assigned_user_id: otto.id,
+        scheduled_for: hours(-26),
+        service_type: 'snow_clearing',
+        status: 'completed',
+        started_at: hours(-25.5),
+        completed_at: hours(-25),
+        operator_notes: 'Cleared to the garage door, salted the step.',
+      },
+      {
+        // On the board for tomorrow morning.
+        contract_id: harold.id,
+        property_id: propertyBy('212 Johnson St').id,
+        branch_id: kingston.id,
+        assigned_user_id: nina.id,
+        scheduled_for: hours(20),
+        service_type: 'salting',
+        status: 'scheduled',
+      },
+      {
+        // The reason skip_reason is not nullable when skipped.
+        contract_id: harold.id,
+        property_id: propertyBy('212 Johnson St').id,
+        branch_id: kingston.id,
+        assigned_user_id: otto.id,
+        scheduled_for: hours(-50),
+        service_type: 'snow_clearing',
+        status: 'skipped',
+        skip_reason: 'Car parked across the driveway, nobody answered the door.',
+      },
+      {
+        // Halifax has no approved operator yet, so this one is unassigned.
+        // That is the state the branch is actually in, per the seeded vault.
+        contract_id: sam.id,
+        property_id: propertyBy('5560 Cornwallis St').id,
+        branch_id: halifax.id,
+        assigned_user_id: null,
+        scheduled_for: hours(6),
+        service_type: 'snow_clearing',
+        status: 'scheduled',
+      },
+    ])
+    .returning(['id', 'status']);
+
+  const completedVisit = workOrders.find((w) => w.status === 'completed');
+  if (!completedVisit) throw new Error('Work order seed failed');
+
+  // Geotagged on the property itself, which is what the upload check compares
+  // against. taken_at is when the driveway was cleared, not when the file
+  // arrived.
+  await knex('service_photos').insert([
+    {
+      work_order_id: completedVisit.id,
+      photo_type: 'before',
+      file_url: 'private/service-photos/212-johnson-before.jpg',
+      taken_at: hours(-25.5),
+      latitude: '44.230500',
+      longitude: '-76.494400',
+      uploaded_by_user_id: otto.id,
+    },
+    {
+      work_order_id: completedVisit.id,
+      photo_type: 'after',
+      file_url: 'private/service-photos/212-johnson-after.jpg',
+      taken_at: hours(-25),
+      latitude: '44.230500',
+      longitude: '-76.494400',
+      uploaded_by_user_id: otto.id,
+    },
   ]);
 
   // --- Audit log ----------------------------------------------------------
