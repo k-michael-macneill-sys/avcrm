@@ -51,6 +51,26 @@ export type QuoteStatus = (typeof QUOTE_STATUSES)[number];
 export const CONTRACT_STATUSES = ['active', 'cancelled', 'completed'] as const;
 export type ContractStatus = (typeof CONTRACT_STATUSES)[number];
 
+export const SERVICE_TYPES = [
+  'snow_clearing',
+  'salting',
+  'ice_removal',
+  'inspection',
+] as const;
+export type ServiceType = (typeof SERVICE_TYPES)[number];
+
+export const WORK_ORDER_STATUSES = [
+  'scheduled',
+  'en_route',
+  'in_progress',
+  'completed',
+  'skipped',
+] as const;
+export type WorkOrderStatus = (typeof WORK_ORDER_STATUSES)[number];
+
+export const PHOTO_TYPES = ['before', 'after', 'issue'] as const;
+export type PhotoType = (typeof PHOTO_TYPES)[number];
+
 export interface Branch {
   id: string;
   name: string;
@@ -231,4 +251,36 @@ export interface AuditLogEntry {
   after_json: unknown | null;
   ip_address: string | null;
   created_at: Date;
+}
+
+export interface WorkOrder {
+  id: string;
+  contract_id: string;
+  property_id: string;
+  branch_id: string;
+  assigned_user_id: string | null;
+  scheduled_for: Date;
+  service_type: ServiceType;
+  status: WorkOrderStatus;
+  skip_reason: string | null;
+  started_at: Date | null;
+  completed_at: Date | null;
+  operator_notes: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface ServicePhoto {
+  id: string;
+  work_order_id: string;
+  photo_type: PhotoType;
+  file_url: string;
+  /** From the image EXIF, not the upload time. */
+  taken_at: Date;
+  /** numeric columns come back from pg as strings. */
+  latitude: string | null;
+  longitude: string | null;
+  uploaded_by_user_id: string | null;
+  created_at: Date;
+  updated_at: Date;
 }

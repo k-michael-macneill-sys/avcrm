@@ -10,7 +10,9 @@ import type {
   PricingGuideEntry,
   Property,
   Quote,
+  ServicePhoto,
   User,
+  WorkOrder,
 } from './models';
 
 declare module 'knex/types/tables' {
@@ -26,6 +28,8 @@ declare module 'knex/types/tables' {
     checklist_requirements: ChecklistRequirement;
     contracts: Contract;
     contract_checklist_items: ContractChecklistItem;
+    work_orders: WorkOrder;
+    service_photos: ServicePhoto;
     audit_log: AuditLogEntry;
   }
 }
