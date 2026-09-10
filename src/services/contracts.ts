@@ -13,6 +13,7 @@ import { offsetOf, paginated, type Paginated, type Pagination } from '../utils/p
 import { isPgError, pgConstraint, PG_UNIQUE_VIOLATION } from '../utils/pg';
 import { applyBranchScope } from '../utils/scope';
 import { recordAudit, type AuditActor } from './audit';
+import { generateInvoicesForContract } from './invoices';
 import { lock as lockQuote } from './quotes';
 
 /** A quote is signable once it has been shown to the customer. */
@@ -245,6 +246,13 @@ export async function createContract(
       },
       trx,
     );
+
+    // A seasonal contract is billed the moment it is signed, per the spec.
+    // A monthly one waits for the billing job to raise each period as it
+    // starts, so this is a no-op for those.
+    if (quote.billing_type === 'seasonal_upfront') {
+      await generateInvoicesForContract(contract.id, undefined, trx);
+    }
 
     return { ...redact(contract), checklist: await checklistOf(contract.id, trx) };
   });

@@ -4,8 +4,10 @@ import { authRouter } from './auth';
 import { branchesRouter } from './branches';
 import { checklistRequirementsRouter, contractsRouter } from './contracts';
 import { customersRouter } from './customers';
+import { invoicesRouter } from './invoices';
 import { messageLogRouter, messageTemplatesRouter } from './messages';
 import { documentRequirementsRouter, operatorsRouter } from './operators';
+import { paymentsRouter } from './payments';
 import { pricingGuideRouter } from './pricing';
 import { propertiesRouter } from './properties';
 import { quotesRouter } from './quotes';
@@ -17,7 +19,7 @@ import { workOrdersRouter } from './workOrders';
  * One place to see the whole surface. Adding a resource is: write the service,
  * write the route file, mount it here.
  *
- * Invoices and payments arrive in build step 6 and mount here the same way.
+ * Reporting views arrive in build step 7 and mount here the same way.
  */
 export const apiRouter = Router();
 
@@ -36,4 +38,6 @@ apiRouter.use('/work-orders', workOrdersRouter);
 apiRouter.use('/message-templates', messageTemplatesRouter);
 apiRouter.use('/message-log', messageLogRouter);
 apiRouter.use('/review-requests', reviewRequestsRouter);
+apiRouter.use('/invoices', invoicesRouter);
+apiRouter.use('/payments', paymentsRouter);
 apiRouter.use('/audit-log', auditLogRouter);

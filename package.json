@@ -19,7 +19,8 @@
     "migrate:status": "tsx node_modules/knex/bin/cli.js --knexfile src/db/knexfile.ts migrate:status",
     "job:document-expiry": "tsx src/jobs/documentExpiry.ts",
     "job:message-queue": "tsx src/jobs/messageQueue.ts",
-    "job:review-requests": "tsx src/jobs/reviewRequests.ts"
+    "job:review-requests": "tsx src/jobs/reviewRequests.ts",
+    "job:billing": "tsx src/jobs/billing.ts"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",
