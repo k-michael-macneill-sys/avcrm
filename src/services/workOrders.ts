@@ -13,7 +13,7 @@ import { offsetOf, paginated, type Paginated, type Pagination } from '../utils/p
 import { isPgError, PG_UNIQUE_VIOLATION } from '../utils/pg';
 import { applyBranchScope } from '../utils/scope';
 import { logger } from '../utils/logger';
-import { sendEmail } from './notifications';
+import { enqueueMessage } from './messages';
 import { assertOperatorAssignable } from './operators';
 
 /**
@@ -484,6 +484,8 @@ async function lock(
 }
 
 interface CompletionRow {
+  branch_id: string;
+  customer_id: string;
   service_type: ServiceType;
   completed_at: Date | null;
   address_line1: string;
@@ -500,10 +502,9 @@ interface CompletionRow {
  * Tells the customer and the branch manager the driveway is done, with the
  * photo set, the time it was finished and who did it.
  *
- * Called after the transaction commits and never awaited by the caller, per
- * the spec: the API response must not wait on SMTP. sendEmail is still the
- * mock in services/notifications.ts — build step 5 puts a real queue behind
- * it and this function does not change.
+ * Both messages are queued, not sent: the operator's phone must not wait on
+ * SMTP, and a provider being down cannot undo a finished job. The worker
+ * (npm run job:message-queue) delivers them.
  */
 export async function notifyServiceComplete(
   workOrderId: string,
@@ -518,8 +519,10 @@ export async function notifyServiceComplete(
     .leftJoin('users as manager', 'manager.id', 'branches.manager_user_id')
     .where('work_orders.id', workOrderId)
     .first([
+      'work_orders.branch_id',
       'work_orders.service_type',
       'work_orders.completed_at',
+      'customers.id as customer_id',
       'properties.address_line1',
       'properties.city',
       'customers.first_name as customer_first_name',
@@ -536,39 +539,55 @@ export async function notifyServiceComplete(
   }
 
   const photos = await listPhotos(workOrderId, db);
-  const operator =
-    [row.operator_first_name, row.operator_last_name].filter(Boolean).join(' ') ||
-    'the crew';
-  const finishedAt = (row.completed_at ?? new Date()).toISOString();
-  const service = row.service_type.replace(/_/g, ' ');
 
-  const photoLines = photos
-    .map((p) => `  ${p.photo_type}: ${p.file_url} (taken ${p.taken_at.toISOString()})`)
-    .join('\n');
+  const context = {
+    customer_first_name: row.customer_first_name,
+    address_line1: row.address_line1,
+    city: row.city,
+    branch_name: row.branch_name,
+    service_type: row.service_type.replace(/_/g, ' '),
+    completed_at: (row.completed_at ?? new Date()).toISOString(),
+    operator_name:
+      [row.operator_first_name, row.operator_last_name].filter(Boolean).join(' ') ||
+      'the crew',
+    photo_list: photos
+      .map((p) => `  ${p.photo_type}: ${p.file_url} (taken ${p.taken_at.toISOString()})`)
+      .join('\n'),
+  };
 
-  const subject = `${row.address_line1} — ${service} complete`;
-  const body = [
-    `${service} at ${row.address_line1}, ${row.city} was completed at ${finishedAt}.`,
-    `Operator: ${operator}`,
-    '',
-    'Photos:',
-    photoLines || '  (none)',
-  ].join('\n');
+  const addressed = {
+    branch_id: row.branch_id,
+    customer_id: row.customer_id,
+    work_order_id: workOrderId,
+    context,
+  };
 
   if (row.customer_email) {
-    await sendEmail(
-      row.customer_email,
-      subject,
-      `Hi ${row.customer_first_name},\n\n${body}`,
+    await enqueueMessage(
+      {
+        ...addressed,
+        template_code: 'service_complete',
+        channel: 'email',
+        recipient: row.customer_email,
+      },
+      db,
     );
   } else {
     logger.info(
       { work_order_id: workOrderId },
-      'No customer email on file; completion notice not sent to the customer',
+      'No customer email on file; completion notice not queued for the customer',
     );
   }
 
   if (row.manager_email) {
-    await sendEmail(row.manager_email, `[${row.branch_name}] ${subject}`, body);
+    await enqueueMessage(
+      {
+        ...addressed,
+        template_code: 'service_complete_internal',
+        channel: 'email',
+        recipient: row.manager_email,
+      },
+      db,
+    );
   }
 }

@@ -32,6 +32,13 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().default('12h'),
   BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(15).default(10),
 
+  // Where the customer-facing links in outbound messages point.
+  APP_BASE_URL: z.string().url().default('http://localhost:3000'),
+  // Where a happy customer is sent to leave a public review.
+  GOOGLE_REVIEW_URL: z.string().url().default('https://g.page/r/example/review'),
+  // How many times the queue worker retries a message before giving up.
+  MESSAGE_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
+
   SEED_PASSWORD: z.string().min(8).default('Password123!'),
 });
 
@@ -70,6 +77,11 @@ export const config = {
     jwtSecret: env.JWT_SECRET,
     jwtExpiresIn: env.JWT_EXPIRES_IN,
     bcryptRounds: env.BCRYPT_ROUNDS,
+  },
+  messaging: {
+    appBaseUrl: env.APP_BASE_URL.replace(/\/+$/, ''),
+    googleReviewUrl: env.GOOGLE_REVIEW_URL,
+    maxAttempts: env.MESSAGE_MAX_ATTEMPTS,
   },
   seed: {
     password: env.SEED_PASSWORD,
