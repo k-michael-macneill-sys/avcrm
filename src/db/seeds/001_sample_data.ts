@@ -113,7 +113,9 @@ export async function seed(knex: Knex): Promise<void> {
         onboarding_status: 'approved',
       },
       {
-        // Documents submitted but not reviewed yet.
+        // Two documents submitted and neither reviewed, which is exactly what
+        // refreshOnboardingStatus computes from the vault below. Seeding
+        // 'pending' here would have the fixture disagree with the rule.
         email: 'pat@avcrm.test',
         password_hash,
         first_name: 'Pat',
@@ -121,7 +123,7 @@ export async function seed(knex: Knex): Promise<void> {
         phone: '902-555-0155',
         role: 'operator',
         branch_id: halifax.id,
-        onboarding_status: 'pending',
+        onboarding_status: 'docs_submitted',
       },
     ])
     .returning(['id', 'email']);
@@ -723,7 +725,10 @@ export async function seed(knex: Knex): Promise<void> {
         contract_id: sam.id,
         property_id: propertyBy('5560 Cornwallis St').id,
         branch_id: halifax.id,
-        assigned_user_id: halifaxManager.id,
+        // Unassigned, like the other Halifax visit: the branch still has no
+        // approved operator, and assertOperatorAssignable would refuse to
+        // put a corporate user on a truck.
+        assigned_user_id: null,
         scheduled_for: hours(-74),
         service_type: 'salting',
         status: 'completed',
@@ -789,6 +794,8 @@ export async function seed(knex: Knex): Promise<void> {
     },
     // The Halifax address has no coordinates on file, so neither do its
     // photos: the geotag check only runs when both sides have them.
+    // Corporate may work any visit, which is how an unassigned Halifax job
+    // got done at all: the branch manager went out himself.
     {
       work_order_id: ratedVisit.id,
       photo_type: 'before',

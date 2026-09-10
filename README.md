@@ -17,10 +17,11 @@ Build order from the spec, and what exists today:
 | 4 | Work orders, photo upload, completion gate | **done** |
 | 5 | Email queue + templates, then review automation | **done** |
 | 6 | Invoicing and payments | **done** |
-| 7 | Reporting views | not started |
+| 7 | Reporting views | **done** |
 
-Step 7 mounts into the same structure — a migration, a service of plain
-functions, a router — without reshaping what is already here.
+Every step landed in the same structure — a migration, a service of plain
+functions, a router — without reshaping what came before it. The known gaps
+are listed at the bottom.
 
 ## Setup
 
@@ -42,7 +43,7 @@ Verify:
 
 ```bash
 curl -s localhost:3000/health
-./scripts/test-api.sh   # 247 checks against a running server; safe to re-run
+./scripts/test-api.sh   # 268 checks against a running server; safe to re-run
 ```
 
 The database owner needs to be able to `create extension citext`. It is a
@@ -124,7 +125,7 @@ All seeded users share the password in `SEED_PASSWORD` (default `Password123!`).
 | `halifax.manager@avcrm.test` | corporate | Halifax | Branch manager |
 | `otto@avcrm.test` | operator | Kingston | Fully compliant, assignable |
 | `nina@avcrm.test` | operator | Kingston | Abstract expires in 21 days |
-| `pat@avcrm.test` | operator | Halifax | Documents awaiting review |
+| `pat@avcrm.test` | operator | Halifax | Documents submitted, awaiting review |
 
 The seed also lays down a rate card per branch and five quotes spread across
 the lifecycle — two signed into active contracts (one with a card on file, one
@@ -269,6 +270,9 @@ A suspension is only lifted by corporate, never by the automatic refresh.
 | POST | `/invoices/:id/payments` | any | Books money, or records a failed charge |
 | GET | `/payments` | any | `status`, `method`, `invoice_id` |
 | POST | `/payments/:id/refund` | corporate | Flips the payment; the invoice recomputes |
+| GET | `/reports/branch-summary` | corporate | One row per branch; `from`, `to`, `branch_id` |
+| GET | `/reports/revenue` | corporate | Bucketed by billing month |
+| GET | `/reports/operators` | corporate | Visits done, skipped, and the ratings after |
 | GET | `/audit-log` | corporate | `entity_type`, `entity_id`, `user_id`, `action` |
 
 ### Response shapes
@@ -510,6 +514,68 @@ lands in `payments` — the token stays on the contract and is never copied.
 Every payment write is audited, per the spec's list of things you will want
 the first time a charge is disputed.
 
+## Reporting
+
+Three read-only views, all corporate — the spec puts roll-up reporting there,
+and an operator gets their own run sheet through `/work-orders` rather than the
+branch's numbers.
+
+`GET /reports/branch-summary` is both of the spec's bullets in one endpoint.
+Corporate with no `branch_id` gets every branch side by side, which is the
+cross-branch comparison; narrowing with `?branch_id=` gives that branch's own
+roll-up. Same query, same definitions, different scope. The skeleton comes from
+`branches` rather than from activity, so a branch that sold nothing in the
+window shows as zeroes instead of dropping out of the comparison.
+
+**It is a revenue roll-up, not a P&L.** Nothing in the schema records a cost —
+no operator pay, no fuel, no salt, no vehicle — so there is no margin here,
+because any margin would be invented. Costs need their own tables before the
+other half of a P&L can exist.
+
+### What each figure means
+
+A number without a definition is not worth acting on, so:
+
+| Figure | Definition |
+| --- | --- |
+| `pipeline.win_rate` | `accepted ÷ (accepted + declined + expired)`. Open quotes are not losses yet, so drafts and presented quotes stay out of the denominator. `null` until something is answered. |
+| `revenue.invoiced` | Sum of `amount_due` on non-void invoices. |
+| `revenue.collected` | Sum of `amount_paid`, which is itself derived from succeeded payments. |
+| `revenue.outstanding` | `amount_due − amount_paid` on `sent` and `overdue` invoices. |
+| `revenue.overdue` | The same, on `overdue` invoices only. |
+| `reviews.promoters` | Answers of 4 or 5 — the ones routed to the public review page. |
+| `crew.pending` | `pending` and `docs_submitted` together: everyone not yet assignable. |
+
+Void invoices are excluded from every money figure. A cancelled bill is not
+revenue that went missing; it is a bill that never existed.
+
+### Which date a window filters on
+
+`?from=` and `?to=` are inclusive, and every response echoes the window back —
+a figure without its date range is not a figure anyone should act on. Each
+domain is filtered on the date that answers the question being asked:
+
+| Domain | Date column |
+| --- | --- |
+| Customers | `created_at` — when the rep first put them on the books |
+| Quotes | `created_at` — when it was written |
+| Contracts | `signed_at` |
+| Invoices and revenue | `billing_period_start` — the period the money belongs to, not the day the row was written |
+| Work orders | `scheduled_for` — the day the visit was on the board for |
+| Reviews | `sent_at` — when we asked, not when they got round to it |
+| Crew | none; a head count is current state |
+
+### How it is built
+
+Each report is a handful of grouped aggregates, one per domain, stitched
+together in TypeScript — deliberately not one enormous CTE. Every query can be
+read, run and checked on its own, and the number of queries stays flat however
+many branches there are.
+
+`GET /reports/operators` uses a left join with the window *on the join*, not in
+the where clause: filtering there would drop the operators who did no work, and
+those are exactly the rows worth looking at.
+
 ## What is mocked
 
 - `src/services/notifications.ts` — the **transport**, and only the transport.
@@ -518,10 +584,10 @@ the first time a charge is disputed.
   the log are all wired up, so choosing a provider is a change to these two
   function bodies and nothing else. The queue worker is their only caller.
 
-Not started: reporting and any frontend. Contract and invoice PDFs are a
-`pdf_url` column that something else has to fill in; nothing generates one
-yet, and no payment processor is wired up — `POST /invoices/:id/payments`
-records what a processor (or a rep with a cheque) says happened.
+Not started: any frontend. Contract and invoice PDFs are a `pdf_url` column
+that something else has to fill in; nothing generates one yet, and no payment
+processor is wired up — `POST /invoices/:id/payments` records what a processor
+(or a rep with a cheque) says happened.
 
 ## Layout
 
@@ -598,3 +664,8 @@ Other conventions worth keeping:
   must have already written to a private bucket. No presigned-URL endpoint yet.
 - List endpoints paginate with `OFFSET`, which should become keyset pagination
   before the tables get large.
+- Reports run their aggregates live against the operational tables. That is
+  right at this size and will not be past a few hundred thousand invoices —
+  materialise them, or read from a replica, before it becomes a problem.
+- There is no cost data anywhere, so `/reports/branch-summary` is revenue only.
+  A real P&L needs operator pay, materials and vehicle costs first.

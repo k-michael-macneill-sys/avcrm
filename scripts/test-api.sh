@@ -709,6 +709,79 @@ PAYMENT_ACTIONS="$(node -e "
 assert "payments are logged both ways" "$PAYMENT_ACTIONS" "payment.recorded,payment.refunded"
 
 echo
+echo "== reporting: the cross-branch comparison =="
+call 200 GET '/reports/branch-summary'
+BRANCHES_LISTED="$(node -e "
+  const d = JSON.parse(require('fs').readFileSync(process.env.BODY_PATH,'utf8')).data;
+  process.stdout.write(d.map(b => b.branch_name).join(','));
+")"
+assert "every branch appears, busy or not" "$BRANCHES_LISTED" "Halifax,Kingston"
+
+# Halifax is small enough to assert exactly, and its figures come from seed
+# data the earlier sections do not touch.
+HALIFAX_ROW="$(node -e "
+  const d = JSON.parse(require('fs').readFileSync(process.env.BODY_PATH,'utf8')).data;
+  const h = d.find(b => b.branch_name === 'Halifax');
+  process.stdout.write([
+    h.customers.total, h.contracts.active, h.revenue.invoiced,
+    h.revenue.collected, h.revenue.outstanding, h.reviews.average_rating,
+  ].join('|'));
+")"
+assert "halifax rolls up to its seeded figures" "$HALIFAX_ROW" "1|1|425.00|425.00|0.00|2"
+
+# One quote accepted, none answered against it.
+assert "and a win rate over answered quotes only" "$(node -e "
+  const d = JSON.parse(require('fs').readFileSync(process.env.BODY_PATH,'utf8')).data;
+  process.stdout.write(String(d.find(b => b.branch_name === 'Halifax').pipeline.win_rate));
+")" "1"
+
+# Narrowing to one branch is the same query with a tighter scope.
+call 200 GET "/reports/branch-summary?branch_id=$HALIFAX"
+assert "narrowing gives one branch" "$(node -e "
+  const d = JSON.parse(require('fs').readFileSync(process.env.BODY_PATH,'utf8')).data;
+  process.stdout.write(String(d.length));
+")" "1"
+
+# A window nobody traded in returns the branches with zeroes, not nothing.
+call 200 GET '/reports/branch-summary?from=1999-01-01&to=1999-12-31'
+QUIET_YEAR="$(node -e "
+  const d = JSON.parse(require('fs').readFileSync(process.env.BODY_PATH,'utf8')).data;
+  process.stdout.write(d.map(b => \`\${b.customers.total}/\${b.revenue.invoiced}\`).join(','));
+")"
+assert "an empty window is zeroes, not silence" "$QUIET_YEAR" "0/0.00,0/0.00"
+assert "and the window comes back with them" "$(field meta.from)" "1999-01-01"
+
+call 400 GET '/reports/branch-summary?from=2027-01-01&to=2026-01-01'
+call 400 GET '/reports/branch-summary?from=last-tuesday'
+
+echo
+echo "== reporting: revenue and operators =="
+call 200 GET '/reports/revenue'
+assert "revenue is bucketed by billing period" "$(field data.0.month)" "2026-11"
+call 200 GET "/reports/revenue?branch_id=$HALIFAX"
+assert "halifax billed its season upfront" "$(field data.0.invoiced)" "425.00"
+
+# Windowed to yesterday and earlier, which is exactly the seeded visits: the
+# ones this run dispatched are scheduled a couple of hours out.
+YESTERDAY="$(node -e "
+  const d = new Date(Date.now() - 86400000);
+  process.stdout.write(d.toISOString().slice(0, 10));
+")"
+call 200 GET "/reports/operators?to=$YESTERDAY"
+OTTO_ROW="$(node -e "
+  const d = JSON.parse(require('fs').readFileSync(process.env.BODY_PATH,'utf8')).data;
+  const o = d.find(r => r.name === 'Otto Plows');
+  process.stdout.write([o.completed, o.skipped, o.average_rating].join('|'));
+")"
+assert "otto's record and the rating that followed" "$OTTO_ROW" "1|1|5"
+# The left join is the point: an operator with no work still appears.
+assert "an operator with no visits still shows" "$(node -e "
+  const d = JSON.parse(require('fs').readFileSync(process.env.BODY_PATH,'utf8')).data;
+  const p = d.find(r => r.name === 'Pat Pending');
+  process.stdout.write([p.completed, p.onboarding_status].join('|'));
+")" "0|docs_submitted"
+
+echo
 echo "== branch scoping: operator is hard-scoped =="
 # Counts are taken now, against the same data the operator will query.
 call 200 GET /customers
@@ -745,6 +818,9 @@ call 200 GET /branches
 assert "operator sees only their own branch" "$(field data.1.id)" ""
 
 # Operator-only endpoints corporate work is gated behind.
+call 403 GET /reports/branch-summary
+call 403 GET /reports/revenue
+call 403 GET /reports/operators
 call 403 GET /audit-log
 call 403 GET /users
 call 403 POST /users "{\"email\":\"x-$STAMP@avcrm.test\",\"password\":\"Password123!\",\"first_name\":\"X\",\"last_name\":\"Y\",\"role\":\"corporate\"}"
