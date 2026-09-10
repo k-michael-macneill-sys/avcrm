@@ -11,6 +11,7 @@ import { paymentsRouter } from './payments';
 import { pricingGuideRouter } from './pricing';
 import { propertiesRouter } from './properties';
 import { quotesRouter } from './quotes';
+import { reportsRouter } from './reports';
 import { reviewRequestsRouter } from './reviews';
 import { usersRouter } from './users';
 import { workOrdersRouter } from './workOrders';
@@ -18,8 +19,6 @@ import { workOrdersRouter } from './workOrders';
 /**
  * One place to see the whole surface. Adding a resource is: write the service,
  * write the route file, mount it here.
- *
- * Reporting views arrive in build step 7 and mount here the same way.
  */
 export const apiRouter = Router();
 
@@ -40,4 +39,5 @@ apiRouter.use('/message-log', messageLogRouter);
 apiRouter.use('/review-requests', reviewRequestsRouter);
 apiRouter.use('/invoices', invoicesRouter);
 apiRouter.use('/payments', paymentsRouter);
+apiRouter.use('/reports', reportsRouter);
 apiRouter.use('/audit-log', auditLogRouter);
