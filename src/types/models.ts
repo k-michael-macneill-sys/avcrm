@@ -90,6 +90,8 @@ export const TEMPLATE_CODES = [
   'renewal_reminder',
   'document_expiring',
   'operator_suspended',
+  'invoice_sent',
+  'invoice_overdue',
   // Internal copies. A branch manager reading "Hi Harold, your driveway is
   // clear" is not a notification, so the office wording is its own template
   // rather than the customer's text sent to a second address.
@@ -97,11 +99,31 @@ export const TEMPLATE_CODES = [
   'document_expiring_internal',
   'operator_suspended_internal',
   'low_rating_internal',
+  'payment_failed_internal',
 ] as const;
 export type TemplateCode = (typeof TEMPLATE_CODES)[number];
 
 export const REVIEW_ROUTES = ['google_review', 'internal_feedback'] as const;
 export type ReviewRoute = (typeof REVIEW_ROUTES)[number];
+
+export const INVOICE_STATUSES = ['draft', 'sent', 'paid', 'overdue', 'void'] as const;
+export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
+
+export const PAYMENT_METHODS = [
+  'card_on_file',
+  'etransfer',
+  'cheque',
+  'cash',
+] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+
+export const PAYMENT_STATUSES = [
+  'pending',
+  'succeeded',
+  'failed',
+  'refunded',
+] as const;
+export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 
 export interface Branch {
   id: string;
@@ -360,6 +382,40 @@ export interface ReviewRequest {
   rating_response: number | null;
   routed_to: ReviewRoute | null;
   completed_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface Invoice {
+  id: string;
+  contract_id: string;
+  customer_id: string;
+  branch_id: string;
+  /** date columns come back as YYYY-MM-DD strings. */
+  billing_period_start: string;
+  billing_period_end: string;
+  /** numeric — money is a string all the way through. */
+  amount_due: string;
+  /** Derived from the payments on this invoice, never incremented in place. */
+  amount_paid: string;
+  status: InvoiceStatus;
+  due_date: string;
+  sent_at: Date | null;
+  paid_at: Date | null;
+  pdf_url: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface Payment {
+  id: string;
+  invoice_id: string;
+  amount: string;
+  method: PaymentMethod;
+  provider_transaction_id: string | null;
+  status: PaymentStatus;
+  failure_reason: string | null;
+  processed_at: Date | null;
   created_at: Date;
   updated_at: Date;
 }

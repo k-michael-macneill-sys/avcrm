@@ -6,9 +6,11 @@ import type {
   ContractChecklistItem,
   Customer,
   DocumentRequirement,
+  Invoice,
   MessageLogEntry,
   MessageTemplate,
   OperatorDocument,
+  Payment,
   PricingGuideEntry,
   Property,
   Quote,
@@ -36,6 +38,8 @@ declare module 'knex/types/tables' {
     message_templates: MessageTemplate;
     message_log: MessageLogEntry;
     review_requests: ReviewRequest;
+    invoices: Invoice;
+    payments: Payment;
     audit_log: AuditLogEntry;
   }
 }
