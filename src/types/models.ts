@@ -71,6 +71,38 @@ export type WorkOrderStatus = (typeof WORK_ORDER_STATUSES)[number];
 export const PHOTO_TYPES = ['before', 'after', 'issue'] as const;
 export type PhotoType = (typeof PHOTO_TYPES)[number];
 
+export const MESSAGE_CHANNELS = ['email', 'sms'] as const;
+export type MessageChannel = (typeof MESSAGE_CHANNELS)[number];
+
+export const MESSAGE_STATUSES = ['queued', 'sent', 'failed', 'bounced'] as const;
+export type MessageStatus = (typeof MESSAGE_STATUSES)[number];
+
+/**
+ * Template codes the application sends under. Rows in message_templates are
+ * config and can be reworded per branch, but the code a caller asks for is
+ * part of the code base, so it belongs here.
+ */
+export const TEMPLATE_CODES = [
+  'service_complete',
+  'en_route',
+  'payment_failed',
+  'review_request',
+  'renewal_reminder',
+  'document_expiring',
+  'operator_suspended',
+  // Internal copies. A branch manager reading "Hi Harold, your driveway is
+  // clear" is not a notification, so the office wording is its own template
+  // rather than the customer's text sent to a second address.
+  'service_complete_internal',
+  'document_expiring_internal',
+  'operator_suspended_internal',
+  'low_rating_internal',
+] as const;
+export type TemplateCode = (typeof TEMPLATE_CODES)[number];
+
+export const REVIEW_ROUTES = ['google_review', 'internal_feedback'] as const;
+export type ReviewRoute = (typeof REVIEW_ROUTES)[number];
+
 export interface Branch {
   id: string;
   name: string;
@@ -281,6 +313,53 @@ export interface ServicePhoto {
   latitude: string | null;
   longitude: string | null;
   uploaded_by_user_id: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface MessageTemplate {
+  id: string;
+  /** NULL is the global default; a branch row overrides it. */
+  branch_id: string | null;
+  code: string;
+  channel: MessageChannel;
+  subject: string | null;
+  body: string;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface MessageLogEntry {
+  id: string;
+  branch_id: string | null;
+  customer_id: string | null;
+  work_order_id: string | null;
+  template_code: string;
+  channel: MessageChannel;
+  recipient: string;
+  /** Rendered at enqueue time, so a later template edit cannot rewrite it. */
+  subject: string | null;
+  body: string;
+  status: MessageStatus;
+  provider_message_id: string | null;
+  sent_at: Date | null;
+  error: string | null;
+  attempts: number;
+  last_attempt_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface ReviewRequest {
+  id: string;
+  customer_id: string;
+  work_order_id: string;
+  branch_id: string;
+  sent_at: Date;
+  channel: MessageChannel;
+  rating_response: number | null;
+  routed_to: ReviewRoute | null;
+  completed_at: Date | null;
   created_at: Date;
   updated_at: Date;
 }

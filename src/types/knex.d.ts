@@ -6,10 +6,13 @@ import type {
   ContractChecklistItem,
   Customer,
   DocumentRequirement,
+  MessageLogEntry,
+  MessageTemplate,
   OperatorDocument,
   PricingGuideEntry,
   Property,
   Quote,
+  ReviewRequest,
   ServicePhoto,
   User,
   WorkOrder,
@@ -30,6 +33,9 @@ declare module 'knex/types/tables' {
     contract_checklist_items: ContractChecklistItem;
     work_orders: WorkOrder;
     service_photos: ServicePhoto;
+    message_templates: MessageTemplate;
+    message_log: MessageLogEntry;
+    review_requests: ReviewRequest;
     audit_log: AuditLogEntry;
   }
 }
