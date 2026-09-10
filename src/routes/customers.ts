@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth, requireRole, resolveBranchScope } from '../middleware/auth';
+import { requireAuth, resolveBranchScope, resolveWriteBranch } from '../middleware/auth';
 import {
   createCustomer,
   deleteCustomer,
@@ -8,53 +8,77 @@ import {
   listCustomers,
   updateCustomer,
 } from '../services/customers';
-import { CONTRACT_STATUSES } from '../types/models';
+import { listProperties } from '../services/properties';
+import { CUSTOMER_STATUSES, PREFERRED_CONTACTS } from '../types/models';
 import { asyncHandler } from '../utils/async';
+import { unauthorized } from '../utils/errors';
 import { paginationSchema } from '../utils/pagination';
 import { parse } from '../utils/validate';
 
 export const customersRouter = Router();
 
-// Everything below requires a valid bearer token.
 customersRouter.use(requireAuth);
-
-const listQuerySchema = paginationSchema.extend({
-  branch_id: z.string().uuid().optional(),
-  contract_status: z.enum(CONTRACT_STATUSES).optional(),
-  search: z.string().trim().min(1).max(200).optional(),
-});
 
 const idParamSchema = z.object({ id: z.string().uuid('id must be a UUID') });
 
-const optionalText = (max: number) =>
-  z.string().trim().max(max).nullable().optional();
-
-const createBodySchema = z.object({
+const listQuerySchema = paginationSchema.extend({
   branch_id: z.string().uuid().optional(),
-  name: z.string().trim().min(1).max(200),
-  phone: optionalText(40),
-  address: optionalText(500),
-  email: z.string().trim().email().max(255).nullable().optional(),
-  contract_status: z.enum(CONTRACT_STATUSES).default('none'),
+  status: z.enum(CUSTOMER_STATUSES).optional(),
+  created_by_user_id: z.string().uuid().optional(),
+  search: z.string().trim().min(1).max(200).optional(),
 });
 
-const updateBodySchema = z.object({
-  name: z.string().trim().min(1).max(200).optional(),
-  phone: optionalText(40),
-  address: optionalText(500),
+const contactFields = {
   email: z.string().trim().email().max(255).nullable().optional(),
-  contract_status: z.enum(CONTRACT_STATUSES).optional(),
+  phone: z.string().trim().max(40).nullable().optional(),
+  preferred_contact: z.enum(PREFERRED_CONTACTS).default('email'),
+};
+
+const createBodySchema = z
+  .object({
+    branch_id: z.string().uuid().optional(),
+    first_name: z.string().trim().min(1).max(100),
+    last_name: z.string().trim().min(1).max(100),
+    notes: z.string().trim().max(5000).nullable().optional(),
+    status: z.enum(CUSTOMER_STATUSES).default('lead'),
+    ...contactFields,
+  })
+  .refine((v) => v.preferred_contact !== 'email' || !!v.email, {
+    message: 'email is required when preferred_contact is "email"',
+    path: ['email'],
+  })
+  .refine((v) => v.preferred_contact !== 'sms' || !!v.phone, {
+    message: 'phone is required when preferred_contact is "sms"',
+    path: ['phone'],
+  })
+  .refine((v) => v.preferred_contact !== 'both' || (!!v.email && !!v.phone), {
+    message: 'email and phone are both required when preferred_contact is "both"',
+    path: ['preferred_contact'],
+  });
+
+const updateBodySchema = z.object({
+  first_name: z.string().trim().min(1).max(100).optional(),
+  last_name: z.string().trim().min(1).max(100).optional(),
+  email: z.string().trim().email().max(255).nullable().optional(),
+  phone: z.string().trim().max(40).nullable().optional(),
+  preferred_contact: z.enum(PREFERRED_CONTACTS).optional(),
+  notes: z.string().trim().max(5000).nullable().optional(),
+  status: z.enum(CUSTOMER_STATUSES).optional(),
 });
 
 customersRouter.get(
   '/',
   asyncHandler(async (req, res) => {
     const query = parse(listQuerySchema, req.query);
-    const branchId = resolveBranchScope(req, query.branch_id);
+    const scope = resolveBranchScope(req, query.branch_id);
 
     const result = await listCustomers(
-      branchId,
-      { contract_status: query.contract_status, search: query.search },
+      scope,
+      {
+        status: query.status,
+        created_by_user_id: query.created_by_user_id,
+        search: query.search,
+      },
       { page: query.page, page_size: query.page_size },
     );
 
@@ -66,25 +90,41 @@ customersRouter.get(
   '/:id',
   asyncHandler(async (req, res) => {
     const { id } = parse(idParamSchema, req.params);
-    const branchId = resolveBranchScope(req, req.query.branch_id as string | undefined);
-    const customer = await getCustomer(id, branchId);
-    res.json({ data: customer });
+    const scope = resolveBranchScope(req, req.query.branch_id as string | undefined);
+    res.json({ data: await getCustomer(id, scope) });
+  }),
+);
+
+/** Convenience for the property list of one customer. */
+customersRouter.get(
+  '/:id/properties',
+  asyncHandler(async (req, res) => {
+    const { id } = parse(idParamSchema, req.params);
+    const query = parse(paginationSchema, req.query);
+    const scope = resolveBranchScope(req, req.query.branch_id as string | undefined);
+
+    // 404s if the customer is outside the caller's scope.
+    await getCustomer(id, scope);
+
+    res.json(await listProperties(scope, { customer_id: id }, query));
   }),
 );
 
 customersRouter.post(
   '/',
-  requireRole('admin', 'manager', 'dispatcher'),
   asyncHandler(async (req, res) => {
     const body = parse(createBodySchema, req.body);
-    const branchId = resolveBranchScope(req, body.branch_id);
+    const branchId = resolveWriteBranch(req, body.branch_id);
+    if (!req.user) throw unauthorized();
 
-    const customer = await createCustomer(branchId, {
-      name: body.name,
-      phone: body.phone ?? null,
-      address: body.address ?? null,
+    const customer = await createCustomer(branchId, req.user.id, {
+      first_name: body.first_name,
+      last_name: body.last_name,
       email: body.email ?? null,
-      contract_status: body.contract_status,
+      phone: body.phone ?? null,
+      preferred_contact: body.preferred_contact,
+      notes: body.notes ?? null,
+      status: body.status,
     });
 
     res.status(201).json({ data: customer });
@@ -93,24 +133,20 @@ customersRouter.post(
 
 customersRouter.patch(
   '/:id',
-  requireRole('admin', 'manager', 'dispatcher'),
   asyncHandler(async (req, res) => {
     const { id } = parse(idParamSchema, req.params);
     const body = parse(updateBodySchema, req.body);
-    const branchId = resolveBranchScope(req, req.query.branch_id as string | undefined);
-
-    const customer = await updateCustomer(id, branchId, body);
-    res.json({ data: customer });
+    const scope = resolveBranchScope(req, req.query.branch_id as string | undefined);
+    res.json({ data: await updateCustomer(id, scope, body) });
   }),
 );
 
 customersRouter.delete(
   '/:id',
-  requireRole('admin', 'manager'),
   asyncHandler(async (req, res) => {
     const { id } = parse(idParamSchema, req.params);
-    const branchId = resolveBranchScope(req, req.query.branch_id as string | undefined);
-    await deleteCustomer(id, branchId);
+    const scope = resolveBranchScope(req, req.query.branch_id as string | undefined);
+    await deleteCustomer(id, scope);
     res.status(204).send();
   }),
 );

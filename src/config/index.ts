@@ -17,6 +17,11 @@ const envSchema = z.object({
   LOG_LEVEL: z
     .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace'])
     .default('info'),
+  // Express `trust proxy` setting. Contracts record the IP the signature came
+  // from, so behind a load balancer this has to be set or every contract is
+  // stamped with the proxy's address. Accepts false, true, a hop count, or a
+  // comma-separated list of trusted addresses.
+  TRUST_PROXY: z.string().default('false'),
 
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
   DATABASE_SSL: booleanish.default('false'),
@@ -42,11 +47,19 @@ if (!parsed.success) {
 
 const env = parsed.data;
 
+/** Express accepts a boolean, a hop count, or a list of trusted addresses. */
+function parseTrustProxy(value: string): boolean | number | string {
+  if (value === 'false') return false;
+  if (value === 'true') return true;
+  return /^\d+$/.test(value) ? Number(value) : value;
+}
+
 export const config = {
   env: env.NODE_ENV,
   isProduction: env.NODE_ENV === 'production',
   port: env.PORT,
   logLevel: env.LOG_LEVEL,
+  trustProxy: parseTrustProxy(env.TRUST_PROXY),
   db: {
     url: env.DATABASE_URL,
     ssl: env.DATABASE_SSL,

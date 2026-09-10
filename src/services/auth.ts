@@ -5,20 +5,21 @@ import { config } from '../config';
 import { db as defaultDb } from '../db/client';
 import type { AuthenticatedUser, JwtPayload } from '../types/auth';
 import type { PublicUser, User, UserRole } from '../types/models';
-import { badRequest, conflict, unauthorized } from '../utils/errors';
+import { badRequest, conflict, forbidden, unauthorized } from '../utils/errors';
 
-const PUBLIC_USER_COLUMNS = [
+export const PUBLIC_USER_COLUMNS = [
   'id',
-  'email',
-  'name',
-  'role',
   'branch_id',
+  'email',
+  'first_name',
+  'last_name',
+  'phone',
+  'role',
+  'onboarding_status',
+  'is_active',
   'created_at',
+  'updated_at',
 ] as const;
-
-export function normalizeEmail(email: string): string {
-  return email.trim().toLowerCase();
-}
 
 export function hashPassword(plaintext: string): Promise<string> {
   return bcrypt.hash(plaintext, config.auth.bcryptRounds);
@@ -28,7 +29,12 @@ export function verifyPassword(plaintext: string, hash: string): Promise<boolean
   return bcrypt.compare(plaintext, hash);
 }
 
-export function signToken(user: AuthenticatedUser): string {
+export function signToken(user: {
+  id: string;
+  email: string;
+  role: UserRole;
+  branch_id: string | null;
+}): string {
   const payload: JwtPayload = {
     sub: user.id,
     email: user.email,
@@ -48,23 +54,32 @@ export function verifyToken(token: string): JwtPayload {
   return decoded as unknown as JwtPayload;
 }
 
-export interface RegisterInput {
+export interface CreateUserInput {
   email: string;
   password: string;
-  name: string;
+  first_name: string;
+  last_name: string;
+  phone: string | null;
   role: UserRole;
   branch_id: string | null;
 }
 
-export async function registerUser(
-  input: RegisterInput,
+/**
+ * Role is set here, on the backend, never taken from an unauthenticated
+ * client. Callers decide what role they are allowed to ask for.
+ */
+export async function createUser(
+  input: CreateUserInput,
   db: Knex = defaultDb,
 ): Promise<PublicUser> {
-  const email = normalizeEmail(input.email);
-
-  const existing = await db('users').where({ email }).first('id');
+  // citext makes this comparison case-insensitive.
+  const existing = await db('users').where({ email: input.email }).first('id');
   if (existing) {
     throw conflict('A user with that email already exists');
+  }
+
+  if (input.role === 'operator' && !input.branch_id) {
+    throw badRequest('An operator must belong to a branch');
   }
 
   if (input.branch_id) {
@@ -78,9 +93,11 @@ export async function registerUser(
 
   const [user] = await db('users')
     .insert({
-      email,
+      email: input.email.trim(),
       password_hash,
-      name: input.name.trim(),
+      first_name: input.first_name.trim(),
+      last_name: input.last_name.trim(),
+      phone: input.phone,
       role: input.role,
       branch_id: input.branch_id,
     })
@@ -102,28 +119,24 @@ export async function login(
   password: string,
   db: Knex = defaultDb,
 ): Promise<LoginResult> {
-  const user = (await db('users')
-    .where({ email: normalizeEmail(email) })
-    .first()) as User | undefined;
+  const user = (await db('users').where({ email }).first()) as User | undefined;
 
   // Same error and roughly the same work either way, so the response does not
   // reveal whether the address is registered.
-  const hash = user?.password_hash ?? '$2b$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinva';
+  const hash =
+    user?.password_hash ?? '$2b$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinva';
   const ok = await verifyPassword(password, hash);
 
   if (!user || !ok) {
     throw unauthorized('Invalid email or password');
   }
 
-  const { password_hash: _ignored, ...publicUser } = user;
-  const token = signToken({
-    id: user.id,
-    email: user.email,
-    role: user.role,
-    branch_id: user.branch_id,
-  });
+  if (!user.is_active) {
+    throw forbidden('This account has been deactivated');
+  }
 
-  return { token, user: publicUser };
+  const { password_hash: _ignored, ...publicUser } = user;
+  return { token: signToken(user), user: publicUser };
 }
 
 export async function findUserById(
@@ -132,4 +145,15 @@ export async function findUserById(
 ): Promise<PublicUser | undefined> {
   const user = await db('users').where({ id }).first([...PUBLIC_USER_COLUMNS]);
   return user as PublicUser | undefined;
+}
+
+/** Used by requireAuth on every request. */
+export async function loadAuthenticatedUser(
+  id: string,
+  db: Knex = defaultDb,
+): Promise<AuthenticatedUser | undefined> {
+  const user = await db('users')
+    .where({ id })
+    .first(['id', 'email', 'role', 'branch_id', 'onboarding_status', 'is_active']);
+  return user as AuthenticatedUser | undefined;
 }
