@@ -523,6 +523,69 @@ assert "the log never carries the token" \
   ")" "false"
 
 echo
+echo "== message templates =="
+call 200 GET '/message-templates'
+GLOBAL_CODES="$(node -e "
+  const d = JSON.parse(require('fs').readFileSync(process.env.BODY_PATH,'utf8')).data;
+  const g = d.filter(t => t.branch_id === null && t.channel === 'email').map(t => t.code);
+  process.stdout.write(String(g.includes('service_complete') && g.includes('review_request')));
+")"
+assert "the global email set is seeded" "$GLOBAL_CODES" "true"
+# Halifax rewords service_complete; every other code falls back to the global row.
+OVERRIDES="$(node -e "
+  const d = JSON.parse(require('fs').readFileSync(process.env.BODY_PATH,'utf8')).data;
+  process.stdout.write(d.filter(t => t.branch_id !== null).map(t => t.code).join(','));
+")"
+assert "one branch override is seeded" "$OVERRIDES" "service_complete"
+
+echo
+echo "== the outbound queue =="
+# Completing the visit above queued the customer notice and the office copy.
+call 200 GET "/message-log?work_order_id=$WORK_ORDER_ID"
+QUEUED="$(node -e "
+  const d = JSON.parse(require('fs').readFileSync(process.env.BODY_PATH,'utf8')).data;
+  process.stdout.write(d.map(m => m.template_code).sort().join(','));
+")"
+assert "completion queues both notices" "$QUEUED" "service_complete,service_complete_internal"
+# Rendered at enqueue time, so a later template edit cannot rewrite history.
+RENDERED="$(node -e "
+  const d = JSON.parse(require('fs').readFileSync(process.env.BODY_PATH,'utf8')).data;
+  const m = d.find(x => x.template_code === 'service_complete');
+  process.stdout.write(String(m.body.includes('{{') === false && m.status === 'queued'));
+")"
+assert "queued rendered, not sent" "$RENDERED" "true"
+
+call 200 GET '/message-log?status=sent'
+call 200 GET '/message-log?channel=sms'
+
+echo
+echo "== the review gate =="
+call 200 GET '/review-requests'
+call 200 GET '/review-requests?routed_to=internal_feedback'
+assert "a poor rating stays in house" "$(field meta.total)" "1"
+POOR_ID="$(field data.0.id)"
+call 200 GET '/review-requests?routed_to=google_review'
+assert "a good one goes to the review page" "$(field meta.total)" "1"
+GOOD_ID="$(field data.0.id)"
+call 200 GET '/review-requests?answered=false'
+assert "every seeded ask has been answered" "$(field meta.total)" "0"
+
+# The one-tap link is public: a customer has no account.
+TOKEN=""
+call 400 GET "/review-requests/$GOOD_ID/rate?rating=9"
+call 404 GET "/review-requests/00000000-0000-0000-0000-000000000000/rate?rating=5"
+# Tapping the same star again is the same answer, not an error.
+call 302 GET "/review-requests/$GOOD_ID/rate?rating=5"
+call 200 GET "/review-requests/$POOR_ID/rate?rating=2"
+assert "a poor rating is routed internally" "$(field data.routed_to)" "internal_feedback"
+assert "and is not sent to the review page" "$(field data.redirect_url)" ""
+# A different answer to an answered ask is a conflict, not an overwrite.
+call 409 GET "/review-requests/$GOOD_ID/rate?rating=1"
+call 409 POST "/review-requests/$POOR_ID/rating" '{"rating":5}'
+
+login "$CORPORATE_EMAIL"
+
+echo
 echo "== branch scoping: operator is hard-scoped =="
 # Counts are taken now, against the same data the operator will query.
 call 200 GET /customers
@@ -548,6 +611,8 @@ call 403 GET "/quotes?branch_id=$HALIFAX"
 call 403 GET "/contracts?branch_id=$HALIFAX"
 call 403 GET "/pricing-guide?branch_id=$HALIFAX"
 call 403 GET "/work-orders?branch_id=$HALIFAX"
+call 403 GET "/message-log?branch_id=$HALIFAX"
+call 403 GET "/review-requests?branch_id=$HALIFAX"
 call 200 GET /branches
 assert "operator sees only their own branch" "$(field data.1.id)" ""
 

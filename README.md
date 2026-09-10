@@ -15,11 +15,11 @@ Build order from the spec, and what exists today:
 | 2 | Auth, role middleware, branch scoping | **done** |
 | 3 | Quotes → contracts → checklist, signature and payment token capture | **done** |
 | 4 | Work orders, photo upload, completion gate | **done** |
-| 5 | Email queue + templates, then review automation | mock only |
+| 5 | Email queue + templates, then review automation | **done** |
 | 6 | Invoicing and payments | not started |
 | 7 | Reporting views | not started |
 
-Steps 5 to 7 mount into the same structure — a migration, a service of plain
+Steps 6 and 7 mount into the same structure — a migration, a service of plain
 functions, a router — without reshaping what is already here.
 
 ## Setup
@@ -42,7 +42,7 @@ Verify:
 
 ```bash
 curl -s localhost:3000/health
-./scripts/test-api.sh   # 179 checks against a running server; safe to re-run
+./scripts/test-api.sh   # 205 checks against a running server; safe to re-run
 ```
 
 The database owner needs to be able to `create extension citext`. It is a
@@ -62,16 +62,38 @@ the dev dependencies present.
 ## Scheduled jobs
 
 ```bash
-npm run job:document-expiry
+npm run job:message-queue      # drain the outbound queue
+npm run job:review-requests    # ask about yesterday's finished visits
+npm run job:document-expiry    # nightly compliance sweep
 ```
+
+Each exits non-zero on failure, so a scheduler can alert on them.
+
+### `job:message-queue`
+
+The outbound worker. Claims what is due, sends it, records the outcome, and
+loops until there is nothing left — so one run empties a backlog rather than
+trickling a batch per minute. Run it every minute.
+
+Claiming uses `FOR UPDATE SKIP LOCKED` plus a five minute lease, so several
+copies can run at once without sending anything twice, and a worker killed
+mid-send holds nothing: the row simply becomes eligible again once the lease
+runs out.
+
+### `job:review-requests`
+
+Asks for a rating a day after each finished visit. Run it daily; missing a
+night is not a problem, because the window looks a week back and the next run
+catches up. `runReviewRequests(now)` takes an injectable clock.
+
+### `job:document-expiry`
 
 The nightly compliance sweep. It expires approved documents past their date,
 suspends any operator who loses a **required** document, and warns operators at
 30, 14 and 7 days out, copying the branch manager. Each window is sent once.
-Point cron or your scheduler at it; it exits non-zero on failure.
-
 `runDocumentExpiry(today)` takes an injectable date, so the whole ladder can be
-exercised without waiting for real time to pass.
+exercised without waiting for real time to pass. It queues its warnings rather
+than sending them, like everything else.
 
 ## Seed accounts
 
@@ -89,10 +111,14 @@ All seeded users share the password in `SEED_PASSWORD` (default `Password123!`).
 The seed also lays down a rate card per branch and five quotes spread across
 the lifecycle — two signed into active contracts (one with a card on file, one
 paid upfront by cheque), one presented and waiting, one still a draft, and one
-declined. Four work orders sit on those contracts: one completed with its
-before and after photos, one on tomorrow's board, one skipped with a reason,
-and one unassigned in Halifax, because that branch has no approved operator
-yet.
+declined. Six work orders sit on those contracts, including three completed
+with their before and after photos, one skipped with a reason, and one
+unassigned in Halifax because that branch has no approved operator yet.
+
+Two review requests are already answered — five stars routed to the public
+page, two stars routed to the branch manager — and one finished visit is
+deliberately left unasked, so `npm run job:review-requests` has something to
+pick up on a fresh seed.
 
 ## Auth and permissions
 
@@ -205,6 +231,12 @@ A suspension is only lifted by corporate, never by the automatic refresh.
 | PATCH | `/work-orders/:id/status` | assigned operator or corporate | The completion gate lives here |
 | GET | `/work-orders/:id/photos` | any | |
 | POST | `/work-orders/:id/photos` | assigned operator or corporate | Geotag checked against the property |
+| GET | `/message-templates` | any | Global set plus the caller's branch overrides |
+| GET | `/message-log` | any | `status`, `channel`, `template_code`, `customer_id` |
+| GET | `/review-requests` | any | `routed_to`, `answered`, `customer_id` |
+| GET | `/review-requests/:id` | any | |
+| GET | `/review-requests/:id/rate?rating=N` | **public** | The one-tap link; 302s to the review page on 4-5 |
+| POST | `/review-requests/:id/rating` | **public** | The same action for an API client |
 | GET | `/audit-log` | corporate | `entity_type`, `entity_id`, `user_id`, `action` |
 
 ### Response shapes
@@ -351,14 +383,66 @@ finished job. `sendEmail` is still the mock in `src/services/notifications.ts`
 — build step 5 puts a real queue behind it and `notifyServiceComplete` does not
 change.
 
+## Messaging: the queue and the review gate
+
+Nothing in the application talks to an email or SMS provider. Callers
+`enqueueMessage`, and the worker sends — which is what makes `message_log` a
+complete record of everything the system has ever said to anyone, and what
+keeps an API response from waiting on SMTP.
+
+```
+caller ──enqueue──► message_log (queued) ──worker──► provider
+                          │                            │
+                          └────── sent / failed ◄──────┘
+```
+
+**Templates** are seeded config with `{{mustache}}` tokens. A row with a
+`branch_id` overrides the global row for the same code and channel, so a
+branch can reword a message without a deploy — the seed ships one Halifax
+override of `service_complete` to show the mechanism. An unknown or empty
+token renders blank and logs a warning: mailing a customer a literal
+`{{customer_first_name}}` is worse than a gap.
+
+**Rendering happens at enqueue, not at send.** The rendered subject and body
+are stored on the row, which is one column pair more than the spec lists. The
+render context is gone by the time the worker runs, and a log whose rows
+cannot show what was actually sent is not much of a log — editing a template
+later must not rewrite history.
+
+**Retries** are bounded by `MESSAGE_MAX_ATTEMPTS`. A send that throws leaves
+the row `queued` with `attempts` incremented until the budget is spent, then
+`failed`. `bounced` exists for a provider webhook to set; nothing sets it yet.
+
+Because everything routes through here, the two previously-mocked senders now
+do too: service completion notices and the whole document-expiry ladder are
+queued rows, not direct calls.
+
+### The review gate
+
+A day after a finished visit, `job:review-requests` asks the customer for a
+1-5 rating — one tap, no form. **4-5 redirects to the public review page; 1-3
+stays in house and the branch manager is emailed** with the customer's name
+and number. That routing is the entire point: a bad experience should reach
+someone who can fix it, not a public star rating.
+
+One ask per customer per 90 days. A season is long, and a list that gets asked
+after every snowfall stops answering — which costs more than the reviews are
+worth.
+
+`GET /review-requests/:id/rate?rating=4` is **public and unauthenticated**: the
+customer has no account, and the row's random v4 id is the capability. It is a
+GET that writes, which is not something to do lightly — but an emailed link is
+a GET and nothing else, and the whole feature is one tap. Tapping the same
+star twice is treated as the same answer rather than an error; tapping a
+different one is a 409.
+
 ## What is mocked
 
-- `src/services/notifications.ts` — `sendEmail` / `sendSms` write to the log.
-  Build step 5 replaces the bodies with a real queue and templates; callers do
-  not change.
-
-- `notifyServiceComplete` in `src/services/workOrders.ts` builds the real
-  completion email but hands it to that same mock.
+- `src/services/notifications.ts` — the **transport**, and only the transport.
+  `sendEmail` / `sendSms` write to the log and return a fake provider id.
+  Everything above them is real: templates, rendering, the queue, retries and
+  the log are all wired up, so choosing a provider is a change to these two
+  function bodies and nothing else. The queue worker is their only caller.
 
 Not started: invoicing, payments, reporting, and any frontend. Contract PDFs
 are a `pdf_url` column that something else has to fill in; nothing generates
@@ -430,6 +514,10 @@ Other conventions worth keeping:
 - No automated test suite. `scripts/test-api.sh` is a smoke test, not a substitute.
 - `audit_log` covers contracts and quote pricing. Payments join it in build
   step 6; user role changes are not logged yet.
+- `message_log.status` never becomes `bounced`: that needs a provider webhook,
+  which arrives with the real transport.
+- The internal feedback route returns JSON. A real deployment would redirect a
+  1-3 rating to a feedback form the way a 4-5 redirects to the review page.
 - File uploads are recorded, not performed: operator documents, contract
   signatures and service photos all store an object key that something else
   must have already written to a private bucket. No presigned-URL endpoint yet.

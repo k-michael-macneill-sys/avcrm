@@ -21,6 +21,9 @@ export async function seed(knex: Knex): Promise<void> {
   // audit_log is append-only, and its trigger blocks DELETE. TRUNCATE does not
   // fire row triggers, which is exactly what a dev reset needs.
   await knex.raw('truncate table audit_log');
+  await knex('review_requests').del();
+  await knex('message_log').del();
+  await knex('message_templates').del();
   await knex('service_photos').del();
   await knex('work_orders').del();
   await knex('contract_checklist_items').del();
@@ -507,14 +510,14 @@ export async function seed(knex: Knex): Promise<void> {
         notes: 'Ten off for signing at the door.',
       },
       {
-        // Priced but not answered yet: this is the follow-up list.
+        // Signed below.
         property_id: propertyBy('1140 Princess St').id,
         created_by_user_id: nina.id,
         billing_type: 'seasonal_upfront',
         initial_price: '1030.50',
         discounted_price: '975.00',
         ...season,
-        status: 'presented',
+        status: 'accepted',
       },
       {
         // Still being written up.
@@ -578,6 +581,19 @@ export async function seed(knex: Knex): Promise<void> {
         status: 'active',
       },
       {
+        quote_id: quoteFor(propertyBy('1140 Princess St').id).id,
+        customer_id: customerBy('Priya').id,
+        property_id: propertyBy('1140 Princess St').id,
+        signature_image_url: 'private/signatures/priya-raman.png',
+        signed_at: signedAt,
+        signed_ip: '198.51.100.31',
+        terms_version: '2026-09-01',
+        payment_method_token: 'tok_seed_priya_raman',
+        payment_method_last4: '1881',
+        payment_method_brand: 'mastercard',
+        status: 'active',
+      },
+      {
         // Paid upfront by cheque, so there is no card on file.
         quote_id: quoteFor(propertyBy('5560 Cornwallis St').id).id,
         customer_id: customerBy('Sam').id,
@@ -598,6 +614,7 @@ export async function seed(knex: Knex): Promise<void> {
   };
 
   const harold = contractFor(propertyBy('212 Johnson St').id);
+  const priya = contractFor(propertyBy('1140 Princess St').id);
   const sam = contractFor(propertyBy('5560 Cornwallis St').id);
 
   // Every contract carries a row per checklist item, ticked or not, so the
@@ -616,6 +633,13 @@ export async function seed(knex: Knex): Promise<void> {
     checklistRow(harold.id, 'access_notes_captured', true),
     checklistRow(harold.id, 'photos_taken', false),
     checklistRow(harold.id, 'contact_confirmed', true),
+
+    checklistRow(priya.id, 'card_on_file', true),
+    checklistRow(priya.id, 'terms_reviewed', true),
+    checklistRow(priya.id, 'service_window_explained', true),
+    checklistRow(priya.id, 'access_notes_captured', true),
+    checklistRow(priya.id, 'photos_taken', false),
+    checklistRow(priya.id, 'contact_confirmed', true),
 
     checklistRow(sam.id, 'card_on_file', false),
     checklistRow(sam.id, 'terms_reviewed', true),
@@ -678,11 +702,48 @@ export async function seed(knex: Knex): Promise<void> {
         service_type: 'snow_clearing',
         status: 'scheduled',
       },
+      {
+        // Finished a day and a bit ago and nobody has been asked about it yet.
+        // This is what `npm run job:review-requests` picks up on a fresh seed.
+        contract_id: priya.id,
+        property_id: propertyBy('1140 Princess St').id,
+        branch_id: kingston.id,
+        assigned_user_id: nina.id,
+        scheduled_for: hours(-31),
+        service_type: 'snow_clearing',
+        status: 'completed',
+        started_at: hours(-30.5),
+        completed_at: hours(-30),
+      },
+      {
+        // Finished three days ago, and the customer has already rated it —
+        // poorly, which is what puts it on the branch manager's list.
+        contract_id: sam.id,
+        property_id: propertyBy('5560 Cornwallis St').id,
+        branch_id: halifax.id,
+        assigned_user_id: halifaxManager.id,
+        scheduled_for: hours(-74),
+        service_type: 'salting',
+        status: 'completed',
+        started_at: hours(-73),
+        completed_at: hours(-72),
+      },
     ])
-    .returning(['id', 'status']);
+    .returning(['id', 'status', 'branch_id', 'service_type', 'property_id']);
 
-  const completedVisit = workOrders.find((w) => w.status === 'completed');
-  if (!completedVisit) throw new Error('Work order seed failed');
+  const completedVisit = workOrders.find(
+    (w) => w.status === 'completed' && w.service_type === 'snow_clearing' &&
+      w.branch_id === kingston.id && w.property_id === propertyBy('212 Johnson St').id,
+  );
+  const unaskedVisit = workOrders.find(
+    (w) => w.status === 'completed' && w.property_id === propertyBy('1140 Princess St').id,
+  );
+  const ratedVisit = workOrders.find(
+    (w) => w.status === 'completed' && w.branch_id === halifax.id,
+  );
+  if (!completedVisit || !unaskedVisit || !ratedVisit) {
+    throw new Error('Work order seed failed');
+  }
 
   // Geotagged on the property itself, which is what the upload check compares
   // against. taken_at is when the driveway was cleared, not when the file
@@ -705,6 +766,254 @@ export async function seed(knex: Knex): Promise<void> {
       latitude: '44.230500',
       longitude: '-76.494400',
       uploaded_by_user_id: otto.id,
+    },
+    {
+      work_order_id: unaskedVisit.id,
+      photo_type: 'before',
+      file_url: 'private/service-photos/1140-princess-before.jpg',
+      taken_at: hours(-30.5),
+      latitude: '44.246800',
+      longitude: '-76.526900',
+      uploaded_by_user_id: nina.id,
+    },
+    {
+      work_order_id: unaskedVisit.id,
+      photo_type: 'after',
+      file_url: 'private/service-photos/1140-princess-after.jpg',
+      taken_at: hours(-30),
+      latitude: '44.246800',
+      longitude: '-76.526900',
+      uploaded_by_user_id: nina.id,
+    },
+    // The Halifax address has no coordinates on file, so neither do its
+    // photos: the geotag check only runs when both sides have them.
+    {
+      work_order_id: ratedVisit.id,
+      photo_type: 'before',
+      file_url: 'private/service-photos/5560-cornwallis-before.jpg',
+      taken_at: hours(-73),
+      uploaded_by_user_id: halifaxManager.id,
+    },
+    {
+      work_order_id: ratedVisit.id,
+      photo_type: 'after',
+      file_url: 'private/service-photos/5560-cornwallis-after.jpg',
+      taken_at: hours(-72),
+      uploaded_by_user_id: halifaxManager.id,
+    },
+  ]);
+
+  // --- Message templates --------------------------------------------------
+  // Seeded config. A row with a branch_id overrides the global one for the
+  // same code and channel, which is how a branch rewords a message without a
+  // deploy — see the Halifax override at the end of this block.
+  await knex('message_templates').insert([
+    {
+      code: 'service_complete',
+      channel: 'email',
+      branch_id: null,
+      subject: '{{address_line1}} — {{service_type}} complete',
+      body:
+        'Hi {{customer_first_name}},\n\n' +
+        '{{service_type}} at {{address_line1}}, {{city}} was completed at ' +
+        '{{completed_at}}.\nOperator: {{operator_name}}\n\nPhotos:\n{{photo_list}}',
+    },
+    {
+      // The office copy. A branch manager reading "Hi Harold, your driveway is
+      // clear" is not a notification.
+      code: 'service_complete_internal',
+      channel: 'email',
+      branch_id: null,
+      subject: '[{{branch_name}}] {{address_line1}} — {{service_type}} complete',
+      body:
+        '{{service_type}} at {{address_line1}}, {{city}} was completed at ' +
+        '{{completed_at}} by {{operator_name}}.\n\nPhotos:\n{{photo_list}}',
+    },
+    {
+      code: 'en_route',
+      channel: 'email',
+      branch_id: null,
+      subject: 'On the way to {{address_line1}}',
+      body:
+        'Hi {{customer_first_name}}, {{operator_name}} is on the way to ' +
+        '{{address_line1}} now.',
+    },
+    {
+      code: 'en_route',
+      channel: 'sms',
+      branch_id: null,
+      subject: null,
+      body: '{{operator_name}} is on the way to {{address_line1}} now.',
+    },
+    {
+      code: 'review_request',
+      channel: 'email',
+      branch_id: null,
+      subject: 'How did we do at {{address_line1}}?',
+      body:
+        'Hi {{customer_first_name}},\n\nHow did we do? One tap, no form:\n\n' +
+        '1 star  {{rating_url_1}}\n2 stars {{rating_url_2}}\n' +
+        '3 stars {{rating_url_3}}\n4 stars {{rating_url_4}}\n' +
+        '5 stars {{rating_url_5}}\n\n— {{branch_name}}',
+    },
+    {
+      code: 'review_request',
+      channel: 'sms',
+      branch_id: null,
+      subject: null,
+      body:
+        'How did we do at {{address_line1}}? Tap to rate: ' +
+        '1 {{rating_url_1}} 3 {{rating_url_3}} 5 {{rating_url_5}}',
+    },
+    {
+      // The alert that makes the gate worth having: a poor rating reaches a
+      // person instead of a public star.
+      code: 'low_rating_internal',
+      channel: 'email',
+      branch_id: null,
+      subject: '[{{branch_name}}] {{rating}}-star rating from {{customer_name}}',
+      body:
+        '{{customer_name}} rated a recent visit {{rating}} out of 5.\n\n' +
+        'Email: {{customer_email}}\nPhone: {{customer_phone}}\n\n' +
+        'Call them before they tell everyone else.',
+    },
+    {
+      code: 'payment_failed',
+      channel: 'email',
+      branch_id: null,
+      subject: 'We could not process your payment',
+      body:
+        'Hi {{customer_first_name}}, the card on file for {{address_line1}} was ' +
+        'declined for {{amount}}. Service continues — please update your card ' +
+        'when you get a moment.',
+    },
+    {
+      code: 'renewal_reminder',
+      channel: 'email',
+      branch_id: null,
+      subject: 'Your {{address_line1}} snow contract is up for renewal',
+      body:
+        'Hi {{customer_first_name}}, your season at {{address_line1}} ends on ' +
+        '{{season_end}}. Reply and we will get next winter booked in.',
+    },
+    {
+      code: 'document_expiring',
+      channel: 'email',
+      branch_id: null,
+      subject: '{{label}} expires in {{days_left}} {{day_word}}',
+      body:
+        'Hi {{first_name}}, your {{label}} expires on {{expires_on}}.' +
+        '{{required_note}} Please upload a current copy before then.',
+    },
+    {
+      code: 'document_expiring_internal',
+      channel: 'email',
+      branch_id: null,
+      subject: '[{{branch_name}}] {{operator_name}}: {{label}} expires in {{days_left}} {{day_word}}',
+      body:
+        '{{operator_name}} at {{branch_name}} has a {{label}} expiring on ' +
+        '{{expires_on}}.',
+    },
+    {
+      code: 'operator_suspended',
+      channel: 'email',
+      branch_id: null,
+      subject: 'Your account has been suspended',
+      body:
+        'Hi {{first_name}}, a required document has expired, so you cannot be ' +
+        'assigned work until it is replaced and approved. Please upload a ' +
+        'current copy as soon as you can.',
+    },
+    {
+      code: 'operator_suspended_internal',
+      channel: 'email',
+      branch_id: null,
+      subject: '[{{branch_name}}] Operator suspended: {{operator_name}}',
+      body:
+        '{{operator_name}} has been suspended automatically because a required ' +
+        'document expired. They are out of the assignable pool until it is ' +
+        'replaced.',
+    },
+    {
+      // A branch override, to show the mechanism works. Halifax signs off
+      // differently; everything else falls back to the global rows above.
+      code: 'service_complete',
+      channel: 'email',
+      branch_id: halifax.id,
+      subject: '{{address_line1}} is clear',
+      body:
+        'Hi {{customer_first_name}},\n\nWe finished {{service_type}} at ' +
+        '{{address_line1}} at {{completed_at}}. {{operator_name}} looked after ' +
+        'it.\n\nPhotos:\n{{photo_list}}\n\nThanks for choosing us.\n' +
+        '— The {{branch_name}} crew',
+    },
+  ]);
+
+  // --- Message log --------------------------------------------------------
+  // What the queue would have delivered for the completed Kingston visit.
+  await knex('message_log').insert([
+    {
+      branch_id: kingston.id,
+      customer_id: customerBy('Harold').id,
+      work_order_id: completedVisit.id,
+      template_code: 'service_complete',
+      channel: 'email',
+      recipient: 'harold.bell@example.test',
+      subject: '212 Johnson St — snow clearing complete',
+      body:
+        'Hi Harold,\n\nsnow clearing at 212 Johnson St, Kingston was completed ' +
+        'at ' + hours(-25).toISOString() + '.\nOperator: Otto Plows',
+      status: 'sent',
+      sent_at: hours(-25),
+      provider_message_id: 'mock-email-seed-harold',
+      attempts: 1,
+      last_attempt_at: hours(-25),
+    },
+    {
+      branch_id: kingston.id,
+      customer_id: customerBy('Harold').id,
+      work_order_id: completedVisit.id,
+      template_code: 'service_complete_internal',
+      channel: 'email',
+      recipient: 'kingston.manager@avcrm.test',
+      subject: '[Kingston] 212 Johnson St — snow clearing complete',
+      body:
+        'snow clearing at 212 Johnson St, Kingston was completed at ' +
+        hours(-25).toISOString() + ' by Otto Plows.',
+      status: 'sent',
+      sent_at: hours(-25),
+      provider_message_id: 'mock-email-seed-manager',
+      attempts: 1,
+      last_attempt_at: hours(-25),
+    },
+  ]);
+
+  // --- Review requests ----------------------------------------------------
+  // One of each answer, so both branches of the gate have something to show.
+  // Priya's visit is deliberately left unasked: that is what
+  // `npm run job:review-requests` picks up on a fresh seed.
+  await knex('review_requests').insert([
+    {
+      // Five stars: routed to the public review page.
+      customer_id: customerBy('Harold').id,
+      work_order_id: completedVisit.id,
+      branch_id: kingston.id,
+      channel: 'email',
+      sent_at: hours(-24),
+      rating_response: 5,
+      routed_to: 'google_review',
+      completed_at: hours(-23),
+    },
+    {
+      // Two stars: kept in house, and the branch manager was told.
+      customer_id: customerBy('Sam').id,
+      work_order_id: ratedVisit.id,
+      branch_id: halifax.id,
+      channel: 'email',
+      sent_at: hours(-48),
+      rating_response: 2,
+      routed_to: 'internal_feedback',
+      completed_at: hours(-47),
     },
   ]);
 
