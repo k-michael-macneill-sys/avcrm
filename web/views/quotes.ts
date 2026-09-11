@@ -4,6 +4,8 @@ import { field, fieldList, fragment, h, link, section, table } from '../dom.js';
 import { buildForm, errorLine, submitter } from '../form.js';
 import { date, money, statusPill, stamp } from '../format.js';
 import * as router from '../router.js';
+import { signaturePad } from '../signature.js';
+import { uploadBlob } from '../upload.js';
 import { QUOTE_STATUSES } from '../../src/types/models.js';
 import type {
   ChecklistRequirement,
@@ -175,13 +177,9 @@ async function signaturePanel(quote: Quote): Promise<HTMLElement> {
     );
   });
 
+  const pad = signaturePad();
+
   const form = buildForm([
-    {
-      name: 'signature_image_url',
-      label: 'Signature image key',
-      value: `private/signatures/${quote.id}.png`,
-      required: true,
-    },
     { name: 'terms_version', label: 'Terms version', value: '2026-09-01', required: true },
     {
       name: 'payment_method_token',
@@ -195,6 +193,8 @@ async function signaturePanel(quote: Quote): Promise<HTMLElement> {
   return section(
     'Sign at the door',
     h('div', { class: 'checklist' }, ...rows),
+    h('p', { class: 'sig-label' }, 'Customer signature'),
+    pad.node,
     form.node,
     error,
     h(
@@ -204,9 +204,27 @@ async function signaturePanel(quote: Quote): Promise<HTMLElement> {
         'Capture signature',
         async () => {
           const values = form.values();
+
+          // The signature is uploaded first: a contract without one is not a
+          // contract, so there is no point sending the rest if this fails.
+          const drawn = await pad.toBlob();
+          if (!drawn) {
+            throw new api.ApiError(
+              400,
+              'bad_request',
+              'The customer needs to sign before this can be submitted',
+              [],
+            );
+          }
+          const signatureKey = await uploadBlob(
+            'signature',
+            drawn,
+            `signature-${quote.id}.png`,
+          );
+
           const contract = await api.post<Contract>('/contracts', {
             quote_id: quote.id,
-            signature_image_url: values.signature_image_url,
+            signature_image_url: signatureKey,
             terms_version: values.terms_version,
             payment_method_token: values.payment_method_token || null,
             payment_method_last4: values.payment_method_last4 || null,

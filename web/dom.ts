@@ -34,6 +34,11 @@ export interface Attrs {
   'aria-label'?: string;
   'aria-hidden'?: string;
   for?: string;
+  src?: string;
+  alt?: string;
+  accept?: string;
+  capture?: string;
+  target?: string;
   'aria-current'?: string;
   'aria-live'?: string;
   onclick?: (event: MouseEvent) => void;

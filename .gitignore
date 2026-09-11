@@ -2,6 +2,8 @@ node_modules/
 dist/
 # Built browser modules: tsc output, same as dist/.
 public/assets/
+# Uploaded files when STORAGE_DRIVER=local.
+storage/
 .env
 .env.local
 *.log

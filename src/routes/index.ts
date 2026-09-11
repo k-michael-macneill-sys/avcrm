@@ -13,6 +13,7 @@ import { propertiesRouter } from './properties';
 import { quotesRouter } from './quotes';
 import { reportsRouter } from './reports';
 import { reviewRequestsRouter } from './reviews';
+import { filesRouter, uploadsRouter } from './uploads';
 import { usersRouter } from './users';
 import { workOrdersRouter } from './workOrders';
 
@@ -23,6 +24,8 @@ import { workOrdersRouter } from './workOrders';
 export const apiRouter = Router();
 
 apiRouter.use('/auth', authRouter);
+apiRouter.use('/uploads', uploadsRouter);
+apiRouter.use('/files', filesRouter);
 apiRouter.use('/branches', branchesRouter);
 apiRouter.use('/users', usersRouter);
 apiRouter.use('/operators', operatorsRouter);

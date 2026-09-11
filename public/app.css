@@ -681,3 +681,80 @@ td .btn {
   margin-top: 10px;
   font-size: 12px;
 }
+
+/* ---------- signature pad ---------- */
+
+.sig-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+
+.sig-pad {
+  margin-bottom: 16px;
+}
+
+.sig-canvas {
+  display: block;
+  width: 100%;
+  height: 180px;
+  /* Always a light pad: the signature is an image that gets printed and
+     emailed, where the reader's dark mode does not follow it. */
+  background: #ffffff;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  cursor: crosshair;
+  /* Stop a finger drag from scrolling the page instead of drawing. */
+  touch-action: none;
+}
+
+.sig-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 6px;
+  min-height: 20px;
+}
+
+.sig-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.sig-shown {
+  margin-top: 16px;
+}
+
+.sig-image {
+  display: block;
+  max-width: 340px;
+  width: 100%;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px;
+}
+
+.file-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.file-note {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.thumb {
+  display: block;
+  width: 96px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface-sunken);
+}

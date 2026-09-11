@@ -117,6 +117,22 @@ export const PAYMENT_METHODS = [
 ] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
+/**
+ * What a file is for. The purpose decides its key prefix, which content
+ * types are allowed and how big it may be — see services/storage.ts.
+ */
+export const UPLOAD_PURPOSES = [
+  'signature',
+  'service_photo',
+  'operator_document',
+  'contract_pdf',
+  'invoice_pdf',
+] as const;
+export type UploadPurpose = (typeof UPLOAD_PURPOSES)[number];
+
+export const UPLOAD_STATUSES = ['pending', 'stored'] as const;
+export type UploadStatus = (typeof UPLOAD_STATUSES)[number];
+
 export const PAYMENT_STATUSES = [
   'pending',
   'succeeded',
@@ -416,6 +432,21 @@ export interface Payment {
   status: PaymentStatus;
   failure_reason: string | null;
   processed_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface Upload {
+  id: string;
+  key: string;
+  purpose: UploadPurpose;
+  content_type: string;
+  file_name: string | null;
+  byte_size: number | null;
+  status: UploadStatus;
+  uploaded_by_user_id: string | null;
+  branch_id: string | null;
+  stored_at: Date | null;
   created_at: Date;
   updated_at: Date;
 }

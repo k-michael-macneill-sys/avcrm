@@ -4,6 +4,7 @@ import { field, fieldList, fragment, h, link, section, table } from '../dom.js';
 import { buildForm, disclosure, errorLine, submitter } from '../form.js';
 import { relative, statusPill, stamp } from '../format.js';
 import * as router from '../router.js';
+import { fileImage, filePicker, uploadBlob } from '../upload.js';
 import { SERVICE_TYPES, WORK_ORDER_STATUSES } from '../../src/types/models.js';
 import type {
   Contract,
@@ -280,7 +281,10 @@ export async function renderWorkOrder(root: HTMLElement, params: string[]): Prom
         table<ServicePhoto>(
           [
             { header: 'Type', cell: (row) => statusPill(row.photo_type) },
-            { header: 'File', cell: (row) => row.file_url },
+            {
+              header: 'Photo',
+              cell: (row) => fileImage(row.file_url, `${row.photo_type} photo`, 'thumb'),
+            },
             { header: 'Taken', cell: (row) => stamp(row.taken_at) },
             {
               header: 'Geotag',
@@ -300,6 +304,11 @@ export async function renderWorkOrder(root: HTMLElement, params: string[]): Prom
 function photoPanel(workOrderId: string, property: Property): HTMLElement {
   return disclosure('Add photo', () => {
     const error = errorLine();
+    const picker = filePicker({
+      accept: 'image/jpeg,image/png,image/webp',
+      capture: true,
+      note: 'JPEG, PNG or WebP, up to 12 MB',
+    });
     const form = buildForm([
       {
         name: 'photo_type',
@@ -310,12 +319,6 @@ function photoPanel(workOrderId: string, property: Property): HTMLElement {
           { value: 'after', label: 'after' },
           { value: 'issue', label: 'issue' },
         ],
-      },
-      {
-        name: 'file_url',
-        label: 'File key',
-        value: `private/service-photos/${workOrderId}-${Date.now()}.jpg`,
-        required: true,
       },
       {
         name: 'taken_at',
@@ -337,11 +340,8 @@ function photoPanel(workOrderId: string, property: Property): HTMLElement {
     return h(
       'div',
       { class: 'card' },
-      h(
-        'p',
-        { class: 'empty' },
-        'Uploads are recorded, not performed: the file goes to private storage first and only its key is stored here.',
-      ),
+      h('p', { class: 'sig-label' }, 'Photo'),
+      picker.node,
       form.node,
       error,
       h(
@@ -351,9 +351,15 @@ function photoPanel(workOrderId: string, property: Property): HTMLElement {
           'Attach photo',
           async () => {
             const values = form.values();
+            const file = picker.file();
+            if (!file) {
+              throw new api.ApiError(400, 'bad_request', 'Choose a photo first', []);
+            }
+            const key = await uploadBlob('service_photo', file, file.name);
+
             await api.post<ServicePhoto>(`/work-orders/${workOrderId}/photos`, {
               photo_type: values.photo_type,
-              file_url: values.file_url,
+              file_url: key,
               taken_at: new Date(values.taken_at ?? '').toISOString(),
               latitude: values.latitude ? Number(values.latitude) : null,
               longitude: values.longitude ? Number(values.longitude) : null,

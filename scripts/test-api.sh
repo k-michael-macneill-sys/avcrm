@@ -272,9 +272,77 @@ call 200 GET "/quotes?property_id=$SIGNED_PROPERTY_ID"
 assert "quote is listed against the property" "$(field meta.total)" "1"
 
 echo
+echo "== uploads: asking for somewhere to put a file =="
+# A purpose decides the prefix, the allowed types and the size limit.
+call 400 POST /uploads '{"purpose":"signature","content_type":"application/pdf"}'
+call 400 POST /uploads '{"purpose":"nonsense","content_type":"image/png"}'
+call 201 POST /uploads '{"purpose":"signature","content_type":"image/png","file_name":"sig.png"}'
+UPLOAD_KEY="$(field data.key)"
+UPLOAD_URL="$(field data.upload_url)"
+assert "the key is generated, not supplied" \
+  "$(node -e "process.stdout.write(String(/^signatures\/\d{4}\/\d{2}\/[0-9a-f-]{36}\.png$/.test(process.argv[1])))" "$UPLOAD_KEY")" \
+  "true"
+
+echo
+echo "== uploads: sending the bytes =="
+# A real 1x1 PNG, written here so the test carries no fixtures.
+node -e "
+  require('fs').writeFileSync('/tmp/avcrm-dot.png', Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64'));
+"
+PUT_STATUS="$(curl -sS -o "$BODY" -w '%{http_code}' -X PUT "$BASE_URL$UPLOAD_URL" \
+  -H 'Content-Type: image/png' --data-binary @/tmp/avcrm-dot.png)"
+assert "the bytes are accepted" "$PUT_STATUS" "201"
+assert "and the stored key is the one issued" "$(field data.key)" "$UPLOAD_KEY"
+
+# The target is single use, and the declared type is part of what was signed.
+PUT_AGAIN="$(curl -sS -o "$BODY" -w '%{http_code}' -X PUT "$BASE_URL$UPLOAD_URL" \
+  -H 'Content-Type: image/png' --data-binary @/tmp/avcrm-dot.png)"
+assert "a target cannot be reused" "$PUT_AGAIN" "400"
+
+call 201 POST /uploads '{"purpose":"signature","content_type":"image/png"}'
+MISMATCH_URL="$(field data.upload_url)"
+WRONG_TYPE="$(curl -sS -o "$BODY" -w '%{http_code}' -X PUT "$BASE_URL$MISMATCH_URL" \
+  -H 'Content-Type: application/pdf' --data-binary @/tmp/avcrm-dot.png)"
+assert "the content type cannot be swapped" "$WRONG_TYPE" "400"
+
+# A login token is not an upload token, even though both are signed by us.
+REPLAY="$(curl -sS -o "$BODY" -w '%{http_code}' -X PUT "$BASE_URL/uploads/$TOKEN" \
+  -H 'Content-Type: image/png' --data-binary @/tmp/avcrm-dot.png)"
+assert "a session token is not an upload grant" "$REPLAY" "403"
+
+echo
+echo "== uploads: reading one back =="
+DOWNLOAD="$(curl -sS -o /tmp/avcrm-download.png -w '%{http_code}' \
+  -H "Authorization: Bearer $TOKEN" "$BASE_URL/files/$UPLOAD_KEY")"
+assert "the file comes back" "$DOWNLOAD" "200"
+if cmp -s /tmp/avcrm-dot.png /tmp/avcrm-download.png; then
+  echo "  ok   byte for byte identical"
+  pass=$((pass + 1))
+else
+  echo "  FAIL what came back is not what went up"
+  exit 1
+fi
+
+# Reads need a session, and a key is not a path.
+ANON="$(curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL/files/$UPLOAD_KEY")"
+assert "reading needs a session" "$ANON" "401"
+call 404 GET '/files/signatures/../../../.env'
+call 404 GET '/files/signatures/2026/09/00000000-0000-0000-0000-000000000000.png'
+
+echo
+echo "== uploads: a signature that a contract can actually point at =="
+call 201 POST /uploads '{"purpose":"signature","content_type":"image/png"}'
+SIG_KEY="$(field data.key)"
+SIG_URL="$(field data.upload_url)"
+curl -sS -o /dev/null -X PUT "$BASE_URL$SIG_URL" \
+  -H 'Content-Type: image/png' --data-binary @/tmp/avcrm-dot.png
+
+echo
 echo "== the signature gate =="
 CHECKLIST_OK='[{"item_code":"terms_reviewed","checked":true},{"item_code":"service_window_explained","checked":true},{"item_code":"contact_confirmed","checked":true}]'
-SIGN="\"signature_image_url\":\"private/signatures/smoke-$STAMP.png\",\"terms_version\":\"2026-09-01\""
+SIGN="\"signature_image_url\":\"$SIG_KEY\",\"terms_version\":\"2026-09-01\""
 
 # A draft has not been shown to anyone yet, so it cannot be signed.
 call 409 POST /contracts "{\"quote_id\":\"$QUOTE_ID\",$SIGN,\"checklist\":$CHECKLIST_OK}"
@@ -808,6 +876,8 @@ call 403 GET "/contracts?branch_id=$HALIFAX"
 call 403 GET "/pricing-guide?branch_id=$HALIFAX"
 call 403 GET "/work-orders?branch_id=$HALIFAX"
 call 403 GET "/message-log?branch_id=$HALIFAX"
+# An operator may not read another branch's files.
+call 403 GET "/files/$UPLOAD_KEY"
 call 403 GET "/review-requests?branch_id=$HALIFAX"
 call 403 GET "/invoices?branch_id=$HALIFAX"
 call 403 GET "/payments?branch_id=$HALIFAX"

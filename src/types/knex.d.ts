@@ -16,6 +16,7 @@ import type {
   Quote,
   ReviewRequest,
   ServicePhoto,
+  Upload,
   User,
   WorkOrder,
 } from './models';
@@ -40,6 +41,7 @@ declare module 'knex/types/tables' {
     review_requests: ReviewRequest;
     invoices: Invoice;
     payments: Payment;
+    uploads: Upload;
     audit_log: AuditLogEntry;
   }
 }

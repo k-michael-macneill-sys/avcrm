@@ -4,6 +4,7 @@ import { field, fieldList, fragment, h, link, section, table } from '../dom.js';
 import { errorLine, submitter } from '../form.js';
 import { date, money, statusPill, stamp } from '../format.js';
 import * as router from '../router.js';
+import { fileImage } from '../upload.js';
 import { CONTRACT_STATUSES } from '../../src/types/models.js';
 import type {
   ChecklistRequirement,
@@ -114,6 +115,16 @@ export async function renderContract(root: HTMLElement, params: string[]): Promi
               : 'no coordinates',
           ),
           field('Quote', link(`/quotes/${contract.quote_id}`, 'View the quote')),
+        ),
+        h(
+          'div',
+          { class: 'sig-shown' },
+          h('p', { class: 'sig-label' }, 'Signature'),
+          fileImage(
+            contract.signature_image_url,
+            'The signature captured at the door',
+            'sig-image',
+          ),
         ),
         error,
         isActive

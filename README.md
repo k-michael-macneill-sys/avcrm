@@ -21,6 +21,7 @@ Build order from the spec, and what exists today:
 | 6 | Invoicing and payments | **done** |
 | 7 | Reporting views | **done** |
 | — | Browser client on top of the API | **done** |
+| — | File storage: signature capture, photos, documents | **done** |
 
 Every step landed in the same structure — a migration, a service of plain
 functions, a router — without reshaping what came before it. The known gaps
@@ -50,7 +51,7 @@ Verify:
 
 ```bash
 curl -s localhost:3000/health
-./scripts/test-api.sh   # 268 checks against a running server; safe to re-run
+./scripts/test-api.sh   # 285 checks against a running server; safe to re-run
 ```
 
 While working on the client, `npm run dev:web` recompiles it on save; the API's
@@ -283,6 +284,9 @@ A suspension is only lifted by corporate, never by the automatic refresh.
 | POST | `/invoices/:id/payments` | any | Books money, or records a failed charge |
 | GET | `/payments` | any | `status`, `method`, `invoice_id` |
 | POST | `/payments/:id/refund` | corporate | Flips the payment; the invoice recomputes |
+| POST | `/uploads` | any | Asks for somewhere to put a file |
+| PUT | `/uploads/:token` | the token | Sends the bytes; no session, by design |
+| GET | `/files/*` | any | Reads one back, authorized by what it is |
 | GET | `/reports/branch-summary` | corporate | One row per branch; `from`, `to`, `branch_id` |
 | GET | `/reports/revenue` | corporate | Bucketed by billing month |
 | GET | `/reports/operators` | corporate | Visits done, skipped, and the ratings after |
@@ -613,6 +617,8 @@ web/
   dom.ts         h(), table(), link() — real nodes, never innerHTML
   form.ts        small forms, and turning an ApiError back into text
   format.ts      money, dates, and what a status looks like
+  upload.ts      the two-step upload, and reading files back
+  signature.ts   the canvas the customer signs on
   components.ts  hero figure, stat tiles, page furniture
   views/         one file per screen
 public/
@@ -673,6 +679,102 @@ surfaces them. Both gates from the build are visible:
 - No automated browser tests. The screens were driven and screenshotted by
   hand through headless Chromium during the build, which is a check, not a
   suite.
+
+## Files and signature capture
+
+Uploading is two steps, the way an object store does it: **ask for a target,
+then send the bytes to it.**
+
+```
+POST /uploads          →  { key, upload_url, max_bytes, expires_at }
+PUT  <upload_url>      →  the bytes
+…store the key on the row that needs it (a contract, a photo, a document)
+GET  /files/<key>      →  read it back
+```
+
+The target carries a short-lived signed token, so **the URL is the
+permission** — `PUT` deliberately sits outside `requireAuth`, exactly as it
+would when a browser uploads straight to a bucket. That is the whole reason
+for the two-step shape: swapping the local driver for S3 means handing back
+the bucket's presigned URL from `POST /uploads` and changing nothing else, on
+either side.
+
+### The storage driver
+
+`STORAGE_DRIVER=local` writes under `STORAGE_LOCAL_DIR`. That is a real
+implementation, not a stand-in — it needs no credentials, works offline, and
+is the right answer for a single server. A bucket driver implements the same
+three methods (`put`, `read`, `exists`) in `src/services/storage.ts`.
+
+### What a purpose decides
+
+Every upload names a purpose, and the purpose — not the client — decides the
+key prefix, the allowed content types and the size limit:
+
+| Purpose | Types | Limit |
+| --- | --- | --- |
+| `signature` | PNG | 2 MB |
+| `service_photo` | JPEG, PNG, WebP | 12 MB |
+| `operator_document` | PDF, JPEG, PNG | 10 MB |
+| `contract_pdf`, `invoice_pdf` | PDF | 10 MB |
+
+**Keys are generated, never supplied.** The filename is a uuid, so nothing a
+user typed reaches the filesystem and two uploads cannot collide. Keys are
+still pattern-checked before touching a path, and the local driver re-checks
+that the resolved path is inside its root — the one bug worth catching twice.
+
+An oversized upload is refused on its declared `Content-Length` before a byte
+is read, so the client gets a sentence rather than a reset connection; the
+streaming cap still backstops a client that lies or sends chunked.
+
+### Who may read a file
+
+`uploads` records every issued target — who asked, for what, and whether the
+bytes ever landed. That row is what makes read authorization possible for a
+key nothing references yet: a signature is uploaded *before* the contract that
+will point at it exists.
+
+- Corporate reads anything.
+- The uploader reads their own.
+- An **operator document** is otherwise between that operator and corporate,
+  matching the rule on `/operators/:id/documents`.
+- Everything else is readable by the branch it belongs to.
+
+A key with no stored bytes behind it is a 404, not a 403 — saying otherwise
+would confirm which keys exist.
+
+### The signature pad
+
+`web/signature.ts` is a canvas the customer signs with a finger or a mouse.
+Pointer events, so a stylus, a fingertip and a trackpad are one code path;
+backed at device pixel ratio, so a signature on a phone is not a blurry
+approximation of one; `touch-action: none`, so a finger drag draws instead of
+scrolling the page. It keeps its ink on a white pad in both themes, because
+the image gets printed and emailed where the reader's dark mode does not
+follow it.
+
+Submitting uploads the PNG first and only then posts the contract — a contract
+without a signature is not a contract, so there is no point sending the rest
+if that fails.
+
+### Reading files in the browser
+
+A browser puts no `Authorization` header on an `<img src>` or a plain link, so
+`/files/:key` would 401 for both. Stored files are fetched with the token and
+handed to the page as blob URLs instead. The alternative is a signed read URL
+like the upload target — worth doing when images get numerous, and it trades a
+session check for a URL that works for anyone who copies it.
+
+### Known gaps
+
+- **Nothing checks that a key exists when a row records it.** `POST /contracts`
+  still accepts any string as `signature_image_url`. A `HEAD` against the
+  store belongs with the bucket driver.
+- Orphans are not collected. `uploads` rows that were issued and never stored,
+  or stored and never referenced, accumulate; the table has what a sweeper
+  needs, but there is no sweeper.
+- No virus scanning, and no image re-encoding to strip EXIF. A service photo's
+  geotag is read from what the client sends, not from the file itself.
 
 ## What is mocked
 
@@ -759,9 +861,9 @@ Other conventions worth keeping:
   which arrives with the real transport.
 - The internal feedback route returns JSON. A real deployment would redirect a
   1-3 rating to a feedback form the way a 4-5 redirects to the review page.
-- File uploads are recorded, not performed: operator documents, contract
-  signatures and service photos all store an object key that something else
-  must have already written to a private bucket. No presigned-URL endpoint yet.
+- Files are stored on local disk by default. That is a driver choice rather
+  than a gap, but it means a second server does not see the first one's files
+  — see [Files and signature capture](#files-and-signature-capture).
 - List endpoints paginate with `OFFSET`, which should become keyset pagination
   before the tables get large.
 - Reports run their aggregates live against the operational tables. That is

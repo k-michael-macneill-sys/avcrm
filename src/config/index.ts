@@ -39,6 +39,13 @@ const envSchema = z.object({
   // How many times the queue worker retries a message before giving up.
   MESSAGE_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
 
+  // Object storage. `local` writes to disk and is the default because it
+  // needs no credentials and works offline; `s3` is the seam for a bucket.
+  STORAGE_DRIVER: z.enum(['local']).default('local'),
+  STORAGE_LOCAL_DIR: z.string().default('./storage'),
+  // How long an issued upload target stays usable.
+  UPLOAD_URL_TTL_SECONDS: z.coerce.number().int().min(30).max(3600).default(900),
+
   SEED_PASSWORD: z.string().min(8).default('Password123!'),
 });
 
@@ -77,6 +84,11 @@ export const config = {
     jwtSecret: env.JWT_SECRET,
     jwtExpiresIn: env.JWT_EXPIRES_IN,
     bcryptRounds: env.BCRYPT_ROUNDS,
+  },
+  storage: {
+    driver: env.STORAGE_DRIVER,
+    localDir: path.resolve(__dirname, '..', '..', env.STORAGE_LOCAL_DIR),
+    uploadTtlSeconds: env.UPLOAD_URL_TTL_SECONDS,
   },
   messaging: {
     appBaseUrl: env.APP_BASE_URL.replace(/\/+$/, ''),

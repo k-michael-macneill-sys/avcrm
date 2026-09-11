@@ -4,6 +4,7 @@ import { field, fieldList, fragment, h, link, section, table } from '../dom.js';
 import { buildForm, disclosure, errorLine, submitter } from '../form.js';
 import { date, statusPill, stamp } from '../format.js';
 import * as router from '../router.js';
+import { filePicker, openFile, uploadBlob } from '../upload.js';
 import type { OperatorDocument, PublicUser } from '../../src/types/models.js';
 
 interface ComplianceItem {
@@ -105,7 +106,23 @@ export async function renderOperator(root: HTMLElement, params: string[]): Promi
         table<OperatorDocument>(
           [
             { header: 'Requirement', cell: (row) => row.requirement_code },
-            { header: 'File', cell: (row) => row.file_name },
+            {
+              header: 'File',
+              cell: (row) =>
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    class: 'linkish',
+                    onclick: () => {
+                      void openFile(row.file_url, row.file_name).catch(() => {
+                        error.textContent = 'That file is not in storage';
+                      });
+                    },
+                  },
+                  row.file_name,
+                ),
+            },
             { header: 'Issued', cell: (row) => date(row.issued_on) },
             { header: 'Expires', cell: (row) => date(row.expires_on) },
             { header: 'Status', cell: (row) => statusPill(row.status) },
@@ -153,6 +170,11 @@ function uploadPanel(operatorId: string, compliance: Compliance): HTMLElement {
 
   return disclosure('Record a document', () => {
     const error = errorLine();
+    const picker = filePicker({
+      accept: 'application/pdf,image/jpeg,image/png',
+      capture: true,
+      note: 'PDF or a photo of the document, up to 10 MB',
+    });
     const form = buildForm([
       {
         name: 'requirement_code',
@@ -163,13 +185,6 @@ function uploadPanel(operatorId: string, compliance: Compliance): HTMLElement {
           label: item.label,
         })),
       },
-      {
-        name: 'file_url',
-        label: 'File key',
-        value: `private/operator-docs/${operatorId}/${Date.now()}.pdf`,
-        required: true,
-      },
-      { name: 'file_name', label: 'File name', value: 'document.pdf', required: true },
       { name: 'issued_on', label: 'Issued on', type: 'date' },
     ]);
 
@@ -178,21 +193,29 @@ function uploadPanel(operatorId: string, compliance: Compliance): HTMLElement {
     return h(
       'div',
       { class: 'card' },
+      h('p', { class: 'sig-label' }, 'Document'),
+      picker.node,
       form.node,
       error,
       h(
         'div',
         { class: 'actions' },
         run(
-          'Record it',
+          'Upload it',
           async () => {
             const values = form.values();
+            const file = picker.file();
+            if (!file) {
+              throw new api.ApiError(400, 'bad_request', 'Choose a file first', []);
+            }
+            const key = await uploadBlob('operator_document', file, file.name);
+
             await api.post(`/operators/${operatorId}/documents`, {
               requirement_code: values.requirement_code,
-              file_url: values.file_url,
-              file_name: values.file_name,
-              mime_type: 'application/pdf',
-              file_size: 102_400,
+              file_url: key,
+              file_name: file.name,
+              mime_type: file.type,
+              file_size: file.size,
               issued_on: values.issued_on || null,
             });
           },
