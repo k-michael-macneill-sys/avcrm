@@ -13,12 +13,22 @@ import { h } from './dom.js';
 export interface FieldSpec {
   name: string;
   label: string;
-  type?: 'text' | 'number' | 'date' | 'datetime-local' | 'email' | 'textarea' | 'select';
+  type?:
+    | 'text'
+    | 'number'
+    | 'date'
+    | 'datetime-local'
+    | 'email'
+    | 'password'
+    | 'textarea'
+    | 'select';
   value?: string;
   placeholder?: string;
   required?: boolean;
   step?: string;
   options?: { value: string; label: string }[];
+  /** Shown under the control: where to find this value, what it means. */
+  help?: string;
 }
 
 export interface Form {
@@ -59,7 +69,13 @@ export function buildForm(specs: FieldSpec[]): Form {
     }
 
     controls.set(spec.name, control);
-    return h('div', { class: 'form-row' }, h('label', { for: id }, spec.label), control);
+    return h(
+      'div',
+      { class: 'form-row' },
+      h('label', { for: id }, spec.label),
+      control,
+      spec.help ? h('p', { class: 'form-help' }, spec.help) : null,
+    );
   });
 
   return {

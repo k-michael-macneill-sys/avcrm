@@ -505,6 +505,14 @@ a:focus-visible {
   color: var(--text-muted);
 }
 
+/* Where a value comes from, under the control that needs it. */
+.form-help {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0 0 8px;
+  max-width: 60ch;
+}
+
 .form-error {
   color: var(--critical);
   min-height: 1.5em;

@@ -24,6 +24,7 @@ Build order from the spec, and what exists today:
 | — | File storage: signature capture, photos, documents | **done** |
 | — | Real SMTP mail transport | **done** |
 | — | Card capture and charging through Stripe | **done** |
+| — | SMS provider, connected by an administrator | **done** |
 
 Every step landed in the same structure — a migration, a service of plain
 functions, a router — without reshaping what came before it. The known gaps
@@ -298,6 +299,10 @@ A suspension is only lifted by corporate, never by the automatic refresh.
 | GET | `/reports/branch-summary` | corporate | One row per branch; `from`, `to`, `branch_id` |
 | GET | `/reports/revenue` | corporate | Bucketed by billing month |
 | GET | `/reports/operators` | corporate | Visits done, skipped, and the ratings after |
+| GET | `/settings/sms` | corporate | Current provider; credentials never returned |
+| PUT | `/settings/sms` | corporate | Connects a provider, or switches it off |
+| GET | `/settings/sms/providers` | corporate | The catalogue the screen renders itself from |
+| POST | `/settings/sms/test` | corporate | One real message through the saved credentials |
 | GET | `/audit-log` | corporate | `entity_type`, `entity_id`, `user_id`, `action` |
 
 ### Response shapes
@@ -978,24 +983,130 @@ itself, and that a replayed webhook leaves one payment row.
   the expired ones yet.
 - `message_log.status` still has no `bounced` path from a provider webhook.
 
+## Text messages
+
+Mail has SMTP, so one driver covers every provider. SMS has no such thing —
+every gateway has its own HTTP API — which normally means picking a vendor at
+build time and writing code against them. Since that decision is a business
+one, and gets revisited, it is a setting instead.
+
+**A corporate user connects a provider at `/app/settings`.** Pick one, fill in
+the credentials it asks for, send a test, switch it on. No redeploy, no .env
+edit, and a manager can do it.
+
+### The catalogue
+
+`src/services/smsProviders.ts` describes each provider as data — the fields an
+admin must fill in, how to turn those into one HTTP request, and where the
+message id turns up in the reply:
+
+| Provider | Needs |
+| --- | --- |
+| Twilio | Account SID, auth token, sending number |
+| Telnyx | API key, sending number |
+| MessageBird (Bird) | Access key, originator |
+| Vonage (Nexmo) | API key, API secret, sending number |
+| Anything else (HTTP) | URL, content type, auth header, body template |
+
+The screen renders itself from `GET /settings/sms/providers`, so adding a
+provider to that file adds it to the UI with no change to the client.
+
+**The custom shape is the point of the list, not an afterthought.** A regional
+carrier, a reseller, or an internal relay is configured by giving the endpoint
+and a body template using `{{to}}`, `{{from}}` and `{{body}}`. Substitution
+escapes per content type, so a quote or a newline in a customer's message
+cannot break out of the JSON string it sits in and rewrite the request — the
+suite sends `Quoted "text" and a backslash \` through it and checks what the
+gateway received.
+
+### Credentials
+
+Secret fields are encrypted with AES-256-GCM before they are written
+(`src/utils/secrets.ts`), and:
+
+- never returned by the API — `GET /settings/sms` says *which* secret fields
+  have a value, not what they are;
+- never written to the audit log, though the change itself is audited: this is
+  the switch that decides whether customers get texted and whose account pays
+  for it;
+- write-only in the UI. A blank field means "keep what is stored", so changing
+  the sending number does not mean retyping the token.
+
+Switching provider drops the old credentials rather than carrying them across.
+A Twilio token is not a Telnyx key, and keeping it would leave a secret nobody
+can see and nobody meant to keep.
+
+The encryption key is derived from `JWT_SECRET` by default, so an existing
+install needs no new variable. Set `SECRETS_KEY` to decouple them — then
+rotating `JWT_SECRET` signs everyone out without also making stored
+credentials unreadable. Either way this defends against a leaked database
+dump, not against someone who already has the application's environment; the
+upgrade is a KMS behind the same two functions.
+
+### Sending
+
+Nothing is sent until an administrator switches it on. Until then an SMS is
+still queued, rendered and logged — it just does not leave, exactly as the old
+mock behaved. The difference is that replacing the mock is now a form.
+
+`SMS_REDIRECT_TO` is the same safety valve as `MAIL_REDIRECT_TO`, for the same
+reason: a staging database is a copy of production with real phone numbers in
+it, and a text cannot be unsent.
+
+Failures are classified the way mail's are, because the queue needs the same
+answer. A 4xx is the gateway saying the number is wrong or the credential is
+not accepted, and no amount of retrying changes either — that stops after one
+attempt. A 429, a 5xx, or a connection that never opened is timing rather than
+judgement, and goes back in the queue. A gateway that answers `200` and puts
+the refusal in the body — Vonage does this — is treated as the refusal it is.
+
+A test send is deliberately not a silent success or a 500: a refused test
+comes back as `400` when it is permanent and `502` when it is worth retrying,
+carrying the gateway's own words, because "401: authenticate" is what tells an
+admin the token is wrong.
+
+### Verifying it
+
+```bash
+npm run test:sms
+```
+
+Starts `scripts/sms-fake.js` — a stand-in answering on Twilio's, Telnyx's and
+Vonage's own URL shapes, checking credentials the way they do — and an API
+pointed at it, then does what an administrator would: connect a provider, send
+a test, switch it on, and let the queue drain. It also checks the things worth
+being sure of: that an operator cannot read or change the settings, that the
+token never comes back out of the API or appears in the database or the audit
+log, that a bad number is not retried and an outage is, that switching provider
+drops the old credentials, and that the custom provider can reach a gateway
+nobody wrote code for.
+
+### Known gaps
+
+- **Inbound is not handled.** A STOP reply unsubscribes the customer at the
+  carrier, and this system will not know — it needs a webhook per provider, and
+  the same delivery-receipt path that would give `message_log` a `bounced`
+  status.
+- Numbers are stored as typed. A provider that insists on E.164 will reject
+  anything else, and the error will say so, but nothing normalises them first.
+- One provider for the whole company. Per-branch numbers would be a `branch_id`
+  on the settings row.
+
 ## What is mocked
 
-- **SMS only.** `sendSms` in `src/services/notifications.ts` logs and does
-  nothing else. There is no SMTP equivalent for text messages — every gateway
-  has its own HTTP API — so that one needs a provider chosen and an account
-  opened. The queue, templates, retries and log around it are real; only that
-  function body is not, and `review_request` and `en_route` both have SMS
-  templates waiting for it.
+Nothing is mocked any more. Email goes out over SMTP ([Mail](#mail)), text
+messages go through whichever gateway an administrator connects
+([Text messages](#text-messages)), and cards are charged through Stripe
+([Payments](#payments)).
 
-  Email is no longer mocked: see [Mail](#mail).
+Two of those are off by default, which is not the same as mocked: an install
+with no SMS provider connected and `PAYMENT_GATEWAY=manual` queues, renders and
+logs everything it would have sent, and records payments as a system of record.
+That is a deliberate state — it is what a new install should do before anyone
+has opened an account — and switching it on is configuration rather than code.
 
 Contract and invoice PDFs are a `pdf_url` column that something else has to
 fill in; nothing generates one yet.
-
-Payments are no longer mocked either, though they are opt-in: see
-[Payments](#payments). Left on the default `PAYMENT_GATEWAY=manual`, this is
-still a system of record — `POST /invoices/:id/payments` books what a processor
-or a rep with a cheque says happened, and nothing here talks to a processor.
 
 ## Layout
 
@@ -1064,15 +1175,17 @@ Other conventions worth keeping:
 
 - No refresh tokens or logout; a JWT is valid until it expires (`JWT_EXPIRES_IN`).
 - No rate limiting on `/auth/login`.
-- No automated test suite. `scripts/test-api.sh`, `scripts/test-mail.sh` and
-  `scripts/test-payments.sh` are smoke tests against real servers, not a
-  substitute for one.
+- No automated test suite. `scripts/test-api.sh`, `scripts/test-mail.sh`,
+  `scripts/test-payments.sh` and `scripts/test-sms.sh` are smoke tests against
+  real servers, not a substitute for one.
 - `audit_log` covers contracts, quote pricing and payments. User role changes
   are not logged yet.
 - `message_log.status` never becomes `bounced`. A 5xx *during* the SMTP
   conversation is caught and marked `failed`; an asynchronous bounce that
   arrives minutes later needs a provider webhook or a VERP return path, and
-  neither is wired up.
+  neither is wired up. The same hole on the SMS side means a STOP reply or a
+  delivery receipt never reaches this system — see
+  [Text messages](#text-messages).
 - The internal feedback route returns JSON. A real deployment would redirect a
   1-3 rating to a feedback form the way a 4-5 redirects to the review page.
 - Files are stored on local disk by default. That is a driver choice rather

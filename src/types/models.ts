@@ -478,3 +478,20 @@ export interface CardSetup {
   created_at: Date;
   updated_at: Date;
 }
+
+/**
+ * An integration an administrator configures at runtime — which SMS provider
+ * this company uses, and the credentials for it. Secrets are encrypted into
+ * `secret_ciphertext` and never appear in an API response.
+ */
+export interface IntegrationSetting {
+  id: string;
+  key: string;
+  provider: string;
+  is_enabled: boolean;
+  settings: Record<string, string>;
+  secret_ciphertext: string | null;
+  updated_by_user_id: string | null;
+  created_at: Date;
+  updated_at: Date;
+}

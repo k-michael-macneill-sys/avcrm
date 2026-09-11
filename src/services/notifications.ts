@@ -2,6 +2,11 @@ import { randomUUID } from 'node:crypto';
 import nodemailer, { type Transporter } from 'nodemailer';
 import { config } from '../config';
 import { logger } from '../utils/logger';
+import { deliverSms } from './sms';
+import { SendFailure, type SendResult } from './transport';
+
+// Re-exported: the queue imports "how a message is sent" from one place.
+export { SendFailure, type SendResult };
 
 /**
  * The transport. Everything above it — templates, rendering, the queue,
@@ -13,31 +18,6 @@ import { logger } from '../utils/logger';
  * SendGrid all issue SMTP credentials, so one driver covers any of them and
  * changing provider is a change to .env rather than to code.
  */
-
-export interface SendResult {
-  /** The provider's id for the message, recorded against the log row. */
-  provider_message_id: string;
-}
-
-/**
- * A send that did not work, and whether trying again could help.
- *
- * The distinction matters: a 5xx means the address is wrong or the mailbox is
- * gone, and hammering it three more times wastes the attempt budget and looks
- * like spam to the receiving server. A 4xx is a greylist or a full disk, and
- * is exactly what retries are for.
- */
-export class SendFailure extends Error {
-  readonly permanent: boolean;
-  readonly code: string | undefined;
-
-  constructor(message: string, permanent: boolean, code?: string) {
-    super(message);
-    this.name = 'SendFailure';
-    this.permanent = permanent;
-    this.code = code;
-  }
-}
 
 export interface OutboundEmail {
   to: string;
@@ -170,12 +150,13 @@ export function closeTransport(): Promise<void> {
 }
 
 /**
- * STILL A MOCK. SMS needs an account with a carrier gateway and has no
- * equivalent of SMTP — every provider has its own HTTP API — so this one
- * genuinely does nothing but log. The queue, templates and log around it are
- * real; only this function body is not.
+ * SMS has no SMTP — every gateway has its own HTTP API — so instead of
+ * choosing one here, the provider is configured by an administrator and read
+ * at send time. See src/services/sms.ts.
+ *
+ * Kept in this file as a re-export so the queue has one import for "send a
+ * message", whichever channel it is.
  */
-export async function sendSms(to: string, body: string): Promise<SendResult> {
-  logger.warn({ mock: true, channel: 'sms', to, body }, 'Mock SMS (nothing sent)');
-  return { provider_message_id: `mock-sms-${randomUUID()}` };
+export function sendSms(to: string, body: string): Promise<SendResult> {
+  return deliverSms(to, body);
 }

@@ -18,6 +18,8 @@ export interface Route {
   /** Nav item to mark current. */
   nav?: string;
   corporateOnly?: boolean;
+  /** Why, in this section's own terms, when an operator lands on it. */
+  deniedMessage?: string;
 }
 
 let routes: Route[] = [];
@@ -64,7 +66,8 @@ export async function render(): Promise<void> {
       outlet.appendChild(
         notice(
           'Corporate only',
-          'Roll-up reporting is corporate work. Your own visits are under Dispatch.',
+          route.deniedMessage
+            ?? 'This section is corporate work. Your own visits are under Dispatch.',
         ),
       );
       onNavigate(route.nav);

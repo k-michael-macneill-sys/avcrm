@@ -9,6 +9,7 @@ import { renderLogin } from './views/login.js';
 import { renderOperator, renderOperators } from './views/operators.js';
 import { renderQuote, renderQuotes } from './views/quotes.js';
 import { renderReports } from './views/reports.js';
+import { renderSettings } from './views/settings.js';
 import { renderWorkOrder, renderWorkOrders } from './views/workOrders.js';
 
 /**
@@ -32,6 +33,7 @@ const NAV: NavItem[] = [
   { key: 'invoices', href: '/invoices', label: 'Invoices', corporateOnly: true },
   { key: 'operators', href: '/operators', label: 'Crew' },
   { key: 'reports', href: '/reports', label: 'Reports', corporateOnly: true },
+  { key: 'settings', href: '/settings', label: 'Settings', corporateOnly: true },
 ];
 
 /** Detail patterns come first: /customers/:id must not match /customers. */
@@ -72,7 +74,20 @@ const ROUTES: router.Route[] = [
   { pattern: new RegExp(`^/operators/${UUID}$`), nav: 'operators', view: renderOperator },
   { pattern: /^\/operators$/, nav: 'operators', view: renderOperators },
 
-  { pattern: /^\/reports$/, nav: 'reports', corporateOnly: true, view: renderReports },
+  {
+    pattern: /^\/reports$/,
+    nav: 'reports',
+    corporateOnly: true,
+    deniedMessage: 'Roll-up reporting is corporate work. Your own visits are under Dispatch.',
+    view: renderReports,
+  },
+  {
+    pattern: /^\/settings$/,
+    nav: 'settings',
+    corporateOnly: true,
+    deniedMessage: 'Connecting outside services is corporate work.',
+    view: renderSettings,
+  },
 ];
 
 function mustFind(id: string): HTMLElement {

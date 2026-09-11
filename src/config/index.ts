@@ -31,6 +31,12 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
   JWT_EXPIRES_IN: z.string().default('12h'),
   BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(15).default(10),
+  /**
+   * Encrypts the provider credentials an admin saves in the settings screen.
+   * Optional: without it the key is derived from JWT_SECRET, which works but
+   * ties those credentials to the token secret's lifetime.
+   */
+  SECRETS_KEY: z.string().min(32, 'SECRETS_KEY must be at least 32 characters').optional(),
 
   // Where the customer-facing links in outbound messages point.
   APP_BASE_URL: z.string().url().default('http://localhost:3000'),
@@ -52,6 +58,19 @@ const envSchema = z.object({
    * that stops it mailing them.
    */
   MAIL_REDIRECT_TO: z.string().trim().min(3).optional(),
+
+  /**
+   * The same safety valve as MAIL_REDIRECT_TO, for the same reason: a staging
+   * database is a copy of production with real phone numbers in it, and an
+   * SMS to a customer cannot be unsent.
+   */
+  SMS_REDIRECT_TO: z.string().trim().min(3).optional(),
+  /**
+   * Sends every provider's requests to this origin instead of the real one.
+   * Exists only so the driver can be verified against a stand-in; leave it
+   * unset anywhere a real message matters.
+   */
+  SMS_API_BASE: z.string().trim().url().optional(),
 
   SMTP_HOST: z.string().trim().min(1).optional(),
   SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
@@ -158,6 +177,7 @@ export const config = {
     jwtExpiresIn: env.JWT_EXPIRES_IN,
     bcryptRounds: env.BCRYPT_ROUNDS,
   },
+  secretsKey: env.SECRETS_KEY ?? null,
   storage: {
     driver: env.STORAGE_DRIVER,
     localDir: path.resolve(__dirname, '..', '..', env.STORAGE_LOCAL_DIR),
@@ -186,6 +206,10 @@ export const config = {
       user: env.SMTP_USER ?? null,
       password: env.SMTP_PASSWORD ?? null,
     },
+  },
+  sms: {
+    redirectTo: env.SMS_REDIRECT_TO ?? null,
+    apiBase: env.SMS_API_BASE ?? null,
   },
   messaging: {
     appBaseUrl: env.APP_BASE_URL.replace(/\/+$/, ''),

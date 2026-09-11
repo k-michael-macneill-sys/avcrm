@@ -133,6 +133,11 @@ export async function post<T>(path: string, body?: unknown): Promise<T> {
   return payload.data;
 }
 
+export async function put<T>(path: string, body: unknown): Promise<T> {
+  const payload = await request<{ data: T }>('PUT', path, body);
+  return payload.data;
+}
+
 export async function patch<T>(path: string, body: unknown): Promise<T> {
   const payload = await request<{ data: T }>('PATCH', path, body);
   return payload.data;

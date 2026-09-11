@@ -21,6 +21,9 @@ export async function seed(knex: Knex): Promise<void> {
   // audit_log is append-only, and its trigger blocks DELETE. TRUNCATE does not
   // fire row triggers, which is exactly what a dev reset needs.
   await knex.raw('truncate table audit_log');
+  // Reset to a fresh install: no outside service connected, and no stored
+  // credential left over from whatever the last person was testing.
+  await knex('integration_settings').del();
   await knex('payments').del();
   await knex('invoices').del();
   await knex('review_requests').del();

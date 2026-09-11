@@ -25,7 +25,8 @@
     "build:web": "tsc -p tsconfig.web.json",
     "dev:web": "tsc -p tsconfig.web.json --watch",
     "test:mail": "bash scripts/test-mail.sh",
-    "test:payments": "bash scripts/test-payments.sh"
+    "test:payments": "bash scripts/test-payments.sh",
+    "test:sms": "bash scripts/test-sms.sh"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",

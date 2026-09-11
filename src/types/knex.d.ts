@@ -7,6 +7,7 @@ import type {
   ContractChecklistItem,
   Customer,
   DocumentRequirement,
+  IntegrationSetting,
   Invoice,
   MessageLogEntry,
   MessageTemplate,
@@ -45,5 +46,6 @@ declare module 'knex/types/tables' {
     card_setups: CardSetup;
     uploads: Upload;
     audit_log: AuditLogEntry;
+    integration_settings: IntegrationSetting;
   }
 }
