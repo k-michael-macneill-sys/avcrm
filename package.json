@@ -24,7 +24,8 @@
     "build:api": "tsc",
     "build:web": "tsc -p tsconfig.web.json",
     "dev:web": "tsc -p tsconfig.web.json --watch",
-    "test:mail": "bash scripts/test-mail.sh"
+    "test:mail": "bash scripts/test-mail.sh",
+    "test:payments": "bash scripts/test-payments.sh"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",
@@ -35,6 +36,7 @@
     "nodemailer": "^10.0.3",
     "pg": "^8.12.0",
     "pino": "^9.3.2",
+    "stripe": "^22.6.2",
     "zod": "^3.23.8"
   },
   "devDependencies": {

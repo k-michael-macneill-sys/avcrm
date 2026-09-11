@@ -92,6 +92,7 @@ export const TEMPLATE_CODES = [
   'operator_suspended',
   'invoice_sent',
   'invoice_overdue',
+  'card_setup_request',
   // Internal copies. A branch manager reading "Hi Harold, your driveway is
   // clear" is not a notification, so the office wording is its own template
   // rather than the customer's text sent to a second address.
@@ -129,6 +130,14 @@ export const UPLOAD_PURPOSES = [
   'invoice_pdf',
 ] as const;
 export type UploadPurpose = (typeof UPLOAD_PURPOSES)[number];
+
+export const CARD_SETUP_STATUSES = [
+  'sent',
+  'completed',
+  'expired',
+  'cancelled',
+] as const;
+export type CardSetupStatus = (typeof CARD_SETUP_STATUSES)[number];
 
 export const UPLOAD_STATUSES = ['pending', 'stored'] as const;
 export type UploadStatus = (typeof UPLOAD_STATUSES)[number];
@@ -214,6 +223,8 @@ export interface Customer {
   notes: string | null;
   status: CustomerStatus;
   created_by_user_id: string | null;
+  /** Where the processor knows this customer, once they have been asked. */
+  stripe_customer_id: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -447,6 +458,23 @@ export interface Upload {
   uploaded_by_user_id: string | null;
   branch_id: string | null;
   stored_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface CardSetup {
+  id: string;
+  customer_id: string;
+  contract_id: string | null;
+  branch_id: string;
+  provider_session_id: string;
+  url: string;
+  status: CardSetupStatus;
+  payment_method_last4: string | null;
+  payment_method_brand: string | null;
+  requested_by_user_id: string | null;
+  expires_at: Date;
+  completed_at: Date | null;
   created_at: Date;
   updated_at: Date;
 }

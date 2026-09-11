@@ -1,6 +1,7 @@
 import type {
   AuditLogEntry,
   Branch,
+  CardSetup,
   ChecklistRequirement,
   Contract,
   ContractChecklistItem,
@@ -41,6 +42,7 @@ declare module 'knex/types/tables' {
     review_requests: ReviewRequest;
     invoices: Invoice;
     payments: Payment;
+    card_setups: CardSetup;
     uploads: Upload;
     audit_log: AuditLogEntry;
   }

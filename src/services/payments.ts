@@ -8,6 +8,7 @@ import { offsetOf, paginated, type Paginated, type Pagination } from '../utils/p
 import { isPgError, PG_UNIQUE_VIOLATION } from '../utils/pg';
 import { applyBranchScope } from '../utils/scope';
 import { recordAudit, type AuditActor } from './audit';
+import { fromMinorUnits, gateway, toMinorUnits } from './gateway';
 import {
   getInvoice,
   lock as lockInvoice,
@@ -286,4 +287,144 @@ async function notifyPaymentFailed(
   } else {
     logger.warn({ invoice_id: invoiceId }, 'Payment failed with no branch manager to tell');
   }
+}
+
+interface ChargeableRow {
+  invoice_id: string;
+  invoice_status: string;
+  amount_due: string;
+  amount_paid: string;
+  branch_id: string;
+  address_line1: string;
+  payment_method_token: string | null;
+  stripe_customer_id: string | null;
+  customer_name: string;
+}
+
+/**
+ * Charges the card the customer saved, with nobody present.
+ *
+ * This is the whole point of capturing a reusable payment method: the monthly
+ * invoice is taken automatically. A decline is not an error here — it comes
+ * back as a recorded failed payment, which is what fires the notice to the
+ * customer and the flag to the branch manager.
+ */
+export async function chargeInvoice(
+  invoiceId: string,
+  scope: BranchScope,
+  actor: AuditActor,
+  db: Knex = defaultDb,
+): Promise<InvoiceWithPayments> {
+  if (!gateway.canCharge) {
+    throw badRequest(
+      'No payment gateway is configured, so nothing can be charged automatically',
+    );
+  }
+
+  const row = (await applyBranchScope(
+    db('invoices')
+      .join('contracts', 'contracts.id', 'invoices.contract_id')
+      .join('customers', 'customers.id', 'invoices.customer_id')
+      .join('properties', 'properties.id', 'contracts.property_id'),
+    'invoices.branch_id',
+    scope,
+  )
+    .andWhere('invoices.id', invoiceId)
+    .first([
+      'invoices.id as invoice_id',
+      'invoices.status as invoice_status',
+      'invoices.amount_due',
+      'invoices.amount_paid',
+      'invoices.branch_id',
+      'properties.address_line1',
+      'contracts.payment_method_token',
+      'customers.stripe_customer_id',
+      db.raw("customers.first_name || ' ' || customers.last_name as customer_name"),
+    ])) as ChargeableRow | undefined;
+
+  if (!row) {
+    throw notFound('Invoice not found');
+  }
+  if (!PAYABLE_STATUSES.includes(row.invoice_status)) {
+    throw conflict(
+      row.invoice_status === 'draft'
+        ? 'Send this invoice before charging it'
+        : `This invoice is ${row.invoice_status}, so it cannot be charged`,
+    );
+  }
+  if (!row.payment_method_token || !row.stripe_customer_id) {
+    throw badRequest('There is no card on file for this contract');
+  }
+
+  const outstanding = Number(row.amount_due) - Number(row.amount_paid);
+  if (outstanding <= 0) {
+    throw conflict('This invoice is already settled');
+  }
+
+  const amountMinor = toMinorUnits(outstanding);
+  const result = await gateway.charge({
+    stripe_customer_id: row.stripe_customer_id,
+    payment_method: row.payment_method_token,
+    amount_minor: amountMinor,
+    description: `Snow clearing — ${row.address_line1}`,
+    // Keyed on the invoice and what it owed: retrying the same charge is a
+    // no-op at the processor, while a genuinely different balance is a
+    // genuinely different charge.
+    idempotency_key: `invoice:${invoiceId}:${amountMinor}`,
+    metadata: { avcrm_invoice_id: invoiceId, avcrm_branch_id: row.branch_id },
+  });
+
+  return recordPayment(
+    invoiceId,
+    scope,
+    {
+      amount: Number(fromMinorUnits(amountMinor)),
+      method: 'card_on_file',
+      provider_transaction_id: result.transaction_id,
+      status: result.status,
+      failure_reason: result.failure_reason,
+    },
+    actor,
+    db,
+  );
+}
+
+/**
+ * Brings a payment into line with what the processor says asynchronously.
+ * Idempotent by design: it is keyed on the processor's own transaction id and
+ * does nothing when the state already matches, so a replayed webhook is
+ * harmless.
+ */
+export async function reconcilePayment(
+  transactionId: string,
+  status: Extract<PaymentStatus, 'succeeded' | 'failed' | 'refunded'>,
+  failureReason: string | null,
+  db: Knex = defaultDb,
+): Promise<void> {
+  const payment = await db('payments')
+    .where({ provider_transaction_id: transactionId })
+    .first();
+
+  if (!payment) {
+    logger.warn({ transactionId, status }, 'Webhook for a payment we never recorded');
+    return;
+  }
+  if (payment.status === status) return;
+
+  await db.transaction(async (trx) => {
+    await trx('payments')
+      .where({ id: payment.id })
+      .update({
+        status,
+        failure_reason: status === 'failed' ? (failureReason ?? 'Declined') : null,
+        processed_at: payment.processed_at ?? new Date(),
+      });
+
+    await recomputeInvoiceTotals(payment.invoice_id, trx);
+  });
+
+  logger.info(
+    { payment_id: payment.id, from: payment.status, to: status },
+    'Payment reconciled from a webhook',
+  );
 }

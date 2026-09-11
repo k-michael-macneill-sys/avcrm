@@ -4,6 +4,7 @@ import { config } from './config';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { requestLogger } from './middleware/requestLogger';
 import { apiRouter } from './routes';
+import { webhooksRouter } from './routes/webhooks';
 
 /**
  * Builds the Express app. Separated from server.ts so tests can import the app
@@ -17,6 +18,14 @@ export function createApp(): Express {
   // real client. Left off by default: trusting a header nobody set is worse
   // than recording the proxy.
   app.set('trust proxy', config.trustProxy);
+  /*
+   * Before the JSON parser, deliberately. A webhook signature is computed
+   * over the exact bytes that were sent, so the body has to reach the handler
+   * as a Buffer — parsing and re-serialising it breaks the check that makes
+   * an unauthenticated request from the internet trustworthy.
+   */
+  app.use('/webhooks', webhooksRouter);
+
   app.use(express.json({ limit: '1mb' }));
   app.use(requestLogger);
 
@@ -40,6 +49,12 @@ export function createApp(): Express {
   // Client routing: anything under /app that is not a file is a screen.
   app.get(/^\/app(?:\/.*)?$/, (_req, res) => {
     res.sendFile(path.join(publicDir, 'index.html'));
+  });
+
+  // Where the processor sends the customer after they have entered a card.
+  // Public: they have no account here and never will.
+  app.get('/card-complete', (_req, res) => {
+    res.sendFile(path.join(publicDir, 'card-complete.html'));
   });
 
   app.get('/', (_req, res) => res.redirect('/app'));

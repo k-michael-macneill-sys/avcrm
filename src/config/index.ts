@@ -59,6 +59,21 @@ const envSchema = z.object({
   SMTP_USER: z.string().optional(),
   SMTP_PASSWORD: z.string().optional(),
 
+  // Taking money. `manual` records what a processor or a rep with a cheque
+  // says happened, which is what an install without Stripe credentials can
+  // honestly do. `stripe` actually charges.
+  PAYMENT_GATEWAY: z.enum(['manual', 'stripe']).default('manual'),
+  PAYMENT_CURRENCY: z.string().trim().length(3).toLowerCase().default('cad'),
+  STRIPE_SECRET_KEY: z.string().trim().min(1).optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().trim().min(1).optional(),
+  /**
+   * Points the SDK somewhere other than api.stripe.com — at stripe-mock, or
+   * at the stand-in scripts/stripe-fake.js runs. Leave unset for real Stripe.
+   */
+  STRIPE_API_HOST: z.string().trim().min(1).optional(),
+  STRIPE_API_PORT: z.coerce.number().int().min(1).max(65535).optional(),
+  STRIPE_API_PROTOCOL: z.enum(['http', 'https']).default('https'),
+
   // Object storage. `local` writes to disk and is the default because it
   // needs no credentials and works offline; `s3` is the seam for a bucket.
   STORAGE_DRIVER: z.enum(['local']).default('local'),
@@ -90,6 +105,20 @@ const checkedSchema = envSchema.superRefine((env, ctx) => {
       path: ['MAIL_FROM'],
       message: 'is required when MAIL_DRIVER=smtp',
     });
+  }
+}).superRefine((env, ctx) => {
+  if (env.PAYMENT_GATEWAY !== 'stripe') return;
+
+  // Without the webhook secret we would take money and never hear how it
+  // went, which is worse than not taking it.
+  for (const key of ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'] as const) {
+    if (!env[key]) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [key],
+        message: 'is required when PAYMENT_GATEWAY=stripe',
+      });
+    }
   }
 });
 
@@ -133,6 +162,17 @@ export const config = {
     driver: env.STORAGE_DRIVER,
     localDir: path.resolve(__dirname, '..', '..', env.STORAGE_LOCAL_DIR),
     uploadTtlSeconds: env.UPLOAD_URL_TTL_SECONDS,
+  },
+  payments: {
+    gateway: env.PAYMENT_GATEWAY,
+    currency: env.PAYMENT_CURRENCY,
+    stripe: {
+      secretKey: env.STRIPE_SECRET_KEY ?? '',
+      webhookSecret: env.STRIPE_WEBHOOK_SECRET ?? '',
+      host: env.STRIPE_API_HOST ?? null,
+      port: env.STRIPE_API_PORT ?? null,
+      protocol: env.STRIPE_API_PROTOCOL,
+    },
   },
   mail: {
     driver: env.MAIL_DRIVER,

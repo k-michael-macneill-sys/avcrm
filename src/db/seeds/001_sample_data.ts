@@ -976,6 +976,27 @@ export async function seed(knex: Knex): Promise<void> {
         'Service continues — please settle up when you can.\n\n— {{branch_name}}',
     },
     {
+      // The link the customer taps to put a card on file. Nobody reads a card
+      // number or a CVV out loud on a doorstep.
+      code: 'card_setup_request',
+      channel: 'email',
+      branch_id: null,
+      subject: 'Add a card for {{address_line1}}',
+      body:
+        'Hi {{customer_first_name}},\n\nTo set up billing for ' +
+        '{{address_line1}}, add your card here:\n\n{{card_url}}\n\n' +
+        'The page belongs to our payment provider — your card details never ' +
+        'reach us.\n\n— {{branch_name}}',
+    },
+    {
+      code: 'card_setup_request',
+      channel: 'sms',
+      branch_id: null,
+      subject: null,
+      body:
+        '{{branch_name}}: add your card for {{address_line1}} here — {{card_url}}',
+    },
+    {
       code: 'payment_failed_internal',
       channel: 'email',
       branch_id: null,

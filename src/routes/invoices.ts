@@ -14,7 +14,7 @@ import {
   sendInvoice,
   voidInvoice,
 } from '../services/invoices';
-import { recordPayment } from '../services/payments';
+import { chargeInvoice, recordPayment } from '../services/payments';
 import { INVOICE_STATUSES, PAYMENT_METHODS } from '../types/models';
 import { asyncHandler } from '../utils/async';
 import { paginationSchema } from '../utils/pagination';
@@ -153,6 +153,22 @@ invoicesRouter.post(
   asyncHandler(async (req, res) => {
     const { id } = parse(idParamSchema, req.params);
     res.json({ data: await voidInvoice(id, resolveBranchScope(req, branchOf(req))) });
+  }),
+);
+
+/**
+ * Charges the card the customer saved. A decline is not an error here — it
+ * comes back as a recorded failed payment, which is what tells the customer
+ * and flags the branch manager.
+ */
+invoicesRouter.post(
+  '/:id/charge',
+  requireCorporate,
+  asyncHandler(async (req, res) => {
+    const { id } = parse(idParamSchema, req.params);
+    const scope = resolveBranchScope(req, branchOf(req));
+
+    res.json({ data: await chargeInvoice(id, scope, resolveActor(req)) });
   }),
 );
 

@@ -23,6 +23,7 @@ Build order from the spec, and what exists today:
 | — | Browser client on top of the API | **done** |
 | — | File storage: signature capture, photos, documents | **done** |
 | — | Real SMTP mail transport | **done** |
+| — | Card capture and charging through Stripe | **done** |
 
 Every step landed in the same structure — a migration, a service of plain
 functions, a router — without reshaping what came before it. The known gaps
@@ -286,6 +287,11 @@ A suspension is only lifted by corporate, never by the automatic refresh.
 | POST | `/invoices/:id/payments` | any | Books money, or records a failed charge |
 | GET | `/payments` | any | `status`, `method`, `invoice_id` |
 | POST | `/payments/:id/refund` | corporate | Flips the payment; the invoice recomputes |
+| POST | `/invoices/:id/charge` | corporate | Charges the card on the contract, nobody present |
+| GET | `/card-setups` | any | `contract_id`, `customer_id`, `status` |
+| POST | `/card-setups` | any | Asks the customer for a card; returns the link |
+| POST | `/card-setups/:id/refresh` | any | Asks the processor whether they finished yet |
+| POST | `/webhooks/stripe` | **public** | Signature-verified; refuses anything unsigned |
 | POST | `/uploads` | any | Asks for somewhere to put a file |
 | PUT | `/uploads/:token` | the token | Sends the bytes; no session, by design |
 | GET | `/files/*` | any | Reads one back, authorized by what it is |
@@ -364,6 +370,9 @@ audit trail and do not block next season.
 - never returned by the API (`PUBLIC_CONTRACT_COLUMNS`, the same idea as
   `password_hash` and `PublicUser`);
 - never written to the audit log, which keeps `last4` and `brand` only.
+
+The token gets there without anyone reading a card number aloud — see
+[No CVV at the door](#no-cvv-at-the-door).
 
 `signed_ip` is taken from the connection, never the request body — that is what
 makes it evidence. Behind a load balancer, set `TRUST_PROXY` or every contract
@@ -842,6 +851,133 @@ rejection not being retried, the redirect diverting, and the `log` driver
 sending nothing. A transport that has never talked to an SMTP server is a
 transport nobody has tested.
 
+## Payments
+
+Card handling is a port with two drivers, chosen by `PAYMENT_GATEWAY`:
+
+- **`manual`** (the default) is the system as it was: `POST /invoices/:id/payments`
+  records what a processor, a cheque or an e-transfer says happened. Nothing
+  here talks to anyone. Asking it to charge a card returns `NOT_CONFIGURED`
+  rather than pretending.
+- **`stripe`** actually moves money.
+
+```
+PAYMENT_GATEWAY=stripe
+PAYMENT_CURRENCY=cad
+STRIPE_SECRET_KEY=sk_live_…
+STRIPE_WEBHOOK_SECRET=whsec_…
+```
+
+Both keys are required when the gateway is `stripe` — config refuses to start
+without them rather than failing at the first charge. `STRIPE_API_HOST`,
+`STRIPE_API_PORT` and `STRIPE_API_PROTOCOL` exist only to point the SDK at the
+stand-in used by the test suite.
+
+### No CVV at the door
+
+The rep never touches a card. They press **Ask the customer for a card** on the
+contract screen; the customer gets a link, opens the processor's own hosted
+page, and types the card in themselves. So:
+
+- no card number and no CVV is ever read out on a doorstep;
+- no card data reaches this server, this client, or the rep's phone;
+- what comes back is a reusable payment method, which is what a seasonal
+  contract needs — next month's invoice charges it with nobody present.
+
+At the door the fastest path is usually to hand the customer the phone, so
+`POST /card-setups` returns the link as well as queueing it: the response has
+`url` alongside the queued email or text.
+
+```
+POST /card-setups          → session at the processor, link queued, status `sent`
+   customer types the card on the processor's page
+webhook (or POST /card-setups/:id/refresh)
+                           → token on the contract, last4 + brand stored,
+                             the `card_on_file` checklist box ticks itself
+```
+
+The refresh endpoint exists for the case the webhook has not landed yet and a
+rep is standing on the step waiting. It is the same code path as the webhook
+and is idempotent, so both firing changes nothing.
+
+`card_setups` stores the session id, the link and the status — never a card.
+Completing one writes `payment_method_token`, `payment_method_last4` and
+`payment_method_brand` onto the contract and ticks `card_on_file` **in one
+transaction**, because the contract service treats a token on file and that
+box as a single fact and will not let them disagree.
+
+**The later upgrade is tap-to-pay.** Stripe Terminal turns the rep's phone into
+a contactless reader, so the customer taps their own card or watch and there is
+still no number to read out. It needs a native iOS/Android app — the reader SDK
+cannot run in a browser — so it is a second client against this same API, not a
+change to it. The hosted link works today on any phone.
+
+### Charging
+
+`POST /invoices/:id/charge` charges the card on the contract off-session. The
+billing job does the same thing unattended for every sent invoice with a card.
+
+Every charge carries an idempotency key of `invoice:<id>:<amount in cents>`, so
+a retried request, a timed-out response or a re-run of the job books one charge
+and not two. Money is converted to minor units once, from the string the
+database holds — it is never a float.
+
+A decline is an answer, not an error: the charge comes back `failed` with the
+processor's own reason, which is stored on the payment row and goes out in the
+two notices the spec asks for (the customer hears about a declined card, the
+branch manager hears about any failure). The invoice stays owing.
+
+Refunds go through the same port, and the invoice recomputes its `amount_paid`
+from the payment rows as it always has.
+
+### Webhooks
+
+`POST /webhooks/stripe` is public, because the processor has no account here.
+What makes it trustworthy is the signature, so the route is mounted **before**
+`express.json` and reads a raw `Buffer`: a parsed and re-serialised body is not
+the bytes that were signed, and the check would fail on honest traffic while
+still passing nothing useful. An unsigned or forged request is a 400.
+
+It handles four events:
+
+| Event | What it does |
+| --- | --- |
+| `checkout.session.completed` | Finishes the card capture |
+| `payment_intent.succeeded` | Reconciles a charge we already booked |
+| `payment_intent.payment_failed` | Marks the payment failed with the reason |
+| `charge.refunded` | Flips the payment to `refunded` |
+
+Stripe redelivers, so every handler is keyed on the provider's own id and doing
+it twice changes nothing.
+
+### Verifying it
+
+```bash
+npm run test:payments
+```
+
+Starts `scripts/stripe-fake.js` — a stand-in that speaks Stripe's own request
+and response shapes, including the 402 `card_error` a real decline produces —
+and an API pointed at it, then drives the whole path over HTTP: ask for a card,
+complete the capture, charge the saved card, take a decline, refund by webhook,
+and prove an unsigned or forged webhook is refused. The real SDK builds, signs
+and parses every request; only the far end is fake.
+
+The suite asserts against the database, not just the responses: that the
+customer exists at the processor, that the link was queued, that the stored
+token is a `pm_…` and never a card number, that the checklist box ticked
+itself, and that a replayed webhook leaves one payment row.
+
+### Known gaps
+
+- **The rep cannot read a card out even if they want to.** There is no Elements
+  form and no manual-entry path, which is the point, but it means a customer
+  with no phone and no email cannot be set up at the door — that one waits for
+  Terminal.
+- A setup that is never completed stays `sent` until it expires; nothing sweeps
+  the expired ones yet.
+- `message_log.status` still has no `bounced` path from a provider webhook.
+
 ## What is mocked
 
 - **SMS only.** `sendSms` in `src/services/notifications.ts` logs and does
@@ -854,9 +990,12 @@ transport nobody has tested.
   Email is no longer mocked: see [Mail](#mail).
 
 Contract and invoice PDFs are a `pdf_url` column that something else has to
-fill in; nothing generates one yet, and no payment processor is wired up —
-`POST /invoices/:id/payments` records what a processor (or a rep with a cheque)
-says happened.
+fill in; nothing generates one yet.
+
+Payments are no longer mocked either, though they are opt-in: see
+[Payments](#payments). Left on the default `PAYMENT_GATEWAY=manual`, this is
+still a system of record — `POST /invoices/:id/payments` books what a processor
+or a rep with a cheque says happened, and nothing here talks to a processor.
 
 ## Layout
 
@@ -925,7 +1064,9 @@ Other conventions worth keeping:
 
 - No refresh tokens or logout; a JWT is valid until it expires (`JWT_EXPIRES_IN`).
 - No rate limiting on `/auth/login`.
-- No automated test suite. `scripts/test-api.sh` is a smoke test, not a substitute.
+- No automated test suite. `scripts/test-api.sh`, `scripts/test-mail.sh` and
+  `scripts/test-payments.sh` are smoke tests against real servers, not a
+  substitute for one.
 - `audit_log` covers contracts, quote pricing and payments. User role changes
   are not logged yet.
 - `message_log.status` never becomes `bounced`. A 5xx *during* the SMTP
@@ -944,3 +1085,6 @@ Other conventions worth keeping:
   materialise them, or read from a replica, before it becomes a problem.
 - There is no cost data anywhere, so `/reports/branch-summary` is revenue only.
   A real P&L needs operator pay, materials and vehicle costs first.
+- Taking a card at the door needs the customer to have a phone or an email.
+  Tap-to-pay would close that, and needs a native app — see
+  [Payments](#payments).

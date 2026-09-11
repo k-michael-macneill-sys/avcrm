@@ -1,11 +1,13 @@
 import type { Knex } from 'knex';
 import { closeConnection, db as defaultDb } from '../db/client';
+import { gateway } from '../services/gateway';
 import {
   generateInvoicesForContract,
   markOverdue,
   sendInvoice,
   today,
 } from '../services/invoices';
+import { chargeInvoice } from '../services/payments';
 import { logger } from '../utils/logger';
 
 /**
@@ -14,7 +16,9 @@ import { logger } from '../utils/logger';
  *   1. Raise and send any invoice a live contract owes by today. Monthly
  *      contracts get one per period as the period starts; seasonal ones were
  *      already billed at signature.
- *   2. Mark anything sent, past its date and still short as overdue, which
+ *   2. Charge every outstanding invoice that has a card on file, which is
+ *      what capturing a reusable payment method was for.
+ *   3. Mark anything still sent, past its date and short as overdue, which
  *      queues the reminder.
  *
  *   npm run job:billing
@@ -27,6 +31,10 @@ export interface BillingSummary {
   contracts_considered: number;
   invoices_raised: number;
   invoices_sent: number;
+  /** Charged against a saved card. */
+  charged: number;
+  /** The card said no. The customer and the branch manager have been told. */
+  declined: number;
   marked_overdue: number;
 }
 
@@ -39,6 +47,8 @@ export async function runBilling(
     contracts_considered: 0,
     invoices_raised: 0,
     invoices_sent: 0,
+    charged: 0,
+    declined: 0,
     marked_overdue: 0,
   };
 
@@ -61,6 +71,36 @@ export async function runBilling(
       // request from a branch.
       await sendInvoice(invoice.id, { kind: 'all' }, db);
       summary.invoices_sent += 1;
+    }
+  }
+
+  // Take the money before deciding what is late: an invoice the card pays
+  // today should never be called overdue in the same run.
+  if (gateway.canCharge) {
+    const chargeable = (await db('invoices')
+      .join('contracts', 'contracts.id', 'invoices.contract_id')
+      .whereIn('invoices.status', ['sent', 'overdue'])
+      .andWhereRaw('invoices.amount_paid < invoices.amount_due')
+      .whereNotNull('contracts.payment_method_token')
+      .pluck('invoices.id')) as string[];
+
+    for (const invoiceId of chargeable) {
+      try {
+        const invoice = await chargeInvoice(
+          invoiceId,
+          { kind: 'all' },
+          // The company charging its own customers on a schedule: no person
+          // to attribute it to, which the audit log records as such.
+          { user_id: null, ip_address: null },
+          db,
+        );
+        if (invoice.status === 'paid') summary.charged += 1;
+        else summary.declined += 1;
+      } catch (err) {
+        // One bad card must not stop the rest of the run.
+        summary.declined += 1;
+        logger.error({ err, invoice_id: invoiceId }, 'Could not charge the card on file');
+      }
     }
   }
 
