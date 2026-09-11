@@ -1,5 +1,6 @@
 import { closeConnection } from '../db/client';
 import { sendQueued, type QueueSummary } from '../services/messages';
+import { closeTransport } from '../services/notifications';
 import { logger } from '../utils/logger';
 
 /**
@@ -13,7 +14,13 @@ import { logger } from '../utils/logger';
  *   npm run job:message-queue
  */
 export async function runMessageQueue(): Promise<QueueSummary> {
-  const total: QueueSummary = { claimed: 0, sent: 0, failed: 0, retrying: 0 };
+  const total: QueueSummary = {
+    claimed: 0,
+    sent: 0,
+    failed: 0,
+    retrying: 0,
+    rejected: 0,
+  };
 
   // Keep going while a pass still finds work, so one run empties a backlog
   // rather than trickling a batch per minute.
@@ -23,6 +30,7 @@ export async function runMessageQueue(): Promise<QueueSummary> {
     total.sent += pass.sent;
     total.failed += pass.failed;
     total.retrying += pass.retrying;
+    total.rejected += pass.rejected;
 
     if (pass.claimed === 0) break;
   }
@@ -35,12 +43,15 @@ export async function runMessageQueue(): Promise<QueueSummary> {
 if (require.main === module) {
   runMessageQueue()
     .then(async (summary) => {
+      // Let the pooled SMTP connection go, or the process hangs on it.
+      await closeTransport();
       await closeConnection();
       logger.info(summary, 'Done');
       process.exit(0);
     })
     .catch(async (err) => {
       logger.error({ err }, 'Message queue run failed');
+      await closeTransport();
       await closeConnection();
       process.exit(1);
     });

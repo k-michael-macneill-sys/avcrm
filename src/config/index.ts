@@ -39,6 +39,26 @@ const envSchema = z.object({
   // How many times the queue worker retries a message before giving up.
   MESSAGE_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
 
+  // Outbound mail. `log` writes to the log and is the default so a dev box
+  // and the test suite never need a mail server; `smtp` is a real transport,
+  // and every provider worth using (Postmark, SES, Mailgun, SendGrid) speaks
+  // it, so one driver covers all of them.
+  MAIL_DRIVER: z.enum(['log', 'smtp']).default('log'),
+  MAIL_FROM: z.string().trim().min(3).optional(),
+  MAIL_REPLY_TO: z.string().trim().min(3).optional(),
+  /**
+   * Sends every message here instead of to the customer. A staging database
+   * is a copy of production, real addresses and all, so this is the switch
+   * that stops it mailing them.
+   */
+  MAIL_REDIRECT_TO: z.string().trim().min(3).optional(),
+
+  SMTP_HOST: z.string().trim().min(1).optional(),
+  SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
+  SMTP_SECURE: booleanish.default('false'),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASSWORD: z.string().optional(),
+
   // Object storage. `local` writes to disk and is the default because it
   // needs no credentials and works offline; `s3` is the seam for a bucket.
   STORAGE_DRIVER: z.enum(['local']).default('local'),
@@ -49,7 +69,31 @@ const envSchema = z.object({
   SEED_PASSWORD: z.string().min(8).default('Password123!'),
 });
 
-const parsed = envSchema.safeParse(process.env);
+/**
+ * A real transport needs somewhere to send from and somewhere to send
+ * through. Failing at startup beats discovering it when the first invoice
+ * goes out.
+ */
+const checkedSchema = envSchema.superRefine((env, ctx) => {
+  if (env.MAIL_DRIVER !== 'smtp') return;
+
+  if (!env.SMTP_HOST) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['SMTP_HOST'],
+      message: 'is required when MAIL_DRIVER=smtp',
+    });
+  }
+  if (!env.MAIL_FROM) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['MAIL_FROM'],
+      message: 'is required when MAIL_DRIVER=smtp',
+    });
+  }
+});
+
+const parsed = checkedSchema.safeParse(process.env);
 
 if (!parsed.success) {
   const details = parsed.error.issues
@@ -89,6 +133,19 @@ export const config = {
     driver: env.STORAGE_DRIVER,
     localDir: path.resolve(__dirname, '..', '..', env.STORAGE_LOCAL_DIR),
     uploadTtlSeconds: env.UPLOAD_URL_TTL_SECONDS,
+  },
+  mail: {
+    driver: env.MAIL_DRIVER,
+    from: env.MAIL_FROM ?? 'avcrm@localhost',
+    replyTo: env.MAIL_REPLY_TO ?? null,
+    redirectTo: env.MAIL_REDIRECT_TO ?? null,
+    smtp: {
+      host: env.SMTP_HOST ?? 'localhost',
+      port: env.SMTP_PORT,
+      secure: env.SMTP_SECURE,
+      user: env.SMTP_USER ?? null,
+      password: env.SMTP_PASSWORD ?? null,
+    },
   },
   messaging: {
     appBaseUrl: env.APP_BASE_URL.replace(/\/+$/, ''),

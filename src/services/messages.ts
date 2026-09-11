@@ -13,7 +13,7 @@ import { badRequest, notFound } from '../utils/errors';
 import { logger } from '../utils/logger';
 import { offsetOf, paginated, type Paginated, type Pagination } from '../utils/pagination';
 import { applyBranchScope } from '../utils/scope';
-import { sendEmail, sendSms } from './notifications';
+import { SendFailure, sendEmail, sendSms } from './notifications';
 
 /**
  * The outbound queue. Nothing in the application talks to a provider
@@ -141,6 +141,8 @@ export interface QueueSummary {
   failed: number;
   /** Left queued for another pass, because the attempt budget is not spent. */
   retrying: number;
+  /** Refused outright — a bad address is not worth three more tries. */
+  rejected: number;
 }
 
 /**
@@ -154,7 +156,13 @@ export async function sendQueued(
   limit = BATCH_SIZE,
   db: Knex = defaultDb,
 ): Promise<QueueSummary> {
-  const summary: QueueSummary = { claimed: 0, sent: 0, failed: 0, retrying: 0 };
+  const summary: QueueSummary = {
+    claimed: 0,
+    sent: 0,
+    failed: 0,
+    retrying: 0,
+    rejected: 0,
+  };
 
   const claimed = await claim(limit, db);
   summary.claimed = claimed.length;
@@ -164,7 +172,12 @@ export async function sendQueued(
       const result =
         message.channel === 'sms'
           ? await sendSms(message.recipient, message.body)
-          : await sendEmail(message.recipient, message.subject ?? '', message.body);
+          : await sendEmail(
+              message.recipient,
+              message.subject ?? '',
+              message.body,
+              message.id,
+            );
 
       await db('message_log').where({ id: message.id }).update({
         status: 'sent',
@@ -174,22 +187,34 @@ export async function sendQueued(
       });
       summary.sent += 1;
     } catch (err) {
+      // A permanent rejection is the server saying the address is wrong or
+      // the mailbox is gone. Retrying that wastes the budget and looks like
+      // spam to whoever is refusing it, so it stops here whatever the count.
+      const permanent = err instanceof SendFailure && err.permanent;
       // attempts was already incremented by the claim, so this row has had
       // its go. Out of budget means failed; otherwise the lease expiring puts
       // it back in front of a worker.
       const spent = message.attempts >= config.messaging.maxAttempts;
+      const done = permanent || spent;
+
       await db('message_log')
         .where({ id: message.id })
         .update({
-          status: spent ? 'failed' : 'queued',
+          status: done ? 'failed' : 'queued',
           error: err instanceof Error ? err.message : String(err),
         });
 
-      if (spent) {
+      if (permanent) {
+        summary.rejected += 1;
+        logger.error(
+          { err, message_id: message.id, recipient: message.recipient },
+          'Message refused: the address will not accept it',
+        );
+      } else if (spent) {
         summary.failed += 1;
         logger.error(
           { err, message_id: message.id, attempts: message.attempts },
-          'Message failed permanently',
+          'Message failed after every attempt',
         );
       } else {
         summary.retrying += 1;

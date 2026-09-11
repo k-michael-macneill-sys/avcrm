@@ -4,8 +4,8 @@ Snow and ice removal CRM for a multi-branch operation: a JSON API, four schedule
 jobs, and a browser client that runs on top of them.
 
 Stack: Node 20+, TypeScript, Express 4, PostgreSQL 15+, Knex (query builder and
-migrations, not an ORM), Zod for validation, bcrypt, jsonwebtoken, pino. The
-client adds no runtime dependencies at all — see [The browser client](#the-browser-client).
+migrations, not an ORM), Zod for validation, bcrypt, jsonwebtoken, pino,
+nodemailer. The client adds no runtime dependencies at all — see [The browser client](#the-browser-client).
 
 ## Where this is in the build order
 
@@ -22,6 +22,7 @@ Build order from the spec, and what exists today:
 | 7 | Reporting views | **done** |
 | — | Browser client on top of the API | **done** |
 | — | File storage: signature capture, photos, documents | **done** |
+| — | Real SMTP mail transport | **done** |
 
 Every step landed in the same structure — a migration, a service of plain
 functions, a router — without reshaping what came before it. The known gaps
@@ -52,6 +53,7 @@ Verify:
 ```bash
 curl -s localhost:3000/health
 ./scripts/test-api.sh   # 285 checks against a running server; safe to re-run
+npm run test:mail       # 17 checks against a real SMTP server; no server needed
 ```
 
 While working on the client, `npm run dev:web` recompiles it on save; the API's
@@ -776,13 +778,80 @@ session check for a URL that works for anyone who copies it.
 - No virus scanning, and no image re-encoding to strip EXIF. A service photo's
   geotag is read from what the client sends, not from the file itself.
 
+## Mail
+
+`MAIL_DRIVER=smtp` sends real email through nodemailer. SMTP rather than a
+vendor's HTTP API on purpose: Postmark, SES, Mailgun and SendGrid all issue
+SMTP credentials, so one driver covers any of them and changing provider is a
+change to `.env` rather than to code.
+
+`MAIL_DRIVER=log` is the default and writes to the application log. A dev box
+and the API test suite should not need a mail server, and nothing should be
+one missing environment variable away from emailing real customers.
+
+```bash
+MAIL_DRIVER=smtp
+MAIL_FROM="Avalanche CRM <no-reply@example.test>"
+SMTP_HOST=smtp.postmarkapp.com
+SMTP_USER=…
+SMTP_PASSWORD=…
+```
+
+Both are checked at startup: `MAIL_DRIVER=smtp` without `SMTP_HOST` or
+`MAIL_FROM` refuses to boot, rather than failing when the first invoice goes
+out.
+
+### The staging valve
+
+```bash
+MAIL_REDIRECT_TO=staging@example.test
+```
+
+Sends **every** message there instead of to the customer, keeping the real
+recipient in the subject (`[to: harold@…] Your invoice`). Staging is usually a
+copy of production with real addresses in it; without this, the first queue
+drain after a restore mails them all.
+
+### A bounce is not a blip
+
+The queue now distinguishes the two, because they want opposite treatment:
+
+| What happened | What the queue does |
+| --- | --- |
+| SMTP 5xx — no such mailbox | `failed` immediately, after one attempt |
+| SMTP 4xx, or no connection | stays `queued`, retried until `MESSAGE_MAX_ATTEMPTS` |
+
+Retrying a 550 three more times wastes the budget and looks like spam to the
+server refusing it. The run summary counts the two separately: `rejected` for
+refusals, `failed` for things that ran out of attempts.
+
+Every message carries an `X-Avcrm-Message-Id` header holding its `message_log`
+id, so a message in the provider's dashboard can be tied back to the row that
+produced it.
+
+### Verifying it
+
+```bash
+npm run test:mail
+```
+
+Starts a throwaway SMTP server (`scripts/mail-sink.js`), queues messages into
+`message_log`, drains them with the real driver, and asserts on what actually
+arrived: the envelope, the headers, the body, the correlation id, a permanent
+rejection not being retried, the redirect diverting, and the `log` driver
+sending nothing. A transport that has never talked to an SMTP server is a
+transport nobody has tested.
+
 ## What is mocked
 
-- `src/services/notifications.ts` — the **transport**, and only the transport.
-  `sendEmail` / `sendSms` write to the log and return a fake provider id.
-  Everything above them is real: templates, rendering, the queue, retries and
-  the log are all wired up, so choosing a provider is a change to these two
-  function bodies and nothing else. The queue worker is their only caller.
+- **SMS only.** `sendSms` in `src/services/notifications.ts` logs and does
+  nothing else. There is no SMTP equivalent for text messages — every gateway
+  has its own HTTP API — so that one needs a provider chosen and an account
+  opened. The queue, templates, retries and log around it are real; only that
+  function body is not, and `review_request` and `en_route` both have SMS
+  templates waiting for it.
+
+  Email is no longer mocked: see [Mail](#mail).
 
 Contract and invoice PDFs are a `pdf_url` column that something else has to
 fill in; nothing generates one yet, and no payment processor is wired up —
@@ -808,6 +877,8 @@ src/                   the API
   types/               row shapes, JWT payload, module augmentation
   utils/               errors, async wrapper, Zod helper, pagination, scope
 scripts/test-api.sh    curl smoke test
+scripts/test-mail.sh   mail transport test, against a real SMTP server
+scripts/mail-sink.js   the throwaway SMTP server it runs
 web/                   the browser client (see above)
 public/                index.html, app.css, and tsc's output
 ```
@@ -857,8 +928,10 @@ Other conventions worth keeping:
 - No automated test suite. `scripts/test-api.sh` is a smoke test, not a substitute.
 - `audit_log` covers contracts, quote pricing and payments. User role changes
   are not logged yet.
-- `message_log.status` never becomes `bounced`: that needs a provider webhook,
-  which arrives with the real transport.
+- `message_log.status` never becomes `bounced`. A 5xx *during* the SMTP
+  conversation is caught and marked `failed`; an asynchronous bounce that
+  arrives minutes later needs a provider webhook or a VERP return path, and
+  neither is wired up.
 - The internal feedback route returns JSON. A real deployment would redirect a
   1-3 rating to a feedback form the way a 4-5 redirects to the review page.
 - Files are stored on local disk by default. That is a driver choice rather

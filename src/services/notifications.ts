@@ -1,14 +1,17 @@
 import { randomUUID } from 'node:crypto';
+import nodemailer, { type Transporter } from 'nodemailer';
+import { config } from '../config';
 import { logger } from '../utils/logger';
 
 /**
- * MOCK TRANSPORT. Email and SMS are logged, not sent. Replace the bodies when
- * a provider is chosen; callers should not need to change.
+ * The transport. Everything above it — templates, rendering, the queue,
+ * retries, the log — is provider-agnostic; this is the only file that knows
+ * how a message actually leaves the building, and the queue worker is its
+ * only caller.
  *
- * Nothing in the application calls these directly any more — everything
- * outbound goes through the queue in services/messages.ts, and the worker
- * (npm run job:message-queue) is the only caller. That is what makes
- * message_log a complete record of what the system said to anyone.
+ * SMTP rather than a vendor's HTTP API on purpose. Postmark, SES, Mailgun and
+ * SendGrid all issue SMTP credentials, so one driver covers any of them and
+ * changing provider is a change to .env rather than to code.
  */
 
 export interface SendResult {
@@ -16,16 +19,163 @@ export interface SendResult {
   provider_message_id: string;
 }
 
-export async function sendEmail(
+/**
+ * A send that did not work, and whether trying again could help.
+ *
+ * The distinction matters: a 5xx means the address is wrong or the mailbox is
+ * gone, and hammering it three more times wastes the attempt budget and looks
+ * like spam to the receiving server. A 4xx is a greylist or a full disk, and
+ * is exactly what retries are for.
+ */
+export class SendFailure extends Error {
+  readonly permanent: boolean;
+  readonly code: string | undefined;
+
+  constructor(message: string, permanent: boolean, code?: string) {
+    super(message);
+    this.name = 'SendFailure';
+    this.permanent = permanent;
+    this.code = code;
+  }
+}
+
+export interface OutboundEmail {
+  to: string;
+  subject: string;
+  body: string;
+  /** Correlates the provider's copy with our message_log row. */
+  message_id?: string;
+}
+
+interface MailTransport {
+  send(email: OutboundEmail): Promise<SendResult>;
+  close(): Promise<void>;
+}
+
+/**
+ * Where a message really goes. MAIL_REDIRECT_TO exists because staging is
+ * usually a copy of production, real customer addresses and all — without it,
+ * the first queue drain after a database restore emails them.
+ */
+function recipientFor(email: OutboundEmail): { to: string; subject: string } {
+  if (!config.mail.redirectTo) {
+    return { to: email.to, subject: email.subject };
+  }
+  return {
+    to: config.mail.redirectTo,
+    // The real recipient has to survive the redirect or the copy is useless.
+    subject: `[to: ${email.to}] ${email.subject}`,
+  };
+}
+
+/** The default. Writes to the log, which is what dev and the suite want. */
+class LogTransport implements MailTransport {
+  async send(email: OutboundEmail): Promise<SendResult> {
+    const { to, subject } = recipientFor(email);
+    logger.info(
+      { driver: 'log', channel: 'email', to, subject, body: email.body },
+      'Email (not sent: MAIL_DRIVER=log)',
+    );
+    return { provider_message_id: `log-${randomUUID()}` };
+  }
+
+  async close(): Promise<void> {}
+}
+
+class SmtpTransport implements MailTransport {
+  private transporter: Transporter | null = null;
+
+  /** Built on first use: a process that queues nothing never connects. */
+  private connection(): Transporter {
+    if (this.transporter) return this.transporter;
+
+    const { smtp } = config.mail;
+    this.transporter = nodemailer.createTransport({
+      host: smtp.host,
+      port: smtp.port,
+      secure: smtp.secure,
+      ...(smtp.user && smtp.password
+        ? { auth: { user: smtp.user, pass: smtp.password } }
+        : {}),
+      // The worker drains a backlog in one run, so hold the connection open
+      // rather than reconnecting per message.
+      pool: true,
+      maxConnections: 2,
+    });
+
+    return this.transporter;
+  }
+
+  async send(email: OutboundEmail): Promise<SendResult> {
+    const { to, subject } = recipientFor(email);
+
+    try {
+      const info = await this.connection().sendMail({
+        from: config.mail.from,
+        ...(config.mail.replyTo ? { replyTo: config.mail.replyTo } : {}),
+        to,
+        subject,
+        text: email.body,
+        ...(email.message_id
+          ? { headers: { 'X-Avcrm-Message-Id': email.message_id } }
+          : {}),
+      });
+
+      return { provider_message_id: info.messageId ?? `smtp-${randomUUID()}` };
+    } catch (err) {
+      throw classify(err);
+    }
+  }
+
+  async close(): Promise<void> {
+    this.transporter?.close();
+    this.transporter = null;
+  }
+}
+
+/**
+ * Turns a transport error into the one thing the queue needs to know.
+ *
+ * nodemailer surfaces the SMTP reply code as `responseCode`. Anything in the
+ * 500s is the server saying "not this address, not ever"; everything else,
+ * including a connection that never opened, is worth another go.
+ */
+function classify(err: unknown): SendFailure {
+  const error = err as { responseCode?: number; code?: string; message?: string };
+  const responseCode = error.responseCode;
+  const permanent = typeof responseCode === 'number' && responseCode >= 500;
+
+  return new SendFailure(
+    error.message ?? 'The mail server rejected the message',
+    permanent,
+    error.code ?? (responseCode ? String(responseCode) : undefined),
+  );
+}
+
+const transport: MailTransport =
+  config.mail.driver === 'smtp' ? new SmtpTransport() : new LogTransport();
+
+export function sendEmail(
   to: string,
   subject: string,
   body: string,
+  messageId?: string,
 ): Promise<SendResult> {
-  logger.info({ mock: true, channel: 'email', to, subject, body }, 'Mock email');
-  return { provider_message_id: `mock-email-${randomUUID()}` };
+  return transport.send({ to, subject, body, message_id: messageId });
 }
 
+/** Lets a job exit instead of waiting on a pooled connection. */
+export function closeTransport(): Promise<void> {
+  return transport.close();
+}
+
+/**
+ * STILL A MOCK. SMS needs an account with a carrier gateway and has no
+ * equivalent of SMTP — every provider has its own HTTP API — so this one
+ * genuinely does nothing but log. The queue, templates and log around it are
+ * real; only this function body is not.
+ */
 export async function sendSms(to: string, body: string): Promise<SendResult> {
-  logger.info({ mock: true, channel: 'sms', to, body }, 'Mock SMS');
+  logger.warn({ mock: true, channel: 'sms', to, body }, 'Mock SMS (nothing sent)');
   return { provider_message_id: `mock-sms-${randomUUID()}` };
 }
