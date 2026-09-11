@@ -7,10 +7,10 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && tsc -p tsconfig.web.json",
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit",
     "migrate": "tsx node_modules/knex/bin/cli.js --knexfile src/db/knexfile.ts migrate:latest",
     "migrate:rollback": "tsx node_modules/knex/bin/cli.js --knexfile src/db/knexfile.ts migrate:rollback",
     "migrate:make": "tsx node_modules/knex/bin/cli.js --knexfile src/db/knexfile.ts migrate:make -x ts",
@@ -20,7 +20,10 @@
     "job:document-expiry": "tsx src/jobs/documentExpiry.ts",
     "job:message-queue": "tsx src/jobs/messageQueue.ts",
     "job:review-requests": "tsx src/jobs/reviewRequests.ts",
-    "job:billing": "tsx src/jobs/billing.ts"
+    "job:billing": "tsx src/jobs/billing.ts",
+    "build:api": "tsc",
+    "build:web": "tsc -p tsconfig.web.json",
+    "dev:web": "tsc -p tsconfig.web.json --watch"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",

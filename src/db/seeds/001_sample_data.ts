@@ -534,6 +534,18 @@ export async function seed(knex: Knex): Promise<void> {
         status: 'draft',
       },
       {
+        // Re-quoted after the decline below, and sitting with the customer.
+        // This is the one the signature screen has to work on.
+        property_id: propertyBy('9 Barrie St').id,
+        created_by_user_id: otto.id,
+        billing_type: 'monthly',
+        initial_price: '159.00',
+        discounted_price: '139.00',
+        ...season,
+        status: 'presented',
+        notes: 'Second go after they said no in the autumn.',
+      },
+      {
         // A lost deal, kept for the win rate in build step 7.
         property_id: propertyBy('9 Barrie St').id,
         created_by_user_id: nina.id,

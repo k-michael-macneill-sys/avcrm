@@ -1,9 +1,11 @@
-# avcrm — Avalanche CRM (API)
+# avcrm — Avalanche CRM
 
-Snow and ice removal CRM for a multi-branch operation. No frontend; JSON only.
+Snow and ice removal CRM for a multi-branch operation: a JSON API, four scheduled
+jobs, and a browser client that runs on top of them.
 
 Stack: Node 20+, TypeScript, Express 4, PostgreSQL 15+, Knex (query builder and
-migrations, not an ORM), Zod for validation, bcrypt, jsonwebtoken, pino.
+migrations, not an ORM), Zod for validation, bcrypt, jsonwebtoken, pino. The
+client adds no runtime dependencies at all — see [The browser client](#the-browser-client).
 
 ## Where this is in the build order
 
@@ -18,6 +20,7 @@ Build order from the spec, and what exists today:
 | 5 | Email queue + templates, then review automation | **done** |
 | 6 | Invoicing and payments | **done** |
 | 7 | Reporting views | **done** |
+| — | Browser client on top of the API | **done** |
 
 Every step landed in the same structure — a migration, a service of plain
 functions, a router — without reshaping what came before it. The known gaps
@@ -36,8 +39,12 @@ createdb avcrm
 npm run migrate
 npm run seed          # development sample data
 
+npm run build:web     # compile the browser client into public/assets
 npm run dev           # tsx watch, port 3000
 ```
+
+Then open **http://localhost:3000/app** and sign in as `corporate@avcrm.test`
+with the seeded password. The login screen lists the other accounts.
 
 Verify:
 
@@ -45,6 +52,9 @@ Verify:
 curl -s localhost:3000/health
 ./scripts/test-api.sh   # 268 checks against a running server; safe to re-run
 ```
+
+While working on the client, `npm run dev:web` recompiles it on save; the API's
+own `npm run dev` does not watch it.
 
 The database owner needs to be able to `create extension citext`. It is a
 trusted extension on PostgreSQL 13+, so the owner of the database can do this
@@ -127,12 +137,15 @@ All seeded users share the password in `SEED_PASSWORD` (default `Password123!`).
 | `nina@avcrm.test` | operator | Kingston | Abstract expires in 21 days |
 | `pat@avcrm.test` | operator | Halifax | Documents submitted, awaiting review |
 
-The seed also lays down a rate card per branch and five quotes spread across
-the lifecycle — two signed into active contracts (one with a card on file, one
-paid upfront by cheque), one presented and waiting, one still a draft, and one
-declined. Six work orders sit on those contracts, including three completed
-with their before and after photos, one skipped with a reason, and one
-unassigned in Halifax because that branch has no approved operator yet.
+The seed also lays down a rate card per branch and six quotes spread across the
+lifecycle: three signed into active contracts (two with a card on file, one
+paid upfront by cheque), one still a draft, one declined, and one presented and
+sitting with the customer — that last one is what the signature screen has to
+work on.
+
+Six work orders sit on those contracts, including three completed with their
+before and after photos, one skipped with a reason, and one unassigned in
+Halifax because that branch has no approved operator yet.
 
 Two review requests are already answered — five stars routed to the public
 page, two stars routed to the branch manager — and one finished visit is
@@ -576,6 +589,91 @@ many branches there are.
 the where clause: filtering there would drop the operators who did no work, and
 those are exactly the rows worth looking at.
 
+## The browser client
+
+A small single-page app at `/app`, served by the same Express process.
+
+**It adds no dependencies.** The client is TypeScript compiled by the `tsc`
+that was already here into native browser ES modules — no bundler, no
+framework, no npm install. `web/` is the source, `public/assets/` is the
+output, and `public/index.html` loads it with a plain `<script type="module">`.
+
+That is a real trade, so it is worth naming: the cost is roughly 150 lines of
+hand-written router and DOM helpers that a framework would have supplied. What
+it buys is a dependency tree that stays at nine runtime packages, one language
+and one toolchain across the whole repo, and **shared types** — the client
+imports `src/types/models.ts` directly, so a column that changes shape in a
+migration breaks the UI at compile time rather than in front of a customer.
+
+```
+web/
+  base.ts        where the client lives (/app), in one place
+  api.ts         the only thing that talks to the API
+  router.ts      path routing, one screen at a time
+  dom.ts         h(), table(), link() — real nodes, never innerHTML
+  form.ts        small forms, and turning an ApiError back into text
+  format.ts      money, dates, and what a status looks like
+  components.ts  hero figure, stat tiles, page furniture
+  views/         one file per screen
+public/
+  index.html     the shell
+  app.css        one stylesheet, no framework
+  assets/        tsc output — gitignored, built by `npm run build:web`
+```
+
+### Why `/app`
+
+The API owns the root paths — `/customers` is an endpoint — so the client
+needs its own prefix rather than a fight over them. `/` redirects to `/app`,
+anything under `/app` that is not a file serves the shell, and every in-app
+link carries the real `/app/…` href so middle-click, "open in new tab" and
+"copy link address" all land on the screen instead of on the JSON behind it.
+
+### What it shows
+
+| Screen | What it does |
+| --- | --- |
+| Dashboard | Corporate: the roll-up, next visits, money to chase. Operator: their own visits and paperwork |
+| Customers | List, detail, add a customer or a property |
+| Quotes | The lifecycle, and **signature capture** — the checklist, the terms, the card token |
+| Contracts | The signed record, its checklist, its visits and its invoices |
+| Dispatch | The board, booking a visit, and driving one to completion with photos |
+| Invoices | Send, record a payment, refund, void |
+| Crew | Compliance per operator, and approving documents |
+| Reports | The branch comparison, revenue by month, operator scorecards |
+
+**The two roles get genuinely different apps.** An operator's nav has no
+Invoices or Reports, their dashboard is their run sheet rather than a company
+revenue figure, and asking for a corporate screen by URL gets a plain
+explanation. None of that is the security boundary — the API is, and it
+refuses them the same way with no UI at all.
+
+### The gates, on screen
+
+The API's rules are the client's rules; it does not re-implement them, it
+surfaces them. Both gates from the build are visible:
+
+- **Signing** shows the checklist, and a submission missing a required box
+  comes back naming each one — `checklist.terms_reviewed: not ticked` — because
+  the client renders the API's `details` array rather than swallowing it.
+- **Completing a visit** shows a running count of before and after photos on
+  file before you try, and the refusal names which is missing if you do.
+
+### Known gaps
+
+- **The token is in `localStorage`.** That is the ordinary trade for a
+  Bearer-token SPA — it survives a reload, and any script that gets onto the
+  page can read it. The fix is an httpOnly cookie, which is an API change
+  rather than a UI one.
+- No charts. Two branches and a handful of figures is exactly the case where a
+  one-bar bar chart says less than the number itself; stat tiles and tables
+  carry it. A chart earns its place when there is a trend with a shape.
+- Lists page at 50–100 rows and stop; there is no pagination control yet,
+  which is the same `OFFSET` limitation the API has.
+- No automated browser tests. The screens were driven and screenshotted by
+  hand through headless Chromium during the build, which is a check, not a
+  suite.
+
 ## What is mocked
 
 - `src/services/notifications.ts` — the **transport**, and only the transport.
@@ -584,15 +682,15 @@ those are exactly the rows worth looking at.
   the log are all wired up, so choosing a provider is a change to these two
   function bodies and nothing else. The queue worker is their only caller.
 
-Not started: any frontend. Contract and invoice PDFs are a `pdf_url` column
-that something else has to fill in; nothing generates one yet, and no payment
-processor is wired up — `POST /invoices/:id/payments` records what a processor
-(or a rep with a cheque) says happened.
+Contract and invoice PDFs are a `pdf_url` column that something else has to
+fill in; nothing generates one yet, and no payment processor is wired up —
+`POST /invoices/:id/payments` records what a processor (or a rep with a cheque)
+says happened.
 
 ## Layout
 
 ```
-src/
+src/                   the API
   server.ts            process entry: connect, listen, shut down
   app.ts               builds the Express app (importable without a port)
   config/              dotenv + Zod; throws at startup on bad config
@@ -608,6 +706,8 @@ src/
   types/               row shapes, JWT payload, module augmentation
   utils/               errors, async wrapper, Zod helper, pagination, scope
 scripts/test-api.sh    curl smoke test
+web/                   the browser client (see above)
+public/                index.html, app.css, and tsc's output
 ```
 
 ### Conventions
