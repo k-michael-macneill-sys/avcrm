@@ -1,0 +1,126 @@
+# The whole system on one machine: database, application, scheduled jobs,
+# TLS, and a nightly dump.
+#
+#   cp deploy/env.example .env    # then fill it in
+#   docker compose up -d --build
+#
+# Nothing but Caddy is published. Postgres and the application are reachable
+# only from inside the compose network, which is the point of putting them
+# there.
+
+name: avcrm
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-avcrm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-avcrm}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # Everything below waits on this, so it has to mean "ready for queries"
+      # rather than "the process started".
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-avcrm} -d ${POSTGRES_DB:-avcrm}']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Runs to completion before the application starts, so the schema is never
+  # behind the code that expects it. A separate service rather than something
+  # in the entrypoint: two application containers starting at once would
+  # otherwise both try to migrate.
+  migrate:
+    build: .
+    restart: 'no'
+    env_file: .env
+    command: ['node', 'dist/db/migrate.js']
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Caddy terminates TLS, so the client address arrives in a header. A
+      # contract records the IP its signature came from, and that has to be
+      # the customer's rather than the proxy's.
+      TRUST_PROXY: 'true'
+    volumes:
+      - storage:/data/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # node's own fetch, so the image needs neither curl nor wget.
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # The four jobs. Without this nothing is emailed, nothing is billed and no
+  # document expiry is noticed — see src/jobs/scheduler.ts.
+  scheduler:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    command: ['node', 'dist/jobs/scheduler.js']
+    volumes:
+      - storage:/data/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    # Time to finish a billing pass rather than be cut in half by a deploy.
+    stop_grace_period: 60s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # The certificates. Losing this volume means asking Let's Encrypt for
+      # new ones, which is rate limited.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./deploy/backup.sh:/usr/local/bin/backup.sh:ro
+      - backups:/backups
+    entrypoint: ['/bin/sh', '/usr/local/bin/backup.sh']
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  # Signatures, service photos, operator documents and generated PDFs. This
+  # is the volume whose loss cannot be undone by a redeploy.
+  storage:
+  backups:
+  caddy_data:
+  caddy_config:

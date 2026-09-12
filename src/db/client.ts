@@ -3,6 +3,7 @@ import knex, { type Knex } from 'knex';
 import pg from 'pg';
 import { config } from '../config';
 import { logger } from '../utils/logger';
+import { DirectoryMigrationSource } from './migrationSource';
 
 /**
  * Return DATE columns as plain 'YYYY-MM-DD' strings.
@@ -30,10 +31,15 @@ export const knexConfig: Knex.Config = {
   },
   pool: { min: config.db.poolMin, max: config.db.poolMax },
   migrations: {
-    directory: path.join(__dirname, 'migrations'),
     tableName: 'knex_migrations',
-    extension: 'ts',
-    loadExtensions: ['.ts', '.js'],
+    /*
+     * Deliberately the only migration option here. Knex discards a custom
+     * source if `directory` or `extension` sit beside it ("FS-related option
+     * specified ... This resets migrationSource"), so the directory for
+     * `migrate:make` is passed on the command line instead — see the
+     * migrate:make script in package.json.
+     */
+    migrationSource: new DirectoryMigrationSource(path.join(__dirname, 'migrations')),
   },
   seeds: {
     directory: path.join(__dirname, 'seeds'),

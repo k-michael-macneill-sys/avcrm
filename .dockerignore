@@ -1,3 +1,14 @@
+# Everything the image builds for itself, plus everything it must never carry.
 node_modules
 dist
+public/assets
+storage
+storage-test
+tests
+.git
+.github
 .env
+.env.*
+*.log
+coverage
+deploy/caddy-data

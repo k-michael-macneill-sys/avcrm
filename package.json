@@ -11,9 +11,9 @@
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit && tsc -p tsconfig.test.json",
-    "migrate": "tsx node_modules/knex/bin/cli.js --knexfile src/db/knexfile.ts migrate:latest",
+    "migrate": "tsx src/db/migrate.ts",
     "migrate:rollback": "tsx node_modules/knex/bin/cli.js --knexfile src/db/knexfile.ts migrate:rollback",
-    "migrate:make": "tsx node_modules/knex/bin/cli.js --knexfile src/db/knexfile.ts migrate:make -x ts",
+    "migrate:make": "tsx node_modules/knex/bin/cli.js --knexfile src/db/knexfile.ts --migrations-directory migrations migrate:make -x ts",
     "seed": "tsx node_modules/knex/bin/cli.js --knexfile src/db/knexfile.ts seed:run",
     "knex": "tsx node_modules/knex/bin/cli.js --knexfile src/db/knexfile.ts",
     "migrate:status": "tsx node_modules/knex/bin/cli.js --knexfile src/db/knexfile.ts migrate:status",
@@ -25,7 +25,8 @@
     "build:web": "tsc -p tsconfig.web.json",
     "dev:web": "tsc -p tsconfig.web.json --watch",
     "test": "bash scripts/test-setup.sh",
-    "test:watch": "bash scripts/test-setup.sh --watch"
+    "test:watch": "bash scripts/test-setup.sh --watch",
+    "job:scheduler": "tsx src/jobs/scheduler.ts"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",

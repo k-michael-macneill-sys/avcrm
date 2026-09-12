@@ -211,7 +211,11 @@ describe('downloading the documents', () => {
     const reply = await fetch(`${h.server().url}/invoices/${invoice.id}/pdf`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    const text = pdfText(Buffer.from(await reply.arrayBuffer()));
+    const bytes = Buffer.from(await reply.arrayBuffer());
+    // Checked before reading the bytes: an error body would otherwise fail
+    // further down as "no text found", which says nothing about why.
+    assert.equal(reply.status, 200, bytes.toString('utf8').slice(0, 300));
+    const text = pdfText(bytes);
 
     // Nobody should be handed a bill that disagrees with the screen.
     assert.match(text, /Paid in full/);

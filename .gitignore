@@ -8,6 +8,9 @@ storage/
 storage-test/
 .env
 .env.local
+# The production environment file lives beside docker-compose.yml on the
+# server and holds every secret the system has.
+.env.production
 *.log
 coverage/
 .DS_Store

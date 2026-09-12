@@ -27,6 +27,7 @@ Build order from the spec, and what exists today:
 | — | SMS provider, connected by an administrator | **done** |
 | — | Invoice and service report PDFs | **done** |
 | — | Automated test suite | **done** |
+| — | Containerised deployment, scheduler and CI | **done** |
 
 Every step landed in the same structure — a migration, a service of plain
 functions, a router — without reshaping what came before it. The known gaps
@@ -56,9 +57,11 @@ Verify:
 
 ```bash
 curl -s localhost:3000/health
-./scripts/test-api.sh   # 285 checks against a running server; safe to re-run
-npm run test:mail       # 17 checks against a real SMTP server; no server needed
+npm test                # the whole suite; makes and migrates its own database
 ```
+
+To run the whole thing the way it deploys — database, jobs, TLS and all — see
+[Deployment](#deployment).
 
 While working on the client, `npm run dev:web` recompiles it on save; the API's
 own `npm run dev` does not watch it.
@@ -70,12 +73,21 @@ without superuser rights.
 ### Production build
 
 ```bash
-npm run build         # tsc -> dist/
+npm run build         # tsc -> dist/ and public/assets/
 npm start             # node dist/server.js
 ```
 
-Migrations run through the TypeScript sources (`npm run migrate`), which needs
-the dev dependencies present.
+Migrations have one entry point, `src/db/migrate.ts`, run either way:
+
+```bash
+npm run migrate          # from source, via tsx
+node dist/db/migrate.js  # from the built image
+```
+
+Both record the same names, so either can run against the same database — see
+[Deployment](#deployment) for why that took doing.
+
+In production this is all handled by `docker compose up -d --build`.
 
 ## Scheduled jobs
 
@@ -1156,6 +1168,142 @@ has opened an account — and switching it on is configuration rather than code.
 Contract and invoice PDFs are a `pdf_url` column that something else has to
 fill in; nothing generates one yet.
 
+## Deployment
+
+One machine, one command:
+
+```bash
+cp deploy/env.example .env     # fill it in
+docker compose up -d --build
+```
+
+That brings up Postgres, the migrations, the application, the four scheduled
+jobs, TLS, and a nightly dump. Only Caddy is published; the database and the
+application are reachable only from inside the compose network.
+
+### What it needs
+
+- A host with a **persistent disk**. Signatures, service photos, operator
+  documents and generated PDFs are written to a volume
+  (`STORAGE_LOCAL_DIR=/data/storage`). Anywhere with an ephemeral filesystem
+  loses all of it on every deploy — see [Files](#files-and-signature-capture)
+  for the bucket driver that would lift that requirement.
+- A domain already pointing at the machine, and ports 80 and 443 open. Caddy
+  gets a certificate on first boot, which is a real HTTP request to this
+  server.
+- Roughly 2GB of memory. Postgres, Node and Caddy are not demanding, and this
+  is one company rather than a platform.
+
+A small VPS in a Canadian region is the honest fit: this holds Canadian
+customers' names, addresses, phone numbers and signed contracts, and Toronto
+or Montreal costs the same as anywhere else.
+
+### The environment file
+
+`.env` beside `docker-compose.yml` holds every secret the system has. Own it
+as root, mode 600, and keep it out of the repository — it is also the thing to
+back up alongside the database, because **losing `SECRETS_KEY` makes the
+stored SMS credentials unreadable**.
+
+Three settings decide whether the system works rather than merely runs:
+
+| Setting | Why it matters |
+| --- | --- |
+| `APP_BASE_URL` | Card-setup links and review links are built from it. Wrong, and a customer at the door gets a link to nowhere. |
+| `TRUST_PROXY` | Set to `true` by the compose file. Behind Caddy the client address arrives in a header, and a contract records the IP its signature came from. |
+| `DATABASE_URL` | The host is `postgres`, the compose service name, not `localhost`. |
+
+### How it starts
+
+`migrate` runs to completion before `app` and `scheduler` start, so the schema
+is never behind the code that expects it. It is a separate service rather than
+something in the entrypoint because two application containers starting at
+once would otherwise both try to migrate.
+
+Migration names are recorded **without a file extension**
+(`src/db/migrationSource.ts`). Under tsx a migration is a `.ts` file; in the
+image it has been compiled to `.js`, and Knex compares the recorded names
+against what it finds on disk. Without this, pointing a local checkout at the
+server's database once would leave the container unable to migrate ever again,
+with nothing but *"the migration directory is corrupt"* to explain itself.
+
+A database created before that change has the old names in it, so
+`src/db/migrate.ts` strips the extensions on the way past. It is idempotent
+and a no-op on a new database, which means upgrading an existing deployment is
+still just `docker compose up -d --build`.
+
+### The jobs
+
+`scheduler` runs all four in one process, so a deployment is `docker compose
+up` and nothing else — rather than a machine where everything looks healthy
+and no customer has been emailed for a week because one crontab line was never
+added.
+
+| Job | Runs |
+| --- | --- |
+| `message-queue` | every minute — nothing reaches a customer until it does |
+| `review-requests` | hourly |
+| `document-expiry` | daily |
+| `billing` | daily |
+
+Intervals run from boot rather than at a wall-clock hour. Every one of them is
+safe to run twice, so a redeploy shifting the hour costs nothing. A job that
+throws is logged and the others carry on; a job never overlaps itself; and
+`SIGTERM` waits for what is mid-run, so a deploy cannot cut a billing pass in
+half.
+
+**If you would rather use host cron**, drop the `scheduler` service and run:
+
+```cron
+*  *    * * *  cd /srv/avcrm && docker compose run --rm app node dist/jobs/messageQueue.js
+15 *    * * *  cd /srv/avcrm && docker compose run --rm app node dist/jobs/reviewRequests.js
+30 2    * * *  cd /srv/avcrm && docker compose run --rm app node dist/jobs/documentExpiry.js
+0  3    * * *  cd /srv/avcrm && docker compose run --rm app node dist/jobs/billing.js
+```
+
+That buys you billing at 3am specifically, at the cost of configuration that
+lives outside the repository.
+
+### Backups
+
+`deploy/backup.sh` dumps nightly, keeps a fortnight, and writes to a temporary
+name first so an interrupted dump is never left looking like a good one.
+
+**A dump on the same machine as the database is not a backup.** It survives a
+bad migration, not a dead disk. The script has a marked place for an offsite
+copy and deliberately does not choose one for you, because where your
+customers' data goes is your decision. Until it is filled in, there is one
+copy of everything.
+
+Restoring:
+
+```bash
+docker compose stop app scheduler
+gunzip -c backups/avcrm-<stamp>.sql.gz | docker compose exec -T postgres psql -U avcrm -d avcrm
+docker compose start app scheduler
+```
+
+Test that before you need it. A backup nobody has restored is a hypothesis.
+
+### Updating
+
+```bash
+git pull && docker compose up -d --build
+```
+
+Migrations run first, then the application restarts. The storage volume and
+the database are untouched.
+
+### Still to do before this is properly production
+
+- **No rate limiting on `/auth/login`**, and no logout or refresh tokens — a
+  JWT is valid until it expires.
+- **No monitoring.** The health check restarts a wedged container; nothing
+  tells you it happened, and nothing watches whether the queue is draining.
+- One machine is one point of failure. That is a reasonable trade at this
+  size, but it is a trade: a dead disk with no offsite copy is the end of the
+  business's records.
+
 ## Tests
 
 ```bash
@@ -1215,6 +1363,14 @@ the page, so `tests/helpers/pdf.ts` inflates the content streams and decodes
 the text operators. That is how the suite knows a customer's name, a balance,
 and the note about a photo that could not be embedded are really there.
 
+It has tests of its own (`tests/pdfExtractor.test.ts`), which it earned. The
+first version delimited a stream by the newline before `endstream`, which ate
+a byte of any deflate output happening to end in `0x0D` — about one stream in
+256, which is often enough to fail a suite run every few tries and rare enough
+to look like a ghost. Writing the regression test found a second bug in the
+same reader: after a stream it could not inflate, it resumed scanning *inside*
+the word `endstream` and lost everything after it.
+
 ### What is covered
 
 | File | What it holds the line on |
@@ -1231,6 +1387,7 @@ and the note about a photo that could not be embedded are really there.
 | `payments` | Card capture, charging, declines, webhooks |
 | `sms` | Connecting a provider, credentials, sending |
 | `mail` | Real delivery, bounces, the staging redirect |
+| `pdfExtractor` | The reader the PDF tests lean on |
 
 ## Layout
 
@@ -1242,19 +1399,25 @@ src/                   the API
   db/
     client.ts          the single Knex instance, pool and type parsers
     knexfile.ts        config file for the knex CLI
+    migrationSource.ts names migrations without an extension, so .ts and .js agree
     migrations/        one file per table, in dependency order
     seeds/             development sample data
-  jobs/                scheduled work, run as scripts
+  jobs/                scheduled work: each runs as a script or from scheduler.ts
   routes/              HTTP only: validate, scope, call a service, respond
   middleware/          auth, error handler, request logger
-  services/            business logic; plain functions, no classes
+  services/
+    pdf/               the layout toolkit and the two documents
+    ...                business logic; plain functions, no classes
   types/               row shapes, JWT payload, module augmentation
   utils/               errors, async wrapper, Zod helper, pagination, scope
-scripts/test-api.sh    curl smoke test
-scripts/test-mail.sh   mail transport test, against a real SMTP server
-scripts/mail-sink.js   the throwaway SMTP server it runs
+tests/                 the suite; helpers/ holds the harness and the stand-ins
 web/                   the browser client (see above)
 public/                index.html, app.css, and tsc's output
+Dockerfile             multi-stage: build with dev deps, run dist without them
+docker-compose.yml     postgres, migrate, app, scheduler, caddy, backup
+deploy/                Caddyfile, backup.sh, env.example
+scripts/test-setup.sh  makes and migrates the test database, then runs the suite
+.github/workflows/     typecheck, test, build, and build the image
 ```
 
 ### Conventions
@@ -1299,6 +1462,8 @@ Other conventions worth keeping:
 
 - No refresh tokens or logout; a JWT is valid until it expires (`JWT_EXPIRES_IN`).
 - No rate limiting on `/auth/login`.
+- Nothing watches the running system. The container health check restarts a
+  wedged application and tells nobody — see [Deployment](#deployment).
 - Coverage is by behaviour rather than by line, and is thin in places: the
   document vault's expiry job, pricing suggestions, and the browser client have
   no tests of their own.
