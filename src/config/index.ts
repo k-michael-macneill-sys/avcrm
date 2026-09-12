@@ -14,8 +14,10 @@ const booleanish = z
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3000),
+  // 'silent' is pino's own off switch, and is what a test run wants: a suite
+  // that prints a log line per request buries the one failure in it.
   LOG_LEVEL: z
-    .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace'])
+    .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
     .default('info'),
   // Express `trust proxy` setting. Contracts record the IP the signature came
   // from, so behind a load balancer this has to be set or every contract is

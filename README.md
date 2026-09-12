@@ -25,6 +25,8 @@ Build order from the spec, and what exists today:
 | — | Real SMTP mail transport | **done** |
 | — | Card capture and charging through Stripe | **done** |
 | — | SMS provider, connected by an administrator | **done** |
+| — | Invoice and service report PDFs | **done** |
+| — | Automated test suite | **done** |
 
 Every step landed in the same structure — a migration, a service of plain
 functions, a router — without reshaping what came before it. The known gaps
@@ -273,6 +275,7 @@ A suspension is only lifted by corporate, never by the automatic refresh.
 | PATCH | `/work-orders/:id/status` | assigned operator or corporate | The completion gate lives here |
 | GET | `/work-orders/:id/photos` | any | |
 | POST | `/work-orders/:id/photos` | assigned operator or corporate | Geotag checked against the property |
+| GET | `/work-orders/:id/report.pdf` | any | What was done, with the photos |
 | GET | `/message-templates` | any | Global set plus the caller's branch overrides |
 | GET | `/message-log` | any | `status`, `channel`, `template_code`, `customer_id` |
 | GET | `/review-requests` | any | `routed_to`, `answered`, `customer_id` |
@@ -289,6 +292,7 @@ A suspension is only lifted by corporate, never by the automatic refresh.
 | GET | `/payments` | any | `status`, `method`, `invoice_id` |
 | POST | `/payments/:id/refund` | corporate | Flips the payment; the invoice recomputes |
 | POST | `/invoices/:id/charge` | corporate | Charges the card on the contract, nobody present |
+| GET | `/invoices/:id/pdf` | any | The bill, rendered and kept |
 | GET | `/card-setups` | any | `contract_id`, `customer_id`, `status` |
 | POST | `/card-setups` | any | Asks the customer for a card; returns the link |
 | POST | `/card-setups/:id/refresh` | any | Asks the processor whether they finished yet |
@@ -845,16 +849,11 @@ produced it.
 
 ### Verifying it
 
-```bash
-npm run test:mail
-```
-
-Starts a throwaway SMTP server (`scripts/mail-sink.js`), queues messages into
-`message_log`, drains them with the real driver, and asserts on what actually
-arrived: the envelope, the headers, the body, the correlation id, a permanent
-rejection not being retried, the redirect diverting, and the `log` driver
-sending nothing. A transport that has never talked to an SMTP server is a
-transport nobody has tested.
+`tests/mail.test.mts` and `tests/mailRedirect.test.mts` start a throwaway SMTP
+server, queue messages, drain them with the real driver, and assert on what
+actually arrived: the envelope, the headers, the body, the correlation id, a
+permanent rejection not being retried, and the redirect diverting. A transport
+that has never talked to an SMTP server is a transport nobody has tested.
 
 ## Payments
 
@@ -957,21 +956,17 @@ it twice changes nothing.
 
 ### Verifying it
 
-```bash
-npm run test:payments
-```
+`tests/payments.test.mts` runs against a stand-in that speaks Stripe's own
+request and response shapes, including the 402 `card_error` a real decline
+produces. It drives the whole path: ask for a card, complete the capture,
+charge the saved card, take a decline, refund by webhook, and refuse an
+unsigned or forged one. The real SDK builds, signs and parses every request;
+only the far end is fake.
 
-Starts `scripts/stripe-fake.js` — a stand-in that speaks Stripe's own request
-and response shapes, including the 402 `card_error` a real decline produces —
-and an API pointed at it, then drives the whole path over HTTP: ask for a card,
-complete the capture, charge the saved card, take a decline, refund by webhook,
-and prove an unsigned or forged webhook is refused. The real SDK builds, signs
-and parses every request; only the far end is fake.
-
-The suite asserts against the database, not just the responses: that the
-customer exists at the processor, that the link was queued, that the stored
-token is a `pm_…` and never a card number, that the checklist box ticked
-itself, and that a replayed webhook leaves one payment row.
+It asserts against the database, not just the responses: that the customer
+exists at the processor, that the link was queued, that the stored token is a
+`pm_…` and never a card number, that the checklist box ticked itself, and that
+a replayed webhook leaves one payment row.
 
 ### Known gaps
 
@@ -982,6 +977,63 @@ itself, and that a replayed webhook leaves one payment row.
 - A setup that is never completed stays `sent` until it expires; nothing sweeps
   the expired ones yet.
 - `message_log.status` still has no `bounced` path from a provider webhook.
+
+## Documents
+
+Two things a customer is handed: what they owe, and what was done at their
+property. `GET /invoices/:id/pdf` and `GET /work-orders/:id/report.pdf`, and a
+download button on each screen.
+
+**pdfkit rather than a headless browser.** Rendering HTML would mean shipping
+Chromium in the container — two hundred megabytes and a sandbox to worry about
+— to produce a two-page invoice. These draw directly, start in milliseconds,
+and use only the built-in fonts, so there are no font files to deploy and
+nothing to license.
+
+The documents take plain data rather than reaching for the database
+(`src/services/pdf/documents.ts`), so one can be rendered in a test without a
+server — which is how the suite checks that a name, a balance and a missing
+photo really appear on the page.
+
+### Rendered when wanted, not when written
+
+Most invoices are paid by a card on file and never printed, and most visits are
+never asked about, so nothing is rendered on a schedule. A document is made the
+first time someone asks for it, stored through the same object store as
+photos and signatures, and the key kept on the row (`invoices.pdf_url`,
+`work_orders.report_pdf_url`).
+
+It is then regenerated by itself once the thing it describes has moved on — a
+payment lands, a visit is re-completed — by comparing the stored file's
+timestamp against the row's `updated_at`. Nobody is handed a bill that
+disagrees with the screen.
+
+Reads go through the same branch rules as everything else, and the response is
+`private, no-store`: an invoice names a customer and what they owe, so it has
+no business in a shared cache.
+
+### What is on them
+
+The invoice carries the customer, the service address, the period, what is
+owed, and the payments that settled it. A **failed** charge is deliberately not
+on it — the office needs to know a card was declined; the customer's copy of
+their bill is not where that belongs. The balance line only appears once
+something has been paid, because on an untouched invoice the balance is the
+total and saying it twice reads as an error.
+
+The service report carries the times, the operator, the access notes, any skip
+reason, and the photographs with their timestamps and coordinates. pdfkit
+embeds JPEG and PNG only, so a WebP from a newer phone — or a file storage has
+lost — is reported as *"This photo could not be included"* rather than silently
+dropped. A gap in a record is worse than a note about it.
+
+### Known gaps
+
+- A customer cannot fetch their own invoice: both routes need a session, and
+  customers have no account. Emailing the PDF, or a signed read link like the
+  upload targets use, is the next step.
+- Contracts still have a `pdf_url` that nothing fills in. The toolkit is there;
+  the document is not written yet.
 
 ## Text messages
 
@@ -1067,19 +1119,15 @@ admin the token is wrong.
 
 ### Verifying it
 
-```bash
-npm run test:sms
-```
-
-Starts `scripts/sms-fake.js` — a stand-in answering on Twilio's, Telnyx's and
-Vonage's own URL shapes, checking credentials the way they do — and an API
-pointed at it, then does what an administrator would: connect a provider, send
-a test, switch it on, and let the queue drain. It also checks the things worth
-being sure of: that an operator cannot read or change the settings, that the
-token never comes back out of the API or appears in the database or the audit
-log, that a bad number is not retried and an outage is, that switching provider
-drops the old credentials, and that the custom provider can reach a gateway
-nobody wrote code for.
+`tests/sms.test.mts` runs against a stand-in answering on Twilio's, Telnyx's
+and Vonage's own URL shapes and checking credentials the way they do, then does
+what an administrator would: connect a provider, send a test, switch it on, and
+let the queue drain. It also checks the things worth being sure of: that an
+operator cannot read or change the settings, that the token never comes back
+out of the API or appears in the database or the audit log, that a bad number
+is not retried and an outage is, that switching provider drops the old
+credentials, and that the custom provider can reach a gateway nobody wrote code
+for.
 
 ### Known gaps
 
@@ -1107,6 +1155,82 @@ has opened an account — and switching it on is configuration rather than code.
 
 Contract and invoice PDFs are a `pdf_url` column that something else has to
 fill in; nothing generates one yet.
+
+## Tests
+
+```bash
+npm test                       # everything
+npm test tests/billing.test.ts # one file
+npm run typecheck              # the application, the client and the suite
+```
+
+`npm test` creates `avcrm_test` if it is not there, migrates it to head, and
+runs the suite with `node --test`. A forgotten migration fails here rather than
+in production, and the database is a separate one from the dev database so a
+run can truncate freely.
+
+**Real Postgres, not a fake.** Every constraint and trigger in this schema is
+load-bearing — the append-only audit trigger, one active contract per property,
+one non-void invoice per period, the timestamps that must agree with a status —
+and a test that does not exercise them is testing something other than this
+system.
+
+**Real HTTP, not a mocked request.** The app is started on an ephemeral port
+and called with `fetch`. The things most worth testing are middleware-shaped:
+the branch scope resolved from a token, the raw body a webhook signature is
+computed over, a PDF's content type and cache headers.
+
+### How a suite is put together
+
+`tests/helpers/harness.ts` gives a file a server, an empty database before each
+test, and a freshly built world — two branches, the people who work in them,
+and the config rows the application treats as given. No test can be made to
+pass or fail by the one before it.
+
+Fixtures insert rather than post. A test about the completion gate should fail
+because the gate is wrong, not because signing a contract six calls earlier
+changed shape — so only the thing under test goes through HTTP.
+
+Message templates are generated from `TEMPLATE_CODES` rather than listed, so a
+code added to the application arrives in the fixtures with it. A suite that has
+to be edited every time a message is added stops being run.
+
+### The stand-ins
+
+Three suites configure the application differently from the rest — a payment
+gateway, an SMS provider, an SMTP host — and configuration is read once at
+load. Node runs each test file in its own process, so those files set their
+environment and then import the application, which top-level `await` expresses
+and CommonJS cannot; hence `.mts` for `payments`, `sms`, `mail` and
+`mailRedirect`.
+
+Their far ends are in-process servers (`tests/helpers/`) that speak the real
+vendors' request and response shapes. The application genuinely builds, signs
+and sends every request; only what answers is ours.
+
+### Reading a PDF back
+
+A test that checks the bytes start with `%PDF` proves nothing about what is on
+the page, so `tests/helpers/pdf.ts` inflates the content streams and decodes
+the text operators. That is how the suite knows a customer's name, a balance,
+and the note about a photo that could not be embedded are really there.
+
+### What is covered
+
+| File | What it holds the line on |
+| --- | --- |
+| `auth` | Sign-in, the registration gate, role guards, branch scoping |
+| `customers` | CRUD, the duplicate address warning, the delete conflicts |
+| `contracts` | The signature gate, card-data rules, the audit trail |
+| `workOrders` | Dispatch rules, the completion gate, geotagging |
+| `billing` | Period splitting, invoice lifecycle, derived totals, refunds |
+| `messaging` | The queue's claim and retries, the review rating gate |
+| `reports` | The three roll-ups, and that they are corporate work |
+| `uploads` | Signed targets, and who may read a file |
+| `pdf` | Both documents, rendered and downloaded |
+| `payments` | Card capture, charging, declines, webhooks |
+| `sms` | Connecting a provider, credentials, sending |
+| `mail` | Real delivery, bounces, the staging redirect |
 
 ## Layout
 
@@ -1175,9 +1299,9 @@ Other conventions worth keeping:
 
 - No refresh tokens or logout; a JWT is valid until it expires (`JWT_EXPIRES_IN`).
 - No rate limiting on `/auth/login`.
-- No automated test suite. `scripts/test-api.sh`, `scripts/test-mail.sh`,
-  `scripts/test-payments.sh` and `scripts/test-sms.sh` are smoke tests against
-  real servers, not a substitute for one.
+- Coverage is by behaviour rather than by line, and is thin in places: the
+  document vault's expiry job, pricing suggestions, and the browser client have
+  no tests of their own.
 - `audit_log` covers contracts, quote pricing and payments. User role changes
   are not logged yet.
 - `message_log.status` never becomes `bounced`. A 5xx *during* the SMTP

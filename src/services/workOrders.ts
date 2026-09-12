@@ -286,9 +286,9 @@ export async function changeWorkOrderStatus(
   });
 
   if (result.status === 'completed') {
-    // Deliberately not awaited: the operator's phone should not wait on SMTP,
-    // and a failed send must not undo a finished job. Build step 5 swaps the
-    // body of this for a real queue.
+    // Deliberately not awaited: the operator's phone should not wait on the
+    // queue write, and a failure here must not undo a finished job. The
+    // messages are queued, not sent — the worker delivers them.
     notifyServiceComplete(result.id).catch((err: unknown) => {
       logger.error({ err, work_order_id: result.id }, 'Service complete email failed');
     });

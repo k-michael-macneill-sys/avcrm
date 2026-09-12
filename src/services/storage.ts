@@ -71,6 +71,12 @@ const RULES: Record<UploadPurpose, PurposeRule> = {
     contentTypes: ['application/pdf'],
     maxBytes: 10 * 1024 * 1024,
   },
+  // Bigger than the others because a report carries the visit's photos.
+  service_report_pdf: {
+    prefix: 'service-reports',
+    contentTypes: ['application/pdf'],
+    maxBytes: 25 * 1024 * 1024,
+  },
 };
 
 const EXTENSIONS: Record<string, string> = {

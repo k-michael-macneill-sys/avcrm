@@ -4,6 +4,7 @@ import { field, fieldList, fragment, h, link, section, table } from '../dom.js';
 import { buildForm, disclosure, errorLine, submitter } from '../form.js';
 import { date, money, statusPill, stamp } from '../format.js';
 import * as router from '../router.js';
+import { downloadButton } from '../upload.js';
 import { INVOICE_STATUSES, PAYMENT_METHODS } from '../../src/types/models.js';
 import type { Customer, Invoice, Payment } from '../../src/types/models.js';
 
@@ -120,6 +121,14 @@ export async function renderInvoice(root: HTMLElement, params: string[]): Promis
         h(
           'div',
           { class: 'actions' },
+          downloadButton(
+            `/invoices/${id}/pdf`,
+            `invoice-${id.slice(0, 8)}.pdf`,
+            'Download the invoice',
+            (message) => {
+              error.textContent = message;
+            },
+          ),
           invoice.status === 'draft'
             ? run(
                 'Send to customer',

@@ -15,8 +15,11 @@ import {
   listWorkOrders,
   updateWorkOrder,
 } from '../services/workOrders';
+import { serviceReportPdf } from '../services/documents';
 import { PHOTO_TYPES, SERVICE_TYPES, WORK_ORDER_STATUSES } from '../types/models';
 import { asyncHandler } from '../utils/async';
+import { unauthorized } from '../utils/errors';
+import { sendPdf } from '../utils/pdfResponse';
 import { paginationSchema } from '../utils/pagination';
 import { parse } from '../utils/validate';
 
@@ -179,5 +182,23 @@ workOrdersRouter.post(
     res.status(201).json({
       data: await addServicePhoto(id, scope, resolveCrewActor(req), body),
     });
+  }),
+);
+
+/**
+ * What was done at the property, as a document: times, notes, and the photos
+ * the operator took, with their timestamps and coordinates. This is what goes
+ * to a customer who asks whether anyone came, and to an insurer who asks what
+ * the surface looked like.
+ */
+workOrdersRouter.get(
+  '/:id/report.pdf',
+  asyncHandler(async (req, res) => {
+    const { id } = parse(idParamSchema, req.params);
+    const scope = resolveBranchScope(req, req.query.branch_id as string | undefined);
+    if (!req.user) throw unauthorized();
+
+    const document = await serviceReportPdf(id, scope, req.user);
+    sendPdf(res, document);
   }),
 );

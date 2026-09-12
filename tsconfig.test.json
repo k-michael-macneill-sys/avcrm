@@ -1,0 +1,18 @@
+{
+  // Types the suite as well as the application. The build config deliberately
+  // compiles only src/, so without this the tests are transpiled by tsx and
+  // never type-checked — which is how a suite drifts from the code it covers.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // The build config emits from src/; nothing is emitted here, so rootDir
+    // widens to the repo to take tests/ in as well.
+    "rootDir": ".",
+    // Only for the check: .mts suites use top-level await to configure the
+    // application before it loads, which CommonJS cannot express.
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts", "tests/**/*.mts"]
+}

@@ -128,6 +128,7 @@ export const UPLOAD_PURPOSES = [
   'operator_document',
   'contract_pdf',
   'invoice_pdf',
+  'service_report_pdf',
 ] as const;
 export type UploadPurpose = (typeof UPLOAD_PURPOSES)[number];
 
@@ -347,6 +348,8 @@ export interface WorkOrder {
   started_at: Date | null;
   completed_at: Date | null;
   operator_notes: string | null;
+  /** Rendered on first request, not on completion. */
+  report_pdf_url: string | null;
   created_at: Date;
   updated_at: Date;
 }

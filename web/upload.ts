@@ -177,3 +177,56 @@ export function filePicker(options: {
 
   return { node, file: () => input.files?.[0] ?? null };
 }
+
+/**
+ * A button that fetches a generated document and saves it.
+ *
+ * Same problem as fileImage: `/invoices/:id/pdf` is authorized by the session
+ * and a plain link carries no Authorization header. A download rather than a
+ * new tab because opening a blob URL in a tab is what popup blockers exist to
+ * stop — and an invoice is something people print or attach anyway.
+ */
+export function downloadButton(
+  path: string,
+  fileName: string,
+  label: string,
+  onError: (message: string) => void,
+): HTMLButtonElement {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'btn btn-secondary';
+  button.textContent = label;
+
+  button.onclick = () => {
+    button.disabled = true;
+    button.textContent = 'Preparing…';
+
+    const auth = api.token();
+    fetch(path, { headers: auth ? { Authorization: `Bearer ${auth}` } : {} })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(
+            response.status === 403
+              ? 'You cannot open that document'
+              : `The document could not be generated (${response.status})`,
+          );
+        }
+        const url = URL.createObjectURL(await response.blob());
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = fileName;
+        anchor.click();
+        // Freed on the next turn: revoking immediately can beat the save.
+        setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      })
+      .catch((err: unknown) => {
+        onError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        button.disabled = false;
+        button.textContent = label;
+      });
+  };
+
+  return button;
+}

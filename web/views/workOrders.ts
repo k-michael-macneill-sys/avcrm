@@ -4,7 +4,7 @@ import { field, fieldList, fragment, h, link, section, table } from '../dom.js';
 import { buildForm, disclosure, errorLine, submitter } from '../form.js';
 import { relative, statusPill, stamp } from '../format.js';
 import * as router from '../router.js';
-import { fileImage, filePicker, uploadBlob } from '../upload.js';
+import { downloadButton, fileImage, filePicker, uploadBlob } from '../upload.js';
 import { SERVICE_TYPES, WORK_ORDER_STATUSES } from '../../src/types/models.js';
 import type {
   Contract,
@@ -235,6 +235,22 @@ export async function renderWorkOrder(root: HTMLElement, params: string[]): Prom
           : null,
         visit.operator_notes ? h('p', { class: 'notes' }, visit.operator_notes) : null,
         error,
+        // Only once there is something to report on: a booked visit nobody
+        // has been to yet would produce a page of blanks.
+        visit.status === 'completed' || visit.status === 'skipped'
+          ? h(
+              'div',
+              { class: 'actions' },
+              downloadButton(
+                `/work-orders/${id}/report.pdf`,
+                `service-report-${id.slice(0, 8)}.pdf`,
+                'Download the service report',
+                (message) => {
+                  error.textContent = message;
+                },
+              ),
+            )
+          : null,
         isOpen
           ? h(
               'div',

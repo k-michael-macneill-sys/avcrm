@@ -4,6 +4,8 @@ dist/
 public/assets/
 # Uploaded files when STORAGE_DRIVER=local.
 storage/
+# What the test run writes; a fresh one is made every time.
+storage-test/
 .env
 .env.local
 *.log

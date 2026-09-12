@@ -10,7 +10,7 @@
     "build": "tsc && tsc -p tsconfig.web.json",
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit && tsc -p tsconfig.test.json",
     "migrate": "tsx node_modules/knex/bin/cli.js --knexfile src/db/knexfile.ts migrate:latest",
     "migrate:rollback": "tsx node_modules/knex/bin/cli.js --knexfile src/db/knexfile.ts migrate:rollback",
     "migrate:make": "tsx node_modules/knex/bin/cli.js --knexfile src/db/knexfile.ts migrate:make -x ts",
@@ -24,9 +24,8 @@
     "build:api": "tsc",
     "build:web": "tsc -p tsconfig.web.json",
     "dev:web": "tsc -p tsconfig.web.json --watch",
-    "test:mail": "bash scripts/test-mail.sh",
-    "test:payments": "bash scripts/test-payments.sh",
-    "test:sms": "bash scripts/test-sms.sh"
+    "test": "bash scripts/test-setup.sh",
+    "test:watch": "bash scripts/test-setup.sh --watch"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",
@@ -35,6 +34,7 @@
     "jsonwebtoken": "^9.0.2",
     "knex": "^3.1.0",
     "nodemailer": "^10.0.3",
+    "pdfkit": "^0.20.2",
     "pg": "^8.12.0",
     "pino": "^9.3.2",
     "stripe": "^22.6.2",
@@ -46,7 +46,9 @@
     "@types/jsonwebtoken": "^9.0.6",
     "@types/node": "^20.14.10",
     "@types/nodemailer": "^8.0.1",
+    "@types/pdfkit": "^0.17.6",
     "@types/pg": "^8.23.1",
+    "@types/smtp-server": "^3.5.13",
     "pino-pretty": "^11.2.1",
     "smtp-server": "^3.19.10",
     "tsx": "^4.16.2",
