@@ -1170,6 +1170,46 @@ fill in; nothing generates one yet.
 
 ## Deployment
 
+### Running it locally
+
+Two ways to run this without a domain or TLS.
+
+**Option A: without Docker** (good for development)
+
+```bash
+npm install
+
+cp .env.example .env
+# Edit .env: set DATABASE_URL and JWT_SECRET (min 32 chars).
+
+createdb avcrm
+npm run migrate
+npm run seed
+
+npm run build:web
+npm run dev
+```
+
+Open **http://localhost:3000/app** and sign in as `corporate@avcrm.test` (see
+[Seed accounts](#seed-accounts) for the password).
+
+**Option B: with Docker Compose** (runs the whole system the way it deploys)
+
+```bash
+cp deploy/env.local.example .env
+docker compose -f docker-compose.yml -f deploy/compose.local.yml up -d --build
+```
+
+That brings up Postgres, the migrations, the application, and the four scheduled
+jobs. Open **http://localhost:3000/app**.
+
+The local override (`compose.local.yml`) strips out Caddy and backups and
+publishes the app on port 3000. Both files use a single `.env`; the base
+compose checks `DOMAIN` and `ACME_EMAIL` at parse time even though Caddy will
+not run, so placeholder values are fine.
+
+### Production deployment
+
 One machine, one command:
 
 ```bash
