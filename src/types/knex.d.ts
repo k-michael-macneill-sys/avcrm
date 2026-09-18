@@ -1,16 +1,26 @@
 import type {
   AuditLogEntry,
   Branch,
+  CardSetup,
   ChecklistRequirement,
   Contract,
   ContractChecklistItem,
   Customer,
   DocumentRequirement,
+  IntegrationSetting,
+  Invoice,
+  MessageLogEntry,
+  MessageTemplate,
   OperatorDocument,
+  Payment,
   PricingGuideEntry,
   Property,
   Quote,
+  ReviewRequest,
+  ServicePhoto,
+  Upload,
   User,
+  WorkOrder,
 } from './models';
 
 declare module 'knex/types/tables' {
@@ -26,6 +36,16 @@ declare module 'knex/types/tables' {
     checklist_requirements: ChecklistRequirement;
     contracts: Contract;
     contract_checklist_items: ContractChecklistItem;
+    work_orders: WorkOrder;
+    service_photos: ServicePhoto;
+    message_templates: MessageTemplate;
+    message_log: MessageLogEntry;
+    review_requests: ReviewRequest;
+    invoices: Invoice;
+    payments: Payment;
+    card_setups: CardSetup;
+    uploads: Upload;
     audit_log: AuditLogEntry;
+    integration_settings: IntegrationSetting;
   }
 }

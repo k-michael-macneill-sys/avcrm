@@ -51,6 +51,106 @@ export type QuoteStatus = (typeof QUOTE_STATUSES)[number];
 export const CONTRACT_STATUSES = ['active', 'cancelled', 'completed'] as const;
 export type ContractStatus = (typeof CONTRACT_STATUSES)[number];
 
+export const SERVICE_TYPES = [
+  'snow_clearing',
+  'salting',
+  'ice_removal',
+  'inspection',
+] as const;
+export type ServiceType = (typeof SERVICE_TYPES)[number];
+
+export const WORK_ORDER_STATUSES = [
+  'scheduled',
+  'en_route',
+  'in_progress',
+  'completed',
+  'skipped',
+] as const;
+export type WorkOrderStatus = (typeof WORK_ORDER_STATUSES)[number];
+
+export const PHOTO_TYPES = ['before', 'after', 'issue'] as const;
+export type PhotoType = (typeof PHOTO_TYPES)[number];
+
+export const MESSAGE_CHANNELS = ['email', 'sms'] as const;
+export type MessageChannel = (typeof MESSAGE_CHANNELS)[number];
+
+export const MESSAGE_STATUSES = ['queued', 'sent', 'failed', 'bounced'] as const;
+export type MessageStatus = (typeof MESSAGE_STATUSES)[number];
+
+/**
+ * Template codes the application sends under. Rows in message_templates are
+ * config and can be reworded per branch, but the code a caller asks for is
+ * part of the code base, so it belongs here.
+ */
+export const TEMPLATE_CODES = [
+  'service_complete',
+  'en_route',
+  'payment_failed',
+  'review_request',
+  'renewal_reminder',
+  'document_expiring',
+  'operator_suspended',
+  'invoice_sent',
+  'invoice_overdue',
+  'card_setup_request',
+  // Internal copies. A branch manager reading "Hi Harold, your driveway is
+  // clear" is not a notification, so the office wording is its own template
+  // rather than the customer's text sent to a second address.
+  'service_complete_internal',
+  'document_expiring_internal',
+  'operator_suspended_internal',
+  'low_rating_internal',
+  'payment_failed_internal',
+] as const;
+export type TemplateCode = (typeof TEMPLATE_CODES)[number];
+
+export const REVIEW_ROUTES = ['google_review', 'internal_feedback'] as const;
+export type ReviewRoute = (typeof REVIEW_ROUTES)[number];
+
+export const INVOICE_STATUSES = ['draft', 'sent', 'paid', 'overdue', 'void'] as const;
+export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
+
+export const PAYMENT_METHODS = [
+  'card_on_file',
+  'etransfer',
+  'cheque',
+  'cash',
+] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+
+/**
+ * What a file is for. The purpose decides its key prefix, which content
+ * types are allowed and how big it may be — see services/storage.ts.
+ */
+export const UPLOAD_PURPOSES = [
+  'signature',
+  'service_photo',
+  'operator_document',
+  'contract_pdf',
+  'invoice_pdf',
+  'service_report_pdf',
+] as const;
+export type UploadPurpose = (typeof UPLOAD_PURPOSES)[number];
+
+export const CARD_SETUP_STATUSES = [
+  'sent',
+  'completed',
+  'expired',
+  'cancelled',
+] as const;
+export type CardSetupStatus = (typeof CARD_SETUP_STATUSES)[number];
+
+export const UPLOAD_STATUSES = ['pending', 'stored'] as const;
+export type UploadStatus = (typeof UPLOAD_STATUSES)[number];
+
+export const PAYMENT_STATUSES = [
+  'pending',
+  'succeeded',
+  'failed',
+  'refunded',
+] as const;
+export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
+
 export interface Branch {
   id: string;
   name: string;
@@ -124,6 +224,8 @@ export interface Customer {
   notes: string | null;
   status: CustomerStatus;
   created_by_user_id: string | null;
+  /** Where the processor knows this customer, once they have been asked. */
+  stripe_customer_id: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -231,4 +333,168 @@ export interface AuditLogEntry {
   after_json: unknown | null;
   ip_address: string | null;
   created_at: Date;
+}
+
+export interface WorkOrder {
+  id: string;
+  contract_id: string;
+  property_id: string;
+  branch_id: string;
+  assigned_user_id: string | null;
+  scheduled_for: Date;
+  service_type: ServiceType;
+  status: WorkOrderStatus;
+  skip_reason: string | null;
+  started_at: Date | null;
+  completed_at: Date | null;
+  operator_notes: string | null;
+  /** Rendered on first request, not on completion. */
+  report_pdf_url: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface ServicePhoto {
+  id: string;
+  work_order_id: string;
+  photo_type: PhotoType;
+  file_url: string;
+  /** From the image EXIF, not the upload time. */
+  taken_at: Date;
+  /** numeric columns come back from pg as strings. */
+  latitude: string | null;
+  longitude: string | null;
+  uploaded_by_user_id: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface MessageTemplate {
+  id: string;
+  /** NULL is the global default; a branch row overrides it. */
+  branch_id: string | null;
+  code: string;
+  channel: MessageChannel;
+  subject: string | null;
+  body: string;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface MessageLogEntry {
+  id: string;
+  branch_id: string | null;
+  customer_id: string | null;
+  work_order_id: string | null;
+  template_code: string;
+  channel: MessageChannel;
+  recipient: string;
+  /** Rendered at enqueue time, so a later template edit cannot rewrite it. */
+  subject: string | null;
+  body: string;
+  status: MessageStatus;
+  provider_message_id: string | null;
+  sent_at: Date | null;
+  error: string | null;
+  attempts: number;
+  last_attempt_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface ReviewRequest {
+  id: string;
+  customer_id: string;
+  work_order_id: string;
+  branch_id: string;
+  sent_at: Date;
+  channel: MessageChannel;
+  rating_response: number | null;
+  routed_to: ReviewRoute | null;
+  completed_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface Invoice {
+  id: string;
+  contract_id: string;
+  customer_id: string;
+  branch_id: string;
+  /** date columns come back as YYYY-MM-DD strings. */
+  billing_period_start: string;
+  billing_period_end: string;
+  /** numeric — money is a string all the way through. */
+  amount_due: string;
+  /** Derived from the payments on this invoice, never incremented in place. */
+  amount_paid: string;
+  status: InvoiceStatus;
+  due_date: string;
+  sent_at: Date | null;
+  paid_at: Date | null;
+  pdf_url: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface Payment {
+  id: string;
+  invoice_id: string;
+  amount: string;
+  method: PaymentMethod;
+  provider_transaction_id: string | null;
+  status: PaymentStatus;
+  failure_reason: string | null;
+  processed_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface Upload {
+  id: string;
+  key: string;
+  purpose: UploadPurpose;
+  content_type: string;
+  file_name: string | null;
+  byte_size: number | null;
+  status: UploadStatus;
+  uploaded_by_user_id: string | null;
+  branch_id: string | null;
+  stored_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface CardSetup {
+  id: string;
+  customer_id: string;
+  contract_id: string | null;
+  branch_id: string;
+  provider_session_id: string;
+  url: string;
+  status: CardSetupStatus;
+  payment_method_last4: string | null;
+  payment_method_brand: string | null;
+  requested_by_user_id: string | null;
+  expires_at: Date;
+  completed_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+/**
+ * An integration an administrator configures at runtime — which SMS provider
+ * this company uses, and the credentials for it. Secrets are encrypted into
+ * `secret_ciphertext` and never appear in an API response.
+ */
+export interface IntegrationSetting {
+  id: string;
+  key: string;
+  provider: string;
+  is_enabled: boolean;
+  settings: Record<string, string>;
+  secret_ciphertext: string | null;
+  updated_by_user_id: string | null;
+  created_at: Date;
+  updated_at: Date;
 }

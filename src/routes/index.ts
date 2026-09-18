@@ -2,24 +2,32 @@ import { Router } from 'express';
 import { auditLogRouter } from './audit';
 import { authRouter } from './auth';
 import { branchesRouter } from './branches';
+import { cardSetupsRouter } from './cards';
 import { checklistRequirementsRouter, contractsRouter } from './contracts';
 import { customersRouter } from './customers';
+import { invoicesRouter } from './invoices';
+import { messageLogRouter, messageTemplatesRouter } from './messages';
 import { documentRequirementsRouter, operatorsRouter } from './operators';
+import { paymentsRouter } from './payments';
 import { pricingGuideRouter } from './pricing';
 import { propertiesRouter } from './properties';
 import { quotesRouter } from './quotes';
+import { reportsRouter } from './reports';
+import { reviewRequestsRouter } from './reviews';
+import { settingsRouter } from './settings';
+import { filesRouter, uploadsRouter } from './uploads';
 import { usersRouter } from './users';
+import { workOrdersRouter } from './workOrders';
 
 /**
  * One place to see the whole surface. Adding a resource is: write the service,
  * write the route file, mount it here.
- *
- * Work orders, invoices and payments arrive in build steps 4 to 6 and mount
- * here the same way.
  */
 export const apiRouter = Router();
 
 apiRouter.use('/auth', authRouter);
+apiRouter.use('/uploads', uploadsRouter);
+apiRouter.use('/files', filesRouter);
 apiRouter.use('/branches', branchesRouter);
 apiRouter.use('/users', usersRouter);
 apiRouter.use('/operators', operatorsRouter);
@@ -30,4 +38,13 @@ apiRouter.use('/pricing-guide', pricingGuideRouter);
 apiRouter.use('/quotes', quotesRouter);
 apiRouter.use('/checklist-requirements', checklistRequirementsRouter);
 apiRouter.use('/contracts', contractsRouter);
+apiRouter.use('/work-orders', workOrdersRouter);
+apiRouter.use('/message-templates', messageTemplatesRouter);
+apiRouter.use('/message-log', messageLogRouter);
+apiRouter.use('/review-requests', reviewRequestsRouter);
+apiRouter.use('/card-setups', cardSetupsRouter);
+apiRouter.use('/invoices', invoicesRouter);
+apiRouter.use('/payments', paymentsRouter);
+apiRouter.use('/reports', reportsRouter);
+apiRouter.use('/settings', settingsRouter);
 apiRouter.use('/audit-log', auditLogRouter);

@@ -1,0 +1,20 @@
+# Local development override.
+# Run: docker compose -f docker-compose.yml -f deploy/compose.local.yml up -d --build
+#
+# This strips out Caddy and backups, exposes the app directly on port 3000, and disables
+# TRUST_PROXY since there's no reverse proxy. Keep DOMAIN and ACME_EMAIL in .env anyway,
+# because the base compose file checks them at parse time — if they're missing the whole
+# config fails before any service decision is made.
+
+services:
+  app:
+    ports:
+      - '3000:3000'
+    environment:
+      TRUST_PROXY: 'false'
+
+  caddy:
+    profiles: ['disabled']
+
+  backup:
+    profiles: ['disabled']

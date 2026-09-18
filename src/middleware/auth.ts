@@ -1,5 +1,6 @@
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import type { AuditActor } from '../services/audit';
+import type { CrewActor } from '../services/workOrders';
 import { loadAuthenticatedUser, verifyToken } from '../services/auth';
 import type { BranchScope } from '../types/auth';
 import type { UserRole } from '../types/models';
@@ -96,6 +97,18 @@ export function resolveActor(req: Request): AuditActor {
     throw unauthorized();
   }
   return { user_id: req.user.id, ip_address: req.ip ?? null };
+}
+
+/**
+ * The caller as the work order rules see them. Branch scope decides which
+ * visits are visible; this decides whose may be touched, so it carries the
+ * role as well as the id.
+ */
+export function resolveCrewActor(req: Request): CrewActor {
+  if (!req.user) {
+    throw unauthorized();
+  }
+  return { user_id: req.user.id, is_corporate: req.user.role === 'corporate' };
 }
 
 /** Route guard for roles. Use after requireAuth. */

@@ -1,7 +1,16 @@
 node_modules/
 dist/
+# Built browser modules: tsc output, same as dist/.
+public/assets/
+# Uploaded files when STORAGE_DRIVER=local.
+storage/
+# What the test run writes; a fresh one is made every time.
+storage-test/
 .env
 .env.local
+# The production environment file lives beside docker-compose.yml on the
+# server and holds every secret the system has.
+.env.production
 *.log
 coverage/
 .DS_Store

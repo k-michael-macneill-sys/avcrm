@@ -1,0 +1,29 @@
+# TLS is automatic: Caddy gets a certificate from Let's Encrypt on first boot
+# and renews it. The only requirements are that DOMAIN resolves to this
+# machine and that ports 80 and 443 reach it.
+
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode gzip
+
+	# The upload endpoint takes phone photos, and the default 100MB is more
+	# than the largest purpose allows anyway — the application does the real
+	# refusing, with a message.
+	request_body {
+		max_size 30MB
+	}
+
+	header {
+		# The app is same-origin and loads nothing external.
+		Content-Security-Policy "default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "same-origin"
+		-Server
+	}
+
+	reverse_proxy app:3000
+}

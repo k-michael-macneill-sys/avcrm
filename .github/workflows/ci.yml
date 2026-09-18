@@ -1,0 +1,74 @@
+name: CI
+
+# Every push and every pull request. The suite needs a real Postgres, which is
+# the point of it — the constraints and triggers in this schema are load
+# bearing, and a test that does not exercise them is testing something else.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: avcrm
+          POSTGRES_PASSWORD: avcrm
+          POSTGRES_DB: avcrm
+        ports:
+          - 5432:5432
+        # The steps below start the moment this reports ready, so it has to
+        # mean ready for queries.
+        options: >-
+          --health-cmd "pg_isready -U avcrm"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      # The suite creates and migrates avcrm_test itself; this is the
+      # connection it creates it from.
+      TEST_ADMIN_URL: postgres://avcrm:avcrm@localhost:5432/postgres
+      TEST_DATABASE_URL: postgres://avcrm:avcrm@localhost:5432/avcrm_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Install psql
+        # The test script creates the database and needs the client for it.
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
+
+      - name: Typecheck the app, the client and the suite
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  # Proves the thing that actually gets deployed still builds. Catches a
+  # missing file in the image long before a server does.
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

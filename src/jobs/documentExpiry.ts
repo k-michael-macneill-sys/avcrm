@@ -1,6 +1,6 @@
 import type { Knex } from 'knex';
 import { db as defaultDb, closeConnection } from '../db/client';
-import { sendEmail } from '../services/notifications';
+import { enqueueMessage } from '../services/messages';
 import { addDays } from '../services/operators';
 import { logger } from '../utils/logger';
 
@@ -12,6 +12,10 @@ import { logger } from '../utils/logger';
  *      them out of the assignable pool immediately.
  *   3. Operators are warned 30, 14 and 7 days ahead, copying the branch
  *      manager, and each window is only ever sent once.
+ *
+ * Every message is queued rather than sent here: this job's business is
+ * compliance, and delivery is the queue worker's. Run that after this one, or
+ * on its own schedule.
  *
  * Run it from cron or a scheduler:  npm run job:document-expiry
  */
@@ -41,6 +45,7 @@ interface DueRow {
   first_name: string;
   email: string;
   onboarding_status: string;
+  branch_id: string | null;
   branch_name: string | null;
   manager_email: string | null;
 }
@@ -97,20 +102,33 @@ export async function runDocumentExpiry(
     summary.suspended += 1;
     logger.warn({ user_id: userId }, 'Operator suspended: required document expired');
 
-    const manager = await branchManagerEmail(userId, db);
-    await sendEmail(
-      user.email,
-      'Your account has been suspended',
-      `Hi ${user.first_name}, a required document has expired, so you cannot be ` +
-        'assigned work until it is replaced and approved. Please upload a current ' +
-        'copy as soon as you can.',
+    const branch = await branchOf(userId, db);
+    const context = {
+      first_name: user.first_name,
+      operator_name: user.first_name,
+      branch_name: branch?.branch_name ?? 'their branch',
+    };
+
+    await enqueueMessage(
+      {
+        template_code: 'operator_suspended',
+        channel: 'email',
+        recipient: user.email,
+        branch_id: branch?.branch_id ?? null,
+        context,
+      },
+      db,
     );
-    if (manager) {
-      await sendEmail(
-        manager,
-        `Operator suspended: ${user.first_name}`,
-        `${user.first_name} has been suspended automatically because a required ` +
-          'document expired.',
+    if (branch?.manager_email) {
+      await enqueueMessage(
+        {
+          template_code: 'operator_suspended_internal',
+          channel: 'email',
+          recipient: branch.manager_email,
+          branch_id: branch.branch_id,
+          context,
+        },
+        db,
       );
     }
   }
@@ -144,6 +162,7 @@ export async function runDocumentExpiry(
       'users.first_name',
       'users.email',
       'users.onboarding_status',
+      'branches.id as branch_id',
       'branches.name as branch_name',
       'managers.email as manager_email',
     ])) as unknown as DueRow[];
@@ -158,21 +177,41 @@ export async function runDocumentExpiry(
     // heard about it at this urgency; the next warning waits for the next step.
     if (row.last_reminder_days !== null && row.last_reminder_days <= window) continue;
 
-    const subject = `${row.label} expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}`;
-    const body =
-      `Hi ${row.first_name}, your ${row.label} expires on ${row.expires_on}. ` +
-      (row.is_required
-        ? 'It is required, so your account will be suspended automatically if it lapses. '
-        : '') +
-      'Please upload a current copy before then.';
+    // The templates have no conditionals, so the "this one is required"
+    // sentence is rendered here and passed in as a token.
+    const context = {
+      first_name: row.first_name,
+      operator_name: row.first_name,
+      label: row.label,
+      expires_on: row.expires_on,
+      days_left: daysLeft,
+      day_word: daysLeft === 1 ? 'day' : 'days',
+      branch_name: row.branch_name ?? 'their branch',
+      required_note: row.is_required
+        ? ' It is required, so your account will be suspended automatically if it lapses.'
+        : '',
+    };
 
-    await sendEmail(row.email, subject, body);
+    await enqueueMessage(
+      {
+        template_code: 'document_expiring',
+        channel: 'email',
+        recipient: row.email,
+        branch_id: row.branch_id,
+        context,
+      },
+      db,
+    );
     if (row.manager_email) {
-      await sendEmail(
-        row.manager_email,
-        `${row.first_name}: ${subject.toLowerCase()}`,
-        `${row.first_name} at ${row.branch_name ?? 'their branch'} has a ${row.label} ` +
-          `expiring on ${row.expires_on}.`,
+      await enqueueMessage(
+        {
+          template_code: 'document_expiring_internal',
+          channel: 'email',
+          recipient: row.manager_email,
+          branch_id: row.branch_id,
+          context,
+        },
+        db,
       );
     }
 
@@ -187,16 +226,23 @@ export async function runDocumentExpiry(
   return summary;
 }
 
-async function branchManagerEmail(
-  userId: string,
-  db: Knex,
-): Promise<string | null> {
+interface BranchContact {
+  branch_id: string;
+  branch_name: string;
+  manager_email: string | null;
+}
+
+async function branchOf(userId: string, db: Knex): Promise<BranchContact | null> {
   const row = (await db('users')
     .join('branches', 'branches.id', 'users.branch_id')
-    .join('users as managers', 'managers.id', 'branches.manager_user_id')
+    .leftJoin('users as managers', 'managers.id', 'branches.manager_user_id')
     .where('users.id', userId)
-    .first('managers.email as email')) as { email: string } | undefined;
-  return row?.email ?? null;
+    .first([
+      'branches.id as branch_id',
+      'branches.name as branch_name',
+      'managers.email as manager_email',
+    ])) as BranchContact | undefined;
+  return row ?? null;
 }
 
 /** Whole days from one YYYY-MM-DD to another. */
