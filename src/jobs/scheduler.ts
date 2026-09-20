@@ -34,7 +34,7 @@ import { runMessageQueue } from './messageQueue';
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 
-interface ScheduledJob {
+export interface ScheduledJob {
   name: string;
   everyMs: number;
   /** Staggered so a restart does not run all four at once. */
@@ -70,69 +70,115 @@ const JOBS: ScheduledJob[] = [
   },
 ];
 
-let stopping = false;
-/** What is mid-run, so shutdown can wait for it. */
-const inFlight = new Map<string, Promise<void>>();
-const timers: NodeJS.Timeout[] = [];
+export interface Scheduler {
+  /** Arms every job's timer. */
+  start(): void;
+  /**
+   * Stops starting new work and waits for whatever is mid-run, so a deploy
+   * cannot cut a billing pass in half. Safe to call twice.
+   */
+  drain(signal: string): Promise<void>;
+  /** Which jobs are running right now. */
+  readonly running: string[];
+}
 
-async function tick(job: ScheduledJob): Promise<void> {
-  if (stopping) return;
-  if (inFlight.has(job.name)) {
-    logger.warn({ job: job.name }, 'Still running from last time; skipping this turn');
-    return;
+/**
+ * The machinery, separated from the job list so the shutdown path can be
+ * tested with a job that takes long enough to still be running when the
+ * signal arrives. The real jobs finish in milliseconds, which makes the
+ * interesting case impossible to hit against them.
+ */
+export function createScheduler(jobs: ScheduledJob[]): Scheduler {
+  let stopping = false;
+  /** What is mid-run, so shutdown can wait for it. */
+  const inFlight = new Map<string, Promise<void>>();
+  const timers: NodeJS.Timeout[] = [];
+
+  async function tick(job: ScheduledJob): Promise<void> {
+    if (stopping) return;
+    if (inFlight.has(job.name)) {
+      logger.warn({ job: job.name }, 'Still running from last time; skipping this turn');
+      return;
+    }
+
+    const started = Date.now();
+    const running = (async () => {
+      try {
+        const summary = await job.run();
+        logger.info(
+          { job: job.name, duration_ms: Date.now() - started, summary },
+          'Job finished',
+        );
+      } catch (error) {
+        // One bad card or unreachable gateway is not a reason to stop the
+        // others, or the process.
+        logger.error(
+          { job: job.name, duration_ms: Date.now() - started, err: error },
+          'Job failed',
+        );
+      }
+    })();
+
+    inFlight.set(job.name, running);
+    await running;
+    inFlight.delete(job.name);
   }
 
-  const started = Date.now();
-  const running = (async () => {
-    try {
-      const summary = await job.run();
+  function schedule(job: ScheduledJob): void {
+    const start = setTimeout(() => {
+      void tick(job);
+      const repeat = setInterval(() => void tick(job), job.everyMs);
+      timers.push(repeat);
+    }, job.delayMs);
+
+    timers.push(start);
+  }
+
+  return {
+    start(): void {
+      for (const job of jobs) schedule(job);
       logger.info(
-        { job: job.name, duration_ms: Date.now() - started, summary },
-        'Job finished',
+        { jobs: jobs.map((j) => ({ name: j.name, every_ms: j.everyMs })) },
+        'Scheduler started',
       );
-    } catch (err) {
-      // Logged and dropped on purpose. The next turn will try again, and the
-      // other three jobs are none of this one's business.
-      logger.error({ err, job: job.name }, 'Job failed; the others carry on');
-    }
-  })();
+    },
 
-  inFlight.set(job.name, running);
-  await running;
-  inFlight.delete(job.name);
+    async drain(signal: string): Promise<void> {
+      if (stopping) return;
+      stopping = true;
+      logger.info({ signal, waiting_for: [...inFlight.keys()] }, 'Scheduler stopping');
+
+      for (const timer of timers) clearTimeout(timer);
+      // Let whatever is mid-run finish rather than cutting a billing pass in half.
+      await Promise.allSettled([...inFlight.values()]);
+    },
+
+    get running(): string[] {
+      return [...inFlight.keys()];
+    },
+  };
 }
 
-function schedule(job: ScheduledJob): void {
-  const start = setTimeout(() => {
-    void tick(job);
-    const repeat = setInterval(() => void tick(job), job.everyMs);
-    timers.push(repeat);
-  }, job.delayMs);
+function main(): void {
+  const scheduler = createScheduler(JOBS);
+  scheduler.start();
 
-  timers.push(start);
+  const stop = (signal: string): void => {
+    void (async () => {
+      await scheduler.drain(signal);
+      await closeTransport();
+      await closeConnection();
+      logger.info('Scheduler stopped');
+      process.exit(0);
+    })();
+  };
+
+  process.on('SIGTERM', () => stop('SIGTERM'));
+  process.on('SIGINT', () => stop('SIGINT'));
 }
 
-async function shutdown(signal: string): Promise<void> {
-  if (stopping) return;
-  stopping = true;
-  logger.info({ signal, waiting_for: [...inFlight.keys()] }, 'Scheduler stopping');
-
-  for (const timer of timers) clearTimeout(timer);
-  // Let whatever is mid-run finish rather than cutting a billing pass in half.
-  await Promise.allSettled([...inFlight.values()]);
-
-  await closeTransport();
-  await closeConnection();
-  logger.info('Scheduler stopped');
-  process.exit(0);
+// Only when run as the process entry point, so importing this for a test does
+// not arm four real timers against the database.
+if (require.main === module) {
+  main();
 }
-
-for (const job of JOBS) schedule(job);
-
-logger.info(
-  { jobs: JOBS.map((j) => ({ name: j.name, every_ms: j.everyMs })) },
-  'Scheduler started',
-);
-
-process.on('SIGTERM', () => void shutdown('SIGTERM'));
-process.on('SIGINT', () => void shutdown('SIGINT'));

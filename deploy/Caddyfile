@@ -1,7 +1,6 @@
 # TLS is automatic: Caddy gets a certificate from Let's Encrypt on first boot
 # and renews it. The only requirements are that DOMAIN resolves to this
 # machine and that ports 80 and 443 reach it.
-
 {
 	email {$ACME_EMAIL}
 }

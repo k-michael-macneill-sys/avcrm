@@ -1270,6 +1270,27 @@ Three settings decide whether the system works rather than merely runs:
 | `TRUST_PROXY` | Set to `true` by the compose file. Behind Caddy the client address arrives in a header, and a contract records the IP its signature came from. |
 | `DATABASE_URL` | The host is `postgres`, the compose service name, not `localhost`. |
 
+#### Why the application port is not published
+
+`TRUST_PROXY=true` tells Express to believe `X-Forwarded-For`. That is correct
+behind Caddy and **only** behind Caddy, because Caddy does not trust an inbound
+`X-Forwarded-For` either: it discards whatever the client sent and rewrites the
+header with the address the connection actually came from. Measured, signing
+the same contract three ways:
+
+| Reached via | Client sends `X-Forwarded-For: 203.0.113.77` | `signed_ip` recorded |
+| --- | --- | --- |
+| Caddy, `TRUST_PROXY=true` | Caddy replaces it | `127.0.0.1` — the real peer |
+| The app directly, `TRUST_PROXY=true` | believed as sent | **`203.0.113.77` — forged** |
+| The app directly, `TRUST_PROXY=false` | ignored | `127.0.0.1` — the real peer |
+
+So `signed_ip` is evidence only while Caddy is the sole way in. The compose
+file keeps it that way by publishing ports on Caddy alone — **publishing the
+`app` service's port, even briefly to debug something, makes every signature
+taken in that window attributable to an address the signer chose.** If the
+application does need to be reachable directly, set `TRUST_PROXY=false` with
+it, which is what `deploy/compose.local.yml` does.
+
 ### How it starts
 
 `migrate` runs to completion before `app` and `scheduler` start, so the schema
@@ -1444,6 +1465,7 @@ the word `endstream` and lost everything after it.
 | `payments` | Card capture, charging, declines, webhooks |
 | `sms` | Connecting a provider, credentials, sending |
 | `mail` | Real delivery, bounces, the staging redirect |
+| `scheduler` | Graceful shutdown, the overlap guard, a job that throws |
 | `pdfExtractor` | The reader the PDF tests lean on |
 
 ## Layout
