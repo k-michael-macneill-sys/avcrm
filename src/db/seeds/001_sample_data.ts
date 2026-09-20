@@ -2,6 +2,12 @@ import type { Knex } from 'knex';
 import { config } from '../../config';
 import { hashPassword } from '../../services/auth';
 import { addDays } from '../../services/operators';
+import {
+  documentPdf,
+  drivewayPng,
+  signaturePng,
+  storeSeedFile,
+} from '../seedFiles';
 
 /** Mid November to mid April, the season both branches sell. */
 const SEASON_MONTHS = 5;
@@ -38,6 +44,9 @@ export async function seed(knex: Knex): Promise<void> {
   await knex('pricing_guide').del();
   await knex('properties').del();
   await knex('customers').del();
+  // The stored files themselves are left on disk: they are content-addressed
+  // by a generated uuid, so a re-seed writes new ones rather than colliding.
+  await knex('uploads').del();
   await knex('operator_documents').del();
   await knex('document_requirements').del();
   await knex.raw('update branches set manager_user_id = null');
@@ -129,7 +138,9 @@ export async function seed(knex: Knex): Promise<void> {
         onboarding_status: 'docs_submitted',
       },
     ])
-    .returning(['id', 'email']);
+    // branch_id comes back too: an uploaded file records the branch it
+    // belongs to, which is what branch-scoped reads are decided on.
+    .returning(['id', 'email', 'branch_id']);
 
   const byEmail = (email: string) => {
     const found = users.find((u) => u.email === email);
@@ -229,22 +240,35 @@ export async function seed(knex: Knex): Promise<void> {
   ]);
 
   // --- Operator documents -------------------------------------------------
-  const file = (code: string, userEmail: string) => ({
-    file_url: `private/operator-docs/${userEmail}/${code}.pdf`,
-    file_name: `${code}.pdf`,
-    mime_type: 'application/pdf',
-    file_size: 184_320,
-  });
+  // A real PDF per document, written through the storage driver with the
+  // `uploads` row that read authorization is decided from — otherwise every
+  // one of these is a 404 the moment somebody opens the compliance screen.
+  const file = async (code: string, owner: { id: string; branch_id: string | null }) => {
+    const key = await storeSeedFile(
+      knex,
+      'operator_document',
+      'application/pdf',
+      documentPdf(`Sample document: ${code.replace(/_/g, ' ')}`),
+      `${code}.pdf`,
+      owner.id,
+      owner.branch_id,
+    );
+    return {
+      file_url: key,
+      file_name: `${code}.pdf`,
+      mime_type: 'application/pdf',
+      file_size: 184_320,
+    };
+  };
 
-  const approved = (
-    userId: string,
-    email: string,
+  const approved = async (
+    owner: { id: string; branch_id: string | null },
     code: string,
     expiresOn: string | null,
   ) => ({
-    user_id: userId,
+    user_id: owner.id,
     requirement_code: code,
-    ...file(code, email),
+    ...(await file(code, owner)),
     issued_on: expiresOn ? addDays(expiresOn, -365) : null,
     expires_on: expiresOn,
     status: 'approved' as const,
@@ -260,34 +284,32 @@ export async function seed(knex: Knex): Promise<void> {
     'vehicle_registration',
     'wsib_clearance',
   ];
-  const ottoRows = ottoRequired.map((code) =>
-    approved(otto.id, 'otto@avcrm.test', code, addDays(today, 200)),
-  );
-  ottoRows.push(
-    approved(otto.id, 'otto@avcrm.test', 'contractor_agreement', null),
-    approved(otto.id, 'otto@avcrm.test', 'void_cheque', null),
-    approved(otto.id, 'otto@avcrm.test', 'tax_form', null),
-  );
+  const ottoRows = await Promise.all([
+    ...ottoRequired.map((code) => approved(otto, code, addDays(today, 200))),
+    approved(otto, 'contractor_agreement', null),
+    approved(otto, 'void_cheque', null),
+    approved(otto, 'tax_form', null),
+  ]);
 
   // Nina is compliant today, but her abstract lands inside the 30 day window
   // so the nightly job has a reminder to send.
-  const ninaRows = [
-    approved(nina.id, 'nina@avcrm.test', 'drivers_license', addDays(today, 400)),
-    approved(nina.id, 'nina@avcrm.test', 'drivers_abstract', addDays(today, 21)),
-    approved(nina.id, 'nina@avcrm.test', 'insurance_certificate', addDays(today, 150)),
-    approved(nina.id, 'nina@avcrm.test', 'vehicle_registration', addDays(today, 150)),
-    approved(nina.id, 'nina@avcrm.test', 'wsib_clearance', addDays(today, 60)),
-    approved(nina.id, 'nina@avcrm.test', 'contractor_agreement', null),
-    approved(nina.id, 'nina@avcrm.test', 'void_cheque', null),
-    approved(nina.id, 'nina@avcrm.test', 'tax_form', null),
-  ];
+  const ninaRows = await Promise.all([
+    approved(nina, 'drivers_license', addDays(today, 400)),
+    approved(nina, 'drivers_abstract', addDays(today, 21)),
+    approved(nina, 'insurance_certificate', addDays(today, 150)),
+    approved(nina, 'vehicle_registration', addDays(today, 150)),
+    approved(nina, 'wsib_clearance', addDays(today, 60)),
+    approved(nina, 'contractor_agreement', null),
+    approved(nina, 'void_cheque', null),
+    approved(nina, 'tax_form', null),
+  ]);
 
   // Pat has submitted two documents that nobody has reviewed yet.
   const patRows = [
     {
       user_id: pat.id,
       requirement_code: 'drivers_license',
-      ...file('drivers_license', 'pat@avcrm.test'),
+      ...(await file('drivers_license', pat)),
       issued_on: addDays(today, -30),
       expires_on: addDays(today, 1795),
       status: 'submitted' as const,
@@ -295,7 +317,7 @@ export async function seed(knex: Knex): Promise<void> {
     {
       user_id: pat.id,
       requirement_code: 'contractor_agreement',
-      ...file('contractor_agreement', 'pat@avcrm.test'),
+      ...(await file('contractor_agreement', pat)),
       issued_on: addDays(today, -30),
       expires_on: null,
       status: 'submitted' as const,
@@ -581,13 +603,33 @@ export async function seed(knex: Knex): Promise<void> {
   // --- Contracts ----------------------------------------------------------
   const signedAt = new Date();
 
+  // The customer signs on the rep's phone, so the rep is the uploader and the
+  // image is stored before the contract that points at it exists — the same
+  // order the real signature flow uses.
+  const signature = async (rep: { id: string; branch_id: string | null }, salt: number) =>
+    storeSeedFile(
+      knex,
+      'signature',
+      'image/png',
+      signaturePng(salt),
+      'signature.png',
+      rep.id,
+      rep.branch_id,
+    );
+
+  const [haroldSignature, priyaSignature, samSignature] = await Promise.all([
+    signature(otto, 1),
+    signature(nina, 2),
+    signature(halifaxManager, 3),
+  ]);
+
   const contracts = await knex('contracts')
     .insert([
       {
         quote_id: quoteFor(propertyBy('212 Johnson St').id).id,
         customer_id: customerBy('Harold').id,
         property_id: propertyBy('212 Johnson St').id,
-        signature_image_url: 'private/signatures/harold-bell.png',
+        signature_image_url: haroldSignature,
         signed_at: signedAt,
         signed_ip: '198.51.100.24',
         signed_lat: '44.230500',
@@ -603,7 +645,7 @@ export async function seed(knex: Knex): Promise<void> {
         quote_id: quoteFor(propertyBy('1140 Princess St').id).id,
         customer_id: customerBy('Priya').id,
         property_id: propertyBy('1140 Princess St').id,
-        signature_image_url: 'private/signatures/priya-raman.png',
+        signature_image_url: priyaSignature,
         signed_at: signedAt,
         signed_ip: '198.51.100.31',
         terms_version: '2026-09-01',
@@ -617,7 +659,7 @@ export async function seed(knex: Knex): Promise<void> {
         quote_id: quoteFor(propertyBy('5560 Cornwallis St').id).id,
         customer_id: customerBy('Sam').id,
         property_id: propertyBy('5560 Cornwallis St').id,
-        signature_image_url: 'private/signatures/sam-toussaint.png',
+        signature_image_url: samSignature,
         signed_at: signedAt,
         signed_ip: '203.0.113.9',
         terms_version: '2026-09-01',
@@ -770,11 +812,45 @@ export async function seed(knex: Knex): Promise<void> {
   // Geotagged on the property itself, which is what the upload check compares
   // against. taken_at is when the driveway was cleared, not when the file
   // arrived.
+  // A drawn pair per visit: snow lying on the drive, then the same drive
+  // cleared. They have to be tellable apart at thumbnail size, because that is
+  // the entire point of a before and an after.
+  const photo = async (
+    operator: { id: string; branch_id: string | null },
+    cleared: boolean,
+    salt: number,
+  ) =>
+    storeSeedFile(
+      knex,
+      'service_photo',
+      'image/png',
+      drivewayPng(cleared, salt),
+      cleared ? 'after.png' : 'before.png',
+      operator.id,
+      operator.branch_id,
+    );
+
+  const [
+    johnsonBefore,
+    johnsonAfter,
+    princessBefore,
+    princessAfter,
+    cornwallisBefore,
+    cornwallisAfter,
+  ] = await Promise.all([
+    photo(otto, false, 11),
+    photo(otto, true, 11),
+    photo(nina, false, 23),
+    photo(nina, true, 23),
+    photo(halifaxManager, false, 37),
+    photo(halifaxManager, true, 37),
+  ]);
+
   await knex('service_photos').insert([
     {
       work_order_id: completedVisit.id,
       photo_type: 'before',
-      file_url: 'private/service-photos/212-johnson-before.jpg',
+      file_url: johnsonBefore,
       taken_at: hours(-25.5),
       latitude: '44.230500',
       longitude: '-76.494400',
@@ -783,7 +859,7 @@ export async function seed(knex: Knex): Promise<void> {
     {
       work_order_id: completedVisit.id,
       photo_type: 'after',
-      file_url: 'private/service-photos/212-johnson-after.jpg',
+      file_url: johnsonAfter,
       taken_at: hours(-25),
       latitude: '44.230500',
       longitude: '-76.494400',
@@ -792,7 +868,7 @@ export async function seed(knex: Knex): Promise<void> {
     {
       work_order_id: unaskedVisit.id,
       photo_type: 'before',
-      file_url: 'private/service-photos/1140-princess-before.jpg',
+      file_url: princessBefore,
       taken_at: hours(-30.5),
       latitude: '44.246800',
       longitude: '-76.526900',
@@ -801,7 +877,7 @@ export async function seed(knex: Knex): Promise<void> {
     {
       work_order_id: unaskedVisit.id,
       photo_type: 'after',
-      file_url: 'private/service-photos/1140-princess-after.jpg',
+      file_url: princessAfter,
       taken_at: hours(-30),
       latitude: '44.246800',
       longitude: '-76.526900',
@@ -814,14 +890,14 @@ export async function seed(knex: Knex): Promise<void> {
     {
       work_order_id: ratedVisit.id,
       photo_type: 'before',
-      file_url: 'private/service-photos/5560-cornwallis-before.jpg',
+      file_url: cornwallisBefore,
       taken_at: hours(-73),
       uploaded_by_user_id: halifaxManager.id,
     },
     {
       work_order_id: ratedVisit.id,
       photo_type: 'after',
-      file_url: 'private/service-photos/5560-cornwallis-after.jpg',
+      file_url: cornwallisAfter,
       taken_at: hours(-72),
       uploaded_by_user_id: halifaxManager.id,
     },

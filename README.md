@@ -797,6 +797,23 @@ handed to the page as blob URLs instead. The alternative is a signed read URL
 like the upload target — worth doing when images get numerous, and it trades a
 session check for a URL that works for anyone who copies it.
 
+### Seeded files are real files
+
+`npm run seed` writes actual bytes through the storage driver and records the
+matching `uploads` row, because that row is what a read is authorized against.
+
+It used to record keys like `private/signatures/harold-bell.png` that nothing
+had ever written to, which is a 404 by design — so a freshly seeded install
+showed a broken image on every completed visit, a signature nobody could open,
+and a service report whose photos all read *"This photo could not be
+included"*. The demo data disagreed with the feature it was meant to
+demonstrate.
+
+The images are drawn rather than checked in (`src/db/seedFiles.ts`): a
+repository is a poor place for sample JPEGs, and a generated driveway can be
+snow-covered in the before and cleared in the after, which is the one thing
+that pair has to show.
+
 ### Known gaps
 
 - **Nothing checks that a key exists when a row records it.** `POST /contracts`
@@ -1441,6 +1458,7 @@ src/                   the API
     knexfile.ts        config file for the knex CLI
     migrationSource.ts names migrations without an extension, so .ts and .js agree
     migrations/        one file per table, in dependency order
+    seedFiles.ts       draws the seed's signatures, photos and documents
     seeds/             development sample data
   jobs/                scheduled work: each runs as a script or from scheduler.ts
   routes/              HTTP only: validate, scope, call a service, respond
