@@ -33,6 +33,16 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
   JWT_EXPIRES_IN: z.string().default('12h'),
   BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(15).default(10),
+
+  // Throttling for the endpoints reachable without a session. Only failed
+  // attempts accrue — see src/middleware/rateLimit.ts — so these can be tight
+  // without tripping anyone who knows their own password. Set
+  // AUTH_RATE_LIMIT_MAX=0 to switch it off, which the test harness does.
+  AUTH_RATE_LIMIT_WINDOW_S: z.coerce.number().int().min(10).max(86_400).default(900),
+  /** Failed sign-ins for one email address, per window. */
+  AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(0).max(1000).default(8),
+  /** Failed sign-ins from one address across all accounts, per window. */
+  AUTH_RATE_LIMIT_MAX_PER_IP: z.coerce.number().int().min(0).max(10_000).default(30),
   /**
    * Encrypts the provider credentials an admin saves in the settings screen.
    * Optional: without it the key is derived from JWT_SECRET, which works but
@@ -178,6 +188,11 @@ export const config = {
     jwtSecret: env.JWT_SECRET,
     jwtExpiresIn: env.JWT_EXPIRES_IN,
     bcryptRounds: env.BCRYPT_ROUNDS,
+    rateLimit: {
+      windowMs: env.AUTH_RATE_LIMIT_WINDOW_S * 1000,
+      maxPerEmail: env.AUTH_RATE_LIMIT_MAX,
+      maxPerIp: env.AUTH_RATE_LIMIT_MAX_PER_IP,
+    },
   },
   secretsKey: env.SECRETS_KEY ?? null,
   storage: {

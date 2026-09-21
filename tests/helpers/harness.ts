@@ -1,4 +1,5 @@
 import { after, before, beforeEach } from 'node:test';
+import { resetRateLimits } from '../../src/middleware/rateLimit';
 import { resetDatabase } from './database';
 import { buildWorld, type World } from './fixtures';
 import { startServer, type TestServer } from './server';
@@ -31,6 +32,9 @@ export function harness(): Harness {
 
   beforeEach(async () => {
     await resetDatabase();
+    // Failed sign-ins are counted in process memory, so without this a suite
+    // of deliberate rejections would lock out the one after it.
+    resetRateLimits();
     world = await buildWorld();
   });
 

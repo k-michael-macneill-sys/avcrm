@@ -208,6 +208,45 @@ token, so a suspension, deactivation or role change takes effect immediately
 instead of whenever the token expires. That is one indexed primary-key lookup
 per request.
 
+### Signing in
+
+`/auth/login` is a password oracle open to the internet: without a limit, a
+list of common passwords against one known address is free, and nothing in the
+log distinguishes it from ordinary traffic until somebody gets in.
+
+Two rules run on every sign-in and both must pass, because they stop different
+attacks — **by address**, which catches one host working through many
+accounts, and **by email**, which catches many hosts working on one account.
+A refusal is a `429` carrying `Retry-After`, so a client is told when to come
+back rather than left guessing.
+
+**Only failures count.** The attempt is recorded first and released when the
+response comes back under 400, so an operator signing in on the truck, the
+office desktop and a phone never spends the budget. That is what makes a tight
+limit safe: eight failures per account per fifteen minutes stops guessing
+without ever troubling somebody who knows their own password.
+
+Registration is throttled too, and it is the one place where success counts
+against the limit rather than being forgiven — a script creating one valid
+account after another is exactly what is being prevented, so forgiving it
+would defeat the rule entirely.
+
+| Setting | Default | |
+| --- | --- | --- |
+| `AUTH_RATE_LIMIT_WINDOW_S` | `900` | The window, in seconds |
+| `AUTH_RATE_LIMIT_MAX` | `8` | Failed sign-ins per email address |
+| `AUTH_RATE_LIMIT_MAX_PER_IP` | `30` | Failed sign-ins per address, across accounts |
+
+The count lives in the application's memory, which suits a deployment running
+one container. A second one would keep its own counters and the effective
+limit would double; moving the store to Postgres is the change to make then,
+and nothing around it would move. Set `AUTH_RATE_LIMIT_MAX=0` to switch a rule
+off entirely.
+
+The address it keys on is `req.ip`, so it depends on `TRUST_PROXY` being right
+for the same reason `signed_ip` on a contract does — see
+[Why the application port is not published](#why-the-application-port-is-not-published).
+
 ### Registration
 
 `POST /auth/register` is open so a branch can onboard operators, but the role is
@@ -236,7 +275,8 @@ A suspension is only lifted by corporate, never by the automatic refresh.
 
 | Method | Path | Access | Notes |
 | --- | --- | --- | --- |
-| GET | `/health` | public | |
+| GET | `/health` | public | Liveness — is the process answering |
+| GET | `/ready` | public | Readiness — database, queue and storage; 503 when degraded |
 | POST | `/auth/register` | public | Always creates a pending operator |
 | POST | `/auth/login` | public | Returns `{ token, user }` |
 | GET | `/auth/me` | any | |
@@ -1227,16 +1267,35 @@ not run, so placeholder values are fine.
 
 ### Production deployment
 
-One machine, one command:
+Five steps, in this order:
 
 ```bash
-cp deploy/env.example .env     # fill it in
+cp deploy/env.example .env
+npm run secrets                # generates the three it cannot guess
+$EDITOR .env                   # paste those in, plus DOMAIN, SMTP, Stripe
+npm run preflight              # refuses to bless a half-filled .env
 docker compose up -d --build
 ```
+
+`npm run preflight` is the step worth not skipping. The application already
+refuses to boot on a missing `DATABASE_URL`, so that class of mistake is
+caught anyway; preflight catches the other kind — the settings that are
+individually valid and still wrong for production. A `DOMAIN` still reading
+`crm.example.ca`. `MAIL_DRIVER=log`, so every invoice is written to a file
+instead of sent. `MAIL_REDIRECT_TO` left over from staging, so every message
+goes to you and no customer ever hears anything. It exits non-zero on those
+and lists them; things that are your call, like running without an offsite
+backup, come back as warnings rather than refusals.
 
 That brings up Postgres, the migrations, the application, the four scheduled
 jobs, TLS, and a nightly dump. Only Caddy is published; the database and the
 application are reachable only from inside the compose network.
+
+Afterwards, check it is actually working rather than merely running:
+
+```bash
+curl -s https://your-domain/ready | jq
+```
 
 ### What it needs
 
@@ -1348,10 +1407,32 @@ lives outside the repository.
 name first so an interrupted dump is never left looking like a good one.
 
 **A dump on the same machine as the database is not a backup.** It survives a
-bad migration, not a dead disk. The script has a marked place for an offsite
-copy and deliberately does not choose one for you, because where your
-customers' data goes is your decision. Until it is filled in, there is one
-copy of everything.
+bad migration, not a dead disk. `BACKUP_OFFSITE_CMD` is what takes a copy off
+the machine; it is given the dump's path as `$1`, so anything that can be
+written as a shell line works:
+
+```bash
+BACKUP_OFFSITE_CMD='rclone copy "$1" remote:avcrm-backups/'
+BACKUP_OFFSITE_CMD='aws s3 cp "$1" s3://avcrm-backups/'
+BACKUP_OFFSITE_CMD='scp "$1" backups@elsewhere:/srv/avcrm/'
+```
+
+Where that points is deliberately your decision, because it decides who holds
+your customers' data. Leave it empty and the system keeps working and says so
+in the log every night — there is then exactly one copy of everything.
+
+Two things the script does that are easy to leave out:
+
+- **A dump is verified before it counts.** `pg_dump` exiting zero says nothing
+  about whether the bytes that reached the disk decompress, and an archive
+  nobody can open is discovered at the worst possible moment. It is
+  `gzip -t`ed under a `.part` name and only then moved into place.
+- **Pruning waits for the offsite copy.** If tonight's upload failed, the
+  fortnight of older dumps is kept rather than rotated away — otherwise a
+  quietly broken upload would eat the backups it was supposed to be
+  replacing. With no `BACKUP_OFFSITE_CMD` set at all, pruning runs as normal,
+  because that operator has accepted one copy and still needs the disk not to
+  fill.
 
 Restoring:
 
@@ -1372,15 +1453,43 @@ git pull && docker compose up -d --build
 Migrations run first, then the application restarts. The storage volume and
 the database are untouched.
 
+### Watching it
+
+Two endpoints, answering different questions:
+
+| | Asks | Who polls it | On failure |
+| --- | --- | --- | --- |
+| `GET /health` | Is this process answering? | the container healthcheck | Docker restarts the container |
+| `GET /ready` | Is the system doing its job? | an external uptime monitor | 503 |
+
+`/ready` checks the database, the outbound queue and the storage volume. The
+queue one is the point of it. Nothing in the application sends anything
+directly — everything is queued and drained by the scheduler — so if that
+process dies, or an SMTP credential is rotated, every screen keeps working,
+every request still returns 200, and no customer hears anything. That is the
+failure that goes unnoticed for weeks. It reports the age of the oldest
+message still waiting, not the size of the queue: a large backlog draining
+steadily is fine, one message stuck for an hour means nothing is draining.
+
+It answers without a session, because a monitor has no account, and its
+details are coarse on purpose — `"unreachable"` rather than the driver's
+message, which can carry a host and port. The real error goes to the log.
+
+Deliberately **not** wired to the container healthcheck: restarting the
+application because a separate process stopped draining the queue would
+achieve nothing and hide the problem.
+
 ### Still to do before this is properly production
 
-- **No rate limiting on `/auth/login`**, and no logout or refresh tokens — a
-  JWT is valid until it expires.
-- **No monitoring.** The health check restarts a wedged container; nothing
-  tells you it happened, and nothing watches whether the queue is draining.
+- **No logout and no refresh tokens** — a JWT is valid until it expires.
+  Sign-in itself is throttled (see [Signing in](#signing-in)), but a leaked
+  token cannot be revoked short of rotating `JWT_SECRET`, which signs
+  everybody out.
+- **Nothing is alerted automatically.** `/ready` will tell a monitor the
+  truth, but something still has to be pointed at it and told whom to wake.
 - One machine is one point of failure. That is a reasonable trade at this
-  size, but it is a trade: a dead disk with no offsite copy is the end of the
-  business's records.
+  size, but it is a trade: with no `BACKUP_OFFSITE_CMD` set, a dead disk is
+  the end of the business's records.
 
 ## Tests
 
@@ -1466,6 +1575,9 @@ the word `endstream` and lost everything after it.
 | `sms` | Connecting a provider, credentials, sending |
 | `mail` | Real delivery, bounces, the staging redirect |
 | `scheduler` | Graceful shutdown, the overlap guard, a job that throws |
+| `rateLimit` | Sign-in throttling, and that success is forgiven |
+| `preflight` | What a deploy check refuses, and what it only warns about |
+| `health` | Readiness going red on a queue that stopped draining |
 | `pdfExtractor` | The reader the PDF tests lean on |
 
 ## Layout
@@ -1483,8 +1595,9 @@ src/                   the API
     seedFiles.ts       draws the seed's signatures, photos and documents
     seeds/             development sample data
   jobs/                scheduled work: each runs as a script or from scheduler.ts
+  ops/                 deploy tooling: secret generation and the preflight check
   routes/              HTTP only: validate, scope, call a service, respond
-  middleware/          auth, error handler, request logger
+  middleware/          auth, error handler, request logger, rate limiting
   services/
     pdf/               the layout toolkit and the two documents
     ...                business logic; plain functions, no classes
@@ -1541,9 +1654,12 @@ Other conventions worth keeping:
 ## Known gaps
 
 - No refresh tokens or logout; a JWT is valid until it expires (`JWT_EXPIRES_IN`).
-- No rate limiting on `/auth/login`.
-- Nothing watches the running system. The container health check restarts a
-  wedged application and tells nobody — see [Deployment](#deployment).
+- Sign-in throttling counts attempts in the application's own memory, which
+  suits one container and would become per-container if there were two — see
+  [Signing in](#signing-in).
+- Nothing is alerted automatically. `GET /ready` reports the truth to whatever
+  polls it, but pointing a monitor at it is a deployment step, not something
+  the repository can do — see [Watching it](#watching-it).
 - Coverage is by behaviour rather than by line, and is thin in places: the
   document vault's expiry job, pricing suggestions, and the browser client have
   no tests of their own.

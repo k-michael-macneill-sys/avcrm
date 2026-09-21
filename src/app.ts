@@ -4,6 +4,7 @@ import { config } from './config';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { requestLogger } from './middleware/requestLogger';
 import { apiRouter } from './routes';
+import { checkReadiness } from './services/health';
 import { webhooksRouter } from './routes/webhooks';
 
 /**
@@ -29,8 +30,27 @@ export function createApp(): Express {
   app.use(express.json({ limit: '1mb' }));
   app.use(requestLogger);
 
+  // Liveness: is this process answering at all? What the container
+  // healthcheck polls, and what it restarts on.
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok', uptime_s: Math.round(process.uptime()) });
+  });
+
+  /*
+   * Readiness: is the system actually doing its job? Answers 503 when it is
+   * not, so an uptime monitor can say so — see src/services/health.ts for why
+   * a queue that has quietly stopped draining is the failure worth catching.
+   *
+   * No session, because a monitor has no account.
+   */
+  app.get('/ready', (_req, res, next) => {
+    checkReadiness()
+      .then((readiness) => {
+        res.status(readiness.status === 'ready' ? 200 : 503)
+          .set('Cache-Control', 'no-store')
+          .json(readiness);
+      })
+      .catch(next);
   });
 
   app.use(apiRouter);

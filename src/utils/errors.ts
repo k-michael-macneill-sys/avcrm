@@ -30,3 +30,6 @@ export const notFound = (message = 'Resource not found') =>
 
 export const conflict = (message: string, details?: unknown) =>
   new ApiError(409, 'conflict', message, details);
+
+export const tooManyRequests = (message: string, details?: unknown) =>
+  new ApiError(429, 'too_many_requests', message, details);
