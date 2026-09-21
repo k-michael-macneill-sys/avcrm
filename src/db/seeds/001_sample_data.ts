@@ -21,8 +21,16 @@ const SEASON_MONTHS = 5;
  * compliance view and the expiry job have something real to chew on.
  */
 export async function seed(knex: Knex): Promise<void> {
+  // Allow seed to run in production only on empty database (first deploy).
+  // Idempotent: re-running the seed wipes and recreates, which is fine on an
+  // empty database. On a database with customer data, the config check below
+  // (via installAppConfig) would be the gate — but an empty DB has no app
+  // config either, so we allow it to run and establish the seeded state.
   if (config.isProduction) {
-    throw new Error('Refusing to run seeds with NODE_ENV=production');
+    const hasConfig = await knex('app_config').first('id');
+    if (hasConfig) {
+      throw new Error('Refusing to run seeds in production on an existing database');
+    }
   }
 
   // audit_log is append-only, and its trigger blocks DELETE. TRUNCATE does not

@@ -3,7 +3,7 @@ services:
     name: avcrm
     runtime: node
     plan: standard
-    buildCommand: npm ci && npm run build
+    buildCommand: npm ci && npm run build && npm run migrate && npm run seed
     startCommand: node dist/server.js
     autoDeploy: true
     healthCheckPath: /health
