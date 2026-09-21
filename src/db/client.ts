@@ -23,11 +23,30 @@ pg.types.setTypeParser(pg.types.builtins.DATE, (value: string) => value);
  * Single Knex instance for the process. Imported directly by services; there is
  * no container and no repository layer — services just take `db` or use this.
  */
+/**
+ * Managed Postgres reached over the public internet refuses a plaintext
+ * connection, and the driver reports that refusal as a connection error like
+ * any other — which surfaces as a 500 on the first query and explains nothing.
+ * DATABASE_SSL stays the override; this is the default for the hosts that are
+ * known to require it, so a correct connection string is enough on its own.
+ */
+function needsSsl(url: string): boolean {
+  if (config.db.ssl) return true;
+  try {
+    const host = new URL(url).hostname;
+    return /\.(render\.com|neon\.tech|supabase\.co|railway\.app)$/.test(host);
+  } catch {
+    return false;
+  }
+}
+
 export const knexConfig: Knex.Config = {
   client: 'pg',
   connection: {
     connectionString: config.db.url,
-    ssl: config.db.ssl ? { rejectUnauthorized: false } : false,
+    // rejectUnauthorized is off because these providers terminate TLS with a
+    // certificate signed by their own internal CA.
+    ssl: needsSsl(config.db.url) ? { rejectUnauthorized: false } : false,
   },
   pool: { min: config.db.poolMin, max: config.db.poolMax },
   migrations: {
