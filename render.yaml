@@ -1,0 +1,50 @@
+services:
+  - type: web
+    name: avcrm
+    runtime: node
+    plan: standard
+    buildCommand: npm ci && npm run build
+    startCommand: node dist/server.js
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+        isFile: false
+      - key: LOG_LEVEL
+        value: info
+      - key: STORAGE_LOCAL_DIR
+        value: /data/storage
+      - key: DOMAIN
+        scope: build
+      - key: ACME_EMAIL
+        scope: build
+      - key: APP_BASE_URL
+        scope: build
+      - key: DATABASE_URL
+        scope: build
+      - key: JWT_SECRET
+        scope: build
+      - key: POSTGRES_PASSWORD
+        scope: build
+      - key: SECRETS_KEY
+        scope: build
+      - key: MAIL_DRIVER
+        value: log
+      - key: ALLOW_SELF_REGISTRATION
+        value: 'false'
+      - key: TRUST_PROXY
+        value: 'true'
+
+  - type: pserv
+    name: avcrm-postgres
+    runtime: postgres15
+    plan: standard
+    ipAllowList: []
+    envVars:
+      - key: POSTGRES_USER
+        value: avcrm
+      - key: POSTGRES_DB
+        value: avcrm
