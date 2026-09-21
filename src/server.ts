@@ -1,6 +1,7 @@
 import { config } from './config';
 import { checkConnection, closeConnection } from './db/client';
 import { createApp } from './app';
+import { sweepRateLimits } from './middleware/rateLimit';
 import { logger } from './utils/logger';
 
 async function main(): Promise<void> {
@@ -21,6 +22,12 @@ async function main(): Promise<void> {
     // Do not hang forever on a stuck connection.
     setTimeout(() => process.exit(1), 10_000).unref();
   };
+
+  // The rate limiter keeps a bucket per address and per account it has seen.
+  // Without this the map grows for the life of the process; unref'd so it
+  // never holds shutdown open.
+  const window = config.auth.rateLimit.windowMs;
+  setInterval(() => sweepRateLimits(window), window).unref();
 
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));

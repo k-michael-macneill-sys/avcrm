@@ -9,6 +9,7 @@ import { renderLogin } from './views/login.js';
 import { renderOperator, renderOperators } from './views/operators.js';
 import { renderQuote, renderQuotes } from './views/quotes.js';
 import { renderReports } from './views/reports.js';
+import { renderAdmin } from './views/admin.js';
 import { renderSettings } from './views/settings.js';
 import { renderWorkOrder, renderWorkOrders } from './views/workOrders.js';
 
@@ -33,6 +34,7 @@ const NAV: NavItem[] = [
   { key: 'invoices', href: '/invoices', label: 'Invoices', corporateOnly: true },
   { key: 'operators', href: '/operators', label: 'Crew' },
   { key: 'reports', href: '/reports', label: 'Reports', corporateOnly: true },
+  { key: 'admin', href: '/admin', label: 'Company', corporateOnly: true },
   { key: 'settings', href: '/settings', label: 'Settings', corporateOnly: true },
 ];
 
@@ -80,6 +82,13 @@ const ROUTES: router.Route[] = [
     corporateOnly: true,
     deniedMessage: 'Roll-up reporting is corporate work. Your own visits are under Dispatch.',
     view: renderReports,
+  },
+  {
+    pattern: /^\/admin$/,
+    nav: 'admin',
+    corporateOnly: true,
+    deniedMessage: 'Adding branches and staff is corporate work.',
+    view: renderAdmin,
   },
   {
     pattern: /^\/settings$/,

@@ -26,7 +26,10 @@
     "dev:web": "tsc -p tsconfig.web.json --watch",
     "test": "bash scripts/test-setup.sh",
     "test:watch": "bash scripts/test-setup.sh --watch",
-    "job:scheduler": "tsx src/jobs/scheduler.ts"
+    "job:scheduler": "tsx src/jobs/scheduler.ts",
+    "secrets": "tsx src/ops/secrets.ts",
+    "preflight": "tsx src/ops/preflight.ts",
+    "bootstrap": "tsx src/ops/bootstrap.ts"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",
