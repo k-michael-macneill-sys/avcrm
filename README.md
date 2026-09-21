@@ -797,6 +797,23 @@ handed to the page as blob URLs instead. The alternative is a signed read URL
 like the upload target — worth doing when images get numerous, and it trades a
 session check for a URL that works for anyone who copies it.
 
+### Seeded files are real files
+
+`npm run seed` writes actual bytes through the storage driver and records the
+matching `uploads` row, because that row is what a read is authorized against.
+
+It used to record keys like `private/signatures/harold-bell.png` that nothing
+had ever written to, which is a 404 by design — so a freshly seeded install
+showed a broken image on every completed visit, a signature nobody could open,
+and a service report whose photos all read *"This photo could not be
+included"*. The demo data disagreed with the feature it was meant to
+demonstrate.
+
+The images are drawn rather than checked in (`src/db/seedFiles.ts`): a
+repository is a poor place for sample JPEGs, and a generated driveway can be
+snow-covered in the before and cleared in the after, which is the one thing
+that pair has to show.
+
 ### Known gaps
 
 - **Nothing checks that a key exists when a row records it.** `POST /contracts`
@@ -1253,6 +1270,27 @@ Three settings decide whether the system works rather than merely runs:
 | `TRUST_PROXY` | Set to `true` by the compose file. Behind Caddy the client address arrives in a header, and a contract records the IP its signature came from. |
 | `DATABASE_URL` | The host is `postgres`, the compose service name, not `localhost`. |
 
+#### Why the application port is not published
+
+`TRUST_PROXY=true` tells Express to believe `X-Forwarded-For`. That is correct
+behind Caddy and **only** behind Caddy, because Caddy does not trust an inbound
+`X-Forwarded-For` either: it discards whatever the client sent and rewrites the
+header with the address the connection actually came from. Measured, signing
+the same contract three ways:
+
+| Reached via | Client sends `X-Forwarded-For: 203.0.113.77` | `signed_ip` recorded |
+| --- | --- | --- |
+| Caddy, `TRUST_PROXY=true` | Caddy replaces it | `127.0.0.1` — the real peer |
+| The app directly, `TRUST_PROXY=true` | believed as sent | **`203.0.113.77` — forged** |
+| The app directly, `TRUST_PROXY=false` | ignored | `127.0.0.1` — the real peer |
+
+So `signed_ip` is evidence only while Caddy is the sole way in. The compose
+file keeps it that way by publishing ports on Caddy alone — **publishing the
+`app` service's port, even briefly to debug something, makes every signature
+taken in that window attributable to an address the signer chose.** If the
+application does need to be reachable directly, set `TRUST_PROXY=false` with
+it, which is what `deploy/compose.local.yml` does.
+
 ### How it starts
 
 `migrate` runs to completion before `app` and `scheduler` start, so the schema
@@ -1427,6 +1465,7 @@ the word `endstream` and lost everything after it.
 | `payments` | Card capture, charging, declines, webhooks |
 | `sms` | Connecting a provider, credentials, sending |
 | `mail` | Real delivery, bounces, the staging redirect |
+| `scheduler` | Graceful shutdown, the overlap guard, a job that throws |
 | `pdfExtractor` | The reader the PDF tests lean on |
 
 ## Layout
@@ -1441,6 +1480,7 @@ src/                   the API
     knexfile.ts        config file for the knex CLI
     migrationSource.ts names migrations without an extension, so .ts and .js agree
     migrations/        one file per table, in dependency order
+    seedFiles.ts       draws the seed's signatures, photos and documents
     seeds/             development sample data
   jobs/                scheduled work: each runs as a script or from scheduler.ts
   routes/              HTTP only: validate, scope, call a service, respond
