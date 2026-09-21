@@ -51,7 +51,7 @@ npm run dev           # tsx watch, port 3000
 ```
 
 Then open **http://localhost:3000/app** and sign in as `corporate@avcrm.test`
-with the seeded password. The login screen lists the other accounts.
+with the seeded password (see [Seed accounts](#seed-accounts)).
 
 Verify:
 
@@ -145,36 +145,19 @@ than sending them, like everything else.
 
 ## Seed accounts
 
-All seeded users share the password in `SEED_PASSWORD` (default `Password123!`).
+The seed installs no sample business data — no demo branches, crew or
+customers. All of that is the operator's own, added through the app itself
+(Company admin → Add a branch / Add someone, and Add customer on the
+Customers screen) once they have signed in. The one thing a fresh database
+cannot bootstrap through its own UI is the first login, so the seed creates
+exactly one account for that:
 
 | Email | Role | Branch | Notes |
 | --- | --- | --- | --- |
-| `corporate@avcrm.test` | corporate | — | Sees every branch |
-| `kingston.manager@avcrm.test` | corporate | Kingston | Branch manager |
-| `halifax.manager@avcrm.test` | corporate | Halifax | Branch manager |
-| `otto@avcrm.test` | operator | Kingston | Fully compliant, assignable |
-| `nina@avcrm.test` | operator | Kingston | Abstract expires in 21 days |
-| `pat@avcrm.test` | operator | Halifax | Documents submitted, awaiting review |
+| `corporate@avcrm.test` | corporate | — | Sees every branch; add the first one from here |
 
-The seed also lays down a rate card per branch and six quotes spread across the
-lifecycle: three signed into active contracts (two with a card on file, one
-paid upfront by cheque), one still a draft, one declined, and one presented and
-sitting with the customer — that last one is what the signature screen has to
-work on.
-
-Six work orders sit on those contracts, including three completed with their
-before and after photos, one skipped with a reason, and one unassigned in
-Halifax because that branch has no approved operator yet.
-
-Two review requests are already answered — five stars routed to the public
-page, two stars routed to the branch manager — and one finished visit is
-deliberately left unasked, so `npm run job:review-requests` has something to
-pick up on a fresh seed.
-
-Both seasonal contracts are already invoiced: one paid by cheque, one overdue
-with a declined card against it. The monthly contract has no invoice yet,
-because its season has not started — run `npm run job:billing -- 2027-01-20`
-to watch the periods get raised.
+It shares the password in `SEED_PASSWORD` (default `Password123!`). Sign in,
+change the password, then add branches, crew and customers as they come in.
 
 ## Auth and permissions
 
@@ -539,9 +522,8 @@ caller ──enqueue──► message_log (queued) ──worker──► provide
 
 **Templates** are seeded config with `{{mustache}}` tokens. A row with a
 `branch_id` overrides the global row for the same code and channel, so a
-branch can reword a message without a deploy — the seed ships one Halifax
-override of `service_complete` to show the mechanism. An unknown or empty
-token renders blank and logs a warning: mailing a customer a literal
+branch can reword a message without a deploy. An unknown or empty token
+renders blank and logs a warning: mailing a customer a literal
 `{{customer_first_name}}` is worse than a gap.
 
 **Rendering happens at enqueue, not at send.** The rendered subject and body
@@ -1322,8 +1304,8 @@ through the API: signing in needs a user, creating a user needs a corporate
 session, creating a branch needs a corporate session, and self-signup is off
 (and only ever made a pending operator anyway). Every route in is a dead end.
 The development seed would solve it and deliberately refuses to run with
-`NODE_ENV=production`, which is right — nobody wants Harold Bell and six
-sample quotes in their real database.
+`NODE_ENV=production` once a single user exists, which is right — it wipes
+every table it owns, and a production database is not something to wipe.
 
 So `bootstrap` does the three things a new install cannot do for itself:
 installs the configuration the application treats as given (document

@@ -84,8 +84,8 @@ export function CustomerDetail(): JSX.Element {
             submitLabel="Add property"
             specs={[
               { name: 'address_line1', label: 'Address', required: true },
-              { name: 'city', label: 'City', required: true, value: 'Kingston' },
-              { name: 'province', label: 'Province', required: true, value: 'ON' },
+              { name: 'city', label: 'City', required: true },
+              { name: 'province', label: 'Province', required: true },
               { name: 'postal_code', label: 'Postal code', required: true },
               {
                 name: 'driveway_size_cars',

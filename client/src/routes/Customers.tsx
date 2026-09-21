@@ -124,13 +124,14 @@ function NewCustomerForm({ branches, onDone }: { branches: Branch[]; onDone: () 
       specs={[
         { name: 'first_name', label: 'First name', required: true },
         { name: 'last_name', label: 'Last name', required: true },
-        { name: 'email', label: 'Email', type: 'email' },
+        { name: 'email', label: 'Email', type: 'email', required: true },
         { name: 'phone', label: 'Phone' },
         {
           name: 'preferred_contact',
           label: 'Preferred contact',
           type: 'select',
           options: PREFERRED_CONTACTS.map((c) => ({ value: c, label: c })),
+          help: 'Choosing "sms" or "both" also needs a phone number.',
         },
         {
           name: 'branch_id',

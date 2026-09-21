@@ -72,7 +72,10 @@ export function DataFormFields({
         const id = `field-${spec.name}`;
         return (
           <div key={spec.name} className="flex flex-col gap-1.5">
-            <Label htmlFor={id}>{spec.label}</Label>
+            <Label htmlFor={id}>
+              {spec.label}
+              {spec.required ? <span className="text-critical"> *</span> : null}
+            </Label>
             {spec.type === 'select' ? (
               <Select value={values[spec.name] ?? ''} onValueChange={(v) => setValue(spec.name, v)}>
                 <SelectTrigger id={id}>
