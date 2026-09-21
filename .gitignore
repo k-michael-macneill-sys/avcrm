@@ -1,7 +1,7 @@
 node_modules/
 dist/
-# Built browser modules: tsc output, same as dist/.
-public/assets/
+# Built browser client: Vite output, same as dist/.
+client/dist/
 # Uploaded files when STORAGE_DRIVER=local.
 storage/
 # What the test run writes; a fresh one is made every time.

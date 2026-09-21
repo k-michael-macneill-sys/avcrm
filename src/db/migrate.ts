@@ -34,25 +34,40 @@ async function normalizeRecordedNames(): Promise<void> {
   }
 }
 
-async function main(): Promise<void> {
+/**
+ * Exported so the server can bring the schema up on boot.
+ *
+ * A platform without shell access — Render's free tier among them — gives
+ * nowhere to run this by hand, and a deploy against a database with no tables
+ * in it answers every request with a 500 that says only "Internal server
+ * error". Running it at startup is the difference between a deploy that works
+ * and one that cannot be made to.
+ */
+export async function runMigrations(): Promise<void> {
   await normalizeRecordedNames();
 
   const [batch, applied] = (await db.migrate.latest()) as [number, string[]];
 
   if (applied.length === 0) {
-    logger.info('Already up to date');
+    logger.info('Migrations already up to date');
   } else {
     logger.info({ batch, applied }, `Ran ${applied.length} migration(s)`);
   }
 }
 
-main()
-  .then(async () => {
-    await db.destroy();
-    process.exit(0);
-  })
-  .catch(async (err: unknown) => {
-    logger.error({ err }, 'Migration failed');
-    await db.destroy();
-    process.exit(1);
-  });
+async function main(): Promise<void> {
+  await runMigrations();
+}
+
+if (require.main === module) {
+  main()
+    .then(async () => {
+      await db.destroy();
+      process.exit(0);
+    })
+    .catch(async (err: unknown) => {
+      logger.error({ err }, 'Migration failed');
+      await db.destroy();
+      process.exit(1);
+    });
+}

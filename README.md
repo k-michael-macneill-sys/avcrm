@@ -683,36 +683,39 @@ those are exactly the rows worth looking at.
 
 ## The browser client
 
-A small single-page app at `/app`, served by the same Express process.
+A single-page app at `/app`, served by the same Express process.
 
-**It adds no dependencies.** The client is TypeScript compiled by the `tsc`
-that was already here into native browser ES modules — no bundler, no
-framework, no npm install. `web/` is the source, `public/assets/` is the
-output, and `public/index.html` loads it with a plain `<script type="module">`.
+**React, Tailwind and shadcn/ui**, built by Vite. `client/` is the source,
+`client/dist/` is the build Express serves at `/app` (gitignored, built by
+`npm run build:web`); `public/` holds only the one page outside the SPA —
+`card-complete.html`, see below. **Shared types survive the framework
+change**: the client still imports `src/types/models.ts` directly, so a
+column that changes shape in a migration breaks the UI at compile time
+rather than in front of a customer.
 
-That is a real trade, so it is worth naming: the cost is roughly 150 lines of
-hand-written router and DOM helpers that a framework would have supplied. What
-it buys is a dependency tree that stays at nine runtime packages, one language
-and one toolchain across the whole repo, and **shared types** — the client
-imports `src/types/models.ts` directly, so a column that changes shape in a
-migration breaks the UI at compile time rather than in front of a customer.
+Dark is the default look — a deep navy background, glass-panel cards,
+electric-blue accents — with light available from the toggle in the sidebar.
+The choice is remembered per browser; nothing about it is stored server-side.
 
 ```
-web/
-  base.ts        where the client lives (/app), in one place
-  api.ts         the only thing that talks to the API
-  router.ts      path routing, one screen at a time
-  dom.ts         h(), table(), link() — real nodes, never innerHTML
-  form.ts        small forms, and turning an ApiError back into text
-  format.ts      money, dates, and what a status looks like
-  upload.ts      the two-step upload, and reading files back
-  signature.ts   the canvas the customer signs on
-  components.ts  hero figure, stat tiles, page furniture
-  views/         one file per screen
-public/
-  index.html     the shell
-  app.css        one stylesheet, no framework
-  assets/        tsc output — gitignored, built by `npm run build:web`
+client/
+  index.html          Vite's entry HTML
+  vite.config.ts       base /app/, dev-proxies the API's routes to :3000
+  tailwind.config.ts   shadcn's token setup — colors are all CSS variables
+  src/
+    main.tsx, App.tsx  providers, then the route table
+    lib/
+      api.ts            the only thing that talks to the API
+      format.ts          money, dates, and what a status looks like
+      upload.ts          the two-step upload, and reading files back
+      useQuery.ts, useSubmit.ts   the two data-fetching/mutation hooks
+                                   every screen is built from
+    auth/               session context, the route guard, the corporate gate
+    theme/              light/dark context and the toggle
+    components/
+      ui/                hand-written shadcn primitives (Button, Card, …)
+      DataTable, DataForm, SignaturePad, FileWidgets, …
+    routes/             one file per screen
 ```
 
 ### Why `/app`
@@ -760,9 +763,10 @@ surfaces them. Both gates from the build are visible:
   Bearer-token SPA — it survives a reload, and any script that gets onto the
   page can read it. The fix is an httpOnly cookie, which is an API change
   rather than a UI one.
-- No charts. Two branches and a handful of figures is exactly the case where a
-  one-bar bar chart says less than the number itself; stat tiles and tables
-  carry it. A chart earns its place when there is a trend with a shape.
+- One chart — revenue by month on Reports, where there is finally a trend
+  with a shape. Everywhere else stat tiles and tables still carry it; two
+  branches and a handful of figures is exactly the case where a bar chart
+  says less than the number itself.
 - Lists page at 50–100 rows and stop; there is no pagination control yet,
   which is the same `OFFSET` limitation the API has.
 - No automated browser tests. The screens were driven and screenshotted by
@@ -834,7 +838,7 @@ would confirm which keys exist.
 
 ### The signature pad
 
-`web/signature.ts` is a canvas the customer signs with a finger or a mouse.
+`client/src/components/SignaturePad.tsx` is a canvas the customer signs with a finger or a mouse.
 Pointer events, so a stylus, a fingertip and a trackpad are one code path;
 backed at device pixel ratio, so a signature on a phone is not a blurry
 approximation of one; `touch-action: none`, so a finger drag draws instead of
@@ -1642,8 +1646,8 @@ src/                   the API
   types/               row shapes, JWT payload, module augmentation
   utils/               errors, async wrapper, Zod helper, pagination, scope
 tests/                 the suite; helpers/ holds the harness and the stand-ins
-web/                   the browser client (see above)
-public/                index.html, app.css, and tsc's output
+client/                the browser client — React, Tailwind, shadcn/ui (see above)
+public/                card-complete.html, the one page outside the SPA
 Dockerfile             multi-stage: build with dev deps, run dist without them
 docker-compose.yml     postgres, migrate, app, scheduler, caddy, backup
 deploy/                Caddyfile, backup.sh, env.example

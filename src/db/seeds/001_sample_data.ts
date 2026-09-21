@@ -21,15 +21,15 @@ const SEASON_MONTHS = 5;
  * compliance view and the expiry job have something real to chew on.
  */
 export async function seed(knex: Knex): Promise<void> {
-  // Allow seed to run in production only on empty database (first deploy).
-  // Idempotent: re-running the seed wipes and recreates, which is fine on an
-  // empty database. On a database with customer data, the config check below
-  // (via installAppConfig) would be the gate — but an empty DB has no app
-  // config either, so we allow it to run and establish the seeded state.
+  // This seed wipes every table it owns, so in production it is allowed only
+  // where there is nothing to lose: a database with no users in it. That is a
+  // first deploy, and the alternative there is a login box nobody can get past.
   if (config.isProduction) {
-    const hasConfig = await knex('app_config').first('id');
-    if (hasConfig) {
-      throw new Error('Refusing to run seeds in production on an existing database');
+    const existingUser = await knex('users').first('id');
+    if (existingUser) {
+      throw new Error(
+        'Refusing to run seeds against a production database that already has users',
+      );
     }
   }
 
@@ -63,6 +63,13 @@ export async function seed(knex: Knex): Promise<void> {
   await knex('branches').del();
 
   const today = new Date().toISOString().slice(0, 10);
+
+  // --- Configuration ------------------------------------------------------
+  // Before anything else, because this installs document_requirements and
+  // checklist_requirements and the sample data below has foreign keys into
+  // both. The deletes above cleared them, so this has to be what puts them
+  // back — and it has to happen before the first row that references them.
+  await installAppConfig(knex);
 
   // --- Branches -----------------------------------------------------------
   const branches = await knex('branches')
@@ -810,9 +817,8 @@ export async function seed(knex: Knex): Promise<void> {
   // Seeded config. A row with a branch_id overrides the global one for the
   // same code and channel, which is how a branch rewords a message without a
   // deploy — see the Halifax override at the end of this block.
-  // The global set is configuration, installed from src/db/appConfig.ts so a
-  // production install gets exactly the same rows — see installAppConfig.
-  await installAppConfig(knex);
+  // The global set is configuration, installed from src/db/appConfig.ts at the
+  // top of this seed so a production install gets exactly the same rows.
 
   // A branch override, which is sample data rather than configuration: it is
   // here to show the mechanism, not because Halifax needs it.

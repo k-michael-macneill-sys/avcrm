@@ -1,0 +1,134 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Dark is the default look, matching the approved aesthetic. Light is an
+ * explicit opt-in via <html data-theme="light">, set by ThemeProvider — see
+ * client/src/theme/ThemeProvider.tsx. Every value is "H S% L%" (no hsl()
+ * wrapper) because tailwind.config.ts wraps them as hsl(var(--x) / alpha) so
+ * utilities like bg-card/60 work.
+ */
+
+@layer base {
+  :root {
+    --background: 222 47% 6%;
+    --foreground: 210 40% 96%;
+
+    --card: 222 40% 10%;
+    --card-foreground: 210 40% 96%;
+
+    --popover: 222 44% 8%;
+    --popover-foreground: 210 40% 96%;
+
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 96%;
+
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 217 33% 17%;
+    --accent-foreground: 210 40% 96%;
+
+    --destructive: 0 84% 70%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 215 25% 27%;
+    --input: 215 25% 27%;
+    --ring: 217 91% 60%;
+
+    --good: 142 71% 45%;
+    --warning: 38 92% 50%;
+    --serious: 25 95% 63%;
+    --critical: 0 91% 71%;
+
+    --radius: 0.75rem;
+  }
+
+  :root[data-theme='light'] {
+    --background: 40 20% 99%;
+    --foreground: 0 0% 4%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 4%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 4%;
+
+    --primary: 213 68% 50%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 60 5% 96%;
+    --secondary-foreground: 0 0% 4%;
+
+    --muted: 60 5% 96%;
+    --muted-foreground: 30 3% 46%;
+
+    --accent: 60 5% 96%;
+    --accent-foreground: 0 0% 4%;
+
+    --destructive: 0 61% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 40 8% 88%;
+    --input: 40 8% 88%;
+    --ring: 213 68% 50%;
+
+    --good: 120 87% 34%;
+    --warning: 41 96% 55%;
+    --serious: 16 79% 64%;
+    --critical: 0 60% 52%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+
+  /* The faint blue glow wash behind the whole app — dark mode only. */
+  body {
+    background-image:
+      radial-gradient(600px circle at 0% 0%, hsl(var(--primary) / 0.08), transparent 60%),
+      radial-gradient(500px circle at 100% 20%, hsl(var(--primary) / 0.05), transparent 55%);
+    background-attachment: fixed;
+  }
+
+  :root[data-theme='light'] body {
+    background-image: none;
+  }
+
+  ::selection {
+    @apply bg-primary/20;
+  }
+
+  * {
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 999px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  /* Glass only makes sense over the dark wash; light mode gets a plain card. */
+  :root[data-theme='light'] .glass-card {
+    backdrop-filter: none;
+    background-color: hsl(var(--card));
+  }
+}

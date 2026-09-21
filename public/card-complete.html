@@ -4,26 +4,80 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Card saved — Avalanche CRM</title>
-    <link rel="stylesheet" href="/app/app.css" />
+    <style>
+      /*
+       * Self-contained on purpose: this page sits outside the SPA (no
+       * account, no session, nothing to click) and must not depend on
+       * whatever the app's own stylesheet happens to be this month.
+       */
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        font-family:
+          'Inter',
+          -apple-system,
+          BlinkMacSystemFont,
+          'Segoe UI',
+          Roboto,
+          Helvetica,
+          Arial,
+          sans-serif;
+        background: #0b0f19;
+        color: #f1f5f9;
+      }
+      .card {
+        width: 100%;
+        max-width: 380px;
+        background: rgba(15, 23, 42, 0.6);
+        border: 1px solid rgba(148, 163, 184, 0.12);
+        border-radius: 16px;
+        padding: 28px;
+      }
+      .brand {
+        font-weight: 600;
+        margin: 0 0 4px;
+      }
+      .brand::before {
+        content: '❄ ';
+        color: #3b82f6;
+      }
+      h1 {
+        font-size: 22px;
+        margin: 4px 0 16px;
+      }
+      p {
+        margin: 0;
+      }
+      .secondary {
+        color: #cbd5e1;
+        margin-top: 12px;
+      }
+      .muted {
+        color: #94a3b8;
+        font-size: 12px;
+        margin-top: 16px;
+      }
+    </style>
   </head>
-  <body class="signed-out">
+  <body>
     <!--
       The last thing the customer sees. No account, no session, nothing to do
       — so it says the one thing they need and stops.
     -->
-    <div class="login">
-      <div class="login-card">
-        <p class="brand">Avalanche CRM</p>
-        <h1>Your card is saved</h1>
-        <p style="color: var(--text-secondary); margin-top: 12px">
-          Thanks — that is all we need. We will charge it for each billing
-          period of your contract, and email you an invoice every time.
-        </p>
-        <p style="color: var(--text-muted); margin-top: 16px; font-size: 12px">
-          Your card details were entered on our payment provider's page and
-          were never sent to us. You can close this window.
-        </p>
-      </div>
+    <div class="card">
+      <p class="brand">Avalanche CRM</p>
+      <h1>Your card is saved</h1>
+      <p class="secondary">
+        Thanks — that is all we need. We will charge it for each billing
+        period of your contract, and email you an invoice every time.
+      </p>
+      <p class="muted">
+        Your card details were entered on our payment provider's page and
+        were never sent to us. You can close this window.
+      </p>
     </div>
   </body>
 </html>
