@@ -38,6 +38,11 @@ const envSchema = z.object({
   // attempts accrue — see src/middleware/rateLimit.ts — so these can be tight
   // without tripping anyone who knows their own password. Set
   // AUTH_RATE_LIMIT_MAX=0 to switch it off, which the test harness does.
+  // Self-signup is off unless somebody deliberately turns it on. An endpoint
+  // that mints accounts is not something to leave open on the internet by
+  // default; corporate creates staff through POST /users instead.
+  ALLOW_SELF_REGISTRATION: booleanish.default('false'),
+
   AUTH_RATE_LIMIT_WINDOW_S: z.coerce.number().int().min(10).max(86_400).default(900),
   /** Failed sign-ins for one email address, per window. */
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(0).max(1000).default(8),
@@ -188,6 +193,7 @@ export const config = {
     jwtSecret: env.JWT_SECRET,
     jwtExpiresIn: env.JWT_EXPIRES_IN,
     bcryptRounds: env.BCRYPT_ROUNDS,
+    allowSelfRegistration: env.ALLOW_SELF_REGISTRATION,
     rateLimit: {
       windowMs: env.AUTH_RATE_LIMIT_WINDOW_S * 1000,
       maxPerEmail: env.AUTH_RATE_LIMIT_MAX,

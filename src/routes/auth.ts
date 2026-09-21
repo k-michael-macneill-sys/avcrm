@@ -5,7 +5,7 @@ import { optionalAuth, requireAuth } from '../middleware/auth';
 import { rateLimit, type RateLimitRule } from '../middleware/rateLimit';
 import { createUser, findUserById, login } from '../services/auth';
 import { asyncHandler } from '../utils/async';
-import { unauthorized } from '../utils/errors';
+import { forbidden, unauthorized } from '../utils/errors';
 import { parse } from '../utils/validate';
 
 export const authRouter = Router();
@@ -78,16 +78,26 @@ const registerLimiter =
     : rateLimit();
 
 /**
- * Self-signup for operators only. Role is set on the backend and is never
- * read from the request, so this endpoint cannot mint a corporate account.
- * New operators land on onboarding_status 'pending' and stay unassignable
- * until their documents are approved. Corporate creates staff via POST /users.
+ * Self-signup, off by default.
+ *
+ * It only ever produced a pending operator — the role is set on the backend
+ * and never read from the request, so it could not mint a corporate account —
+ * but an open endpoint that creates rows is still not something to leave
+ * facing the internet on a system holding customers' names and addresses.
+ * Corporate adds staff through `POST /users`, which is how a real branch
+ * onboards somebody anyway: the person's account exists before they arrive.
+ *
+ * Set ALLOW_SELF_REGISTRATION=true to open it again.
  */
 authRouter.post(
   '/register',
   registerLimiter,
   optionalAuth,
   asyncHandler(async (req, res) => {
+    if (!config.auth.allowSelfRegistration) {
+      throw forbidden('Accounts are created by an administrator, not signed up for');
+    }
+
     const body = parse(registerSchema, req.body);
 
     const user = await createUser({

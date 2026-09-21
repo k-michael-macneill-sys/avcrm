@@ -247,12 +247,28 @@ The address it keys on is `req.ip`, so it depends on `TRUST_PROXY` being right
 for the same reason `signed_ip` on a contract does — see
 [Why the application port is not published](#why-the-application-port-is-not-published).
 
-### Registration
+### Accounts are made, not signed up for
 
-`POST /auth/register` is open so a branch can onboard operators, but the role is
-set on the backend and never read from the request: self-signup always produces
-an `operator` with `onboarding_status = 'pending'`, which cannot be assigned
-work. Corporate creates staff with `POST /users`, where the role is explicit.
+**`POST /auth/register` is off by default.** It only ever produced a pending
+operator — the role is set on the backend and never read from the request, so
+it could not mint a corporate account — but an endpoint that creates rows has
+no business facing the internet on a system holding customers' names and
+addresses. `ALLOW_SELF_REGISTRATION=true` opens it again; the rule that it
+cannot grant itself a role is still tested, in `tests/selfRegistration.test.mts`.
+
+Corporate adds people under **Company** in the browser client, which is the
+only way an account comes into existence on a default install. Three positions
+over the two roles the database has:
+
+| On screen | Role | Branch | |
+| --- | --- | --- | --- |
+| Operator | `operator` | theirs | Sees their branch, works only visits assigned to them |
+| Branch manager | `corporate` | theirs | Full access, and named as that branch's `manager_user_id`, so the failed-charge and expiry notices reach them |
+| Corporate | `corporate` | none | Every branch |
+
+The same screen adds branches. Both are corporate-only, at the API as well as
+in the nav — an operator asking for `/app/admin` gets a plain explanation, and
+the endpoints behind it refuse them regardless.
 
 ### The onboarding gate
 
@@ -718,6 +734,7 @@ link carries the real `/app/…` href so middle-click, "open in new tab" and
 | Dispatch | The board, booking a visit, and driving one to completion with photos |
 | Invoices | Send, record a payment, refund, void |
 | Crew | Compliance per operator, and approving documents |
+| Company | Branches, and adding staff — corporate only |
 | Reports | The branch comparison, revenue by month, operator scorecards |
 
 **The two roles get genuinely different apps.** An operator's nav has no
@@ -1275,6 +1292,10 @@ npm run secrets                # generates the three it cannot guess
 $EDITOR .env                   # paste those in, plus DOMAIN, SMTP, Stripe
 npm run preflight              # refuses to bless a half-filled .env
 docker compose up -d --build
+
+docker compose exec app node dist/ops/bootstrap.js \
+  --branch "Kingston" --province ON \
+  --email you@example.ca --first-name Your --last-name Name
 ```
 
 `npm run preflight` is the step worth not skipping. The application already
@@ -1290,6 +1311,23 @@ backup, come back as warnings rather than refusals.
 That brings up Postgres, the migrations, the application, the four scheduled
 jobs, TLS, and a nightly dump. Only Caddy is published; the database and the
 application are reachable only from inside the compose network.
+
+**The bootstrap step is not optional.** Migrations create the schema and
+nothing else, so a new database is empty in a way there is no way out of
+through the API: signing in needs a user, creating a user needs a corporate
+session, creating a branch needs a corporate session, and self-signup is off
+(and only ever made a pending operator anyway). Every route in is a dead end.
+The development seed would solve it and deliberately refuses to run with
+`NODE_ENV=production`, which is right — nobody wants Harold Bell and six
+sample quotes in their real database.
+
+So `bootstrap` does the three things a new install cannot do for itself:
+installs the configuration the application treats as given (document
+requirements, the signing checklist, every message template), creates the
+first branch, and creates the first corporate user. It prints that user's
+password once. It refuses to create a second administrator on an install that
+already has users, so it is safe to re-run after an upgrade — which is worth
+doing, because that is also how a newly added message template gets installed.
 
 Afterwards, check it is actually working rather than merely running:
 

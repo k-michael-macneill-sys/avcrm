@@ -28,7 +28,11 @@ describe('signing in and what that entitles you to', () => {
     assert.equal(reply.status, 401);
   });
 
-  it('registers a pending operator whatever the request asks for', async () => {
+  it('refuses self-signup, because accounts are made by an administrator', async () => {
+    // The default posture: an endpoint that mints accounts should not be
+    // facing the internet on a system holding customers' addresses. Corporate
+    // adds staff through POST /users. The behaviour when it is deliberately
+    // switched back on is covered by tests/selfRegistration.test.mts.
     const reply = await call(h.server(), 'POST', '/auth/register', {
       body: {
         email: 'walkin@test.local',
@@ -36,16 +40,12 @@ describe('signing in and what that entitles you to', () => {
         first_name: 'Wal',
         last_name: 'Kin',
         branch_id: h.world().branches.kingston,
-        // The thing a self-service form must not be able to grant itself.
-        role: 'corporate',
-        onboarding_status: 'approved',
       },
     });
 
-    assert.equal(reply.status, 201);
+    assert.equal(reply.status, 403);
     const created = await db('users').where({ email: 'walkin@test.local' }).first();
-    assert.equal(created?.role, 'operator');
-    assert.equal(created?.onboarding_status, 'pending');
+    assert.equal(created, undefined, 'nothing should have been written');
   });
 
   it('keeps corporate-only endpoints away from operators', async () => {

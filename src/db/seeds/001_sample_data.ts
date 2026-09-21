@@ -2,6 +2,7 @@ import type { Knex } from 'knex';
 import { config } from '../../config';
 import { hashPassword } from '../../services/auth';
 import { addDays } from '../../services/operators';
+import { installAppConfig } from '../appConfig';
 import {
   documentPdf,
   drivewayPng,
@@ -163,81 +164,7 @@ export async function seed(knex: Knex): Promise<void> {
     .update({ manager_user_id: halifaxManager.id });
 
   // --- Document requirements ---------------------------------------------
-  await knex('document_requirements').insert([
-    {
-      code: 'drivers_license',
-      label: "Driver's licence",
-      province: null,
-      is_required: true,
-      expires: true,
-      default_validity_days: 1825,
-    },
-    {
-      code: 'drivers_abstract',
-      label: "Driver's abstract",
-      province: null,
-      is_required: true,
-      expires: true,
-      default_validity_days: 365,
-    },
-    {
-      code: 'insurance_certificate',
-      label: 'Insurance certificate',
-      province: null,
-      is_required: true,
-      expires: true,
-      default_validity_days: 365,
-    },
-    {
-      code: 'vehicle_registration',
-      label: 'Vehicle registration',
-      province: null,
-      is_required: true,
-      expires: true,
-      default_validity_days: 365,
-    },
-    {
-      code: 'contractor_agreement',
-      label: 'Contractor agreement',
-      province: null,
-      is_required: true,
-      expires: false,
-      default_validity_days: null,
-    },
-    {
-      code: 'void_cheque',
-      label: 'Void cheque',
-      province: null,
-      is_required: true,
-      expires: false,
-      default_validity_days: null,
-    },
-    {
-      code: 'tax_form',
-      label: 'Tax form',
-      province: null,
-      is_required: true,
-      expires: false,
-      default_validity_days: null,
-    },
-    {
-      // Ontario's workers' compensation board; NS has its own scheme.
-      code: 'wsib_clearance',
-      label: 'WSIB clearance certificate',
-      province: 'ON',
-      is_required: true,
-      expires: true,
-      default_validity_days: 90,
-    },
-    {
-      code: 'criminal_record_check',
-      label: 'Criminal record check',
-      province: null,
-      is_required: false,
-      expires: true,
-      default_validity_days: 1095,
-    },
-  ]);
+  // document_requirements: installed by installAppConfig above.
 
   // --- Operator documents -------------------------------------------------
   // A real PDF per document, written through the storage driver with the
@@ -456,39 +383,7 @@ export async function seed(knex: Knex): Promise<void> {
   // Order and wording match what the rep sees on the signature screen. Only
   // the required three block a submission; card_on_file is optional because a
   // seasonal customer may pay upfront by cheque.
-  await knex('checklist_requirements').insert([
-    { code: 'card_on_file', label: 'Card on file', is_required: false, sort_order: 1 },
-    {
-      code: 'terms_reviewed',
-      label: 'Terms and conditions reviewed',
-      is_required: true,
-      sort_order: 2,
-    },
-    {
-      code: 'service_window_explained',
-      label: 'Service window explained',
-      is_required: true,
-      sort_order: 3,
-    },
-    {
-      code: 'access_notes_captured',
-      label: 'Access notes captured',
-      is_required: false,
-      sort_order: 4,
-    },
-    {
-      code: 'photos_taken',
-      label: 'Property photos taken',
-      is_required: false,
-      sort_order: 5,
-    },
-    {
-      code: 'contact_confirmed',
-      label: 'Contact details confirmed',
-      is_required: true,
-      sort_order: 6,
-    },
-  ]);
+  // checklist_requirements: installed by installAppConfig above.
 
   // --- Pricing guide ------------------------------------------------------
   // One rate card per branch, indexed by driveway size 1-6. The seasonal
@@ -907,184 +802,13 @@ export async function seed(knex: Knex): Promise<void> {
   // Seeded config. A row with a branch_id overrides the global one for the
   // same code and channel, which is how a branch rewords a message without a
   // deploy — see the Halifax override at the end of this block.
+  // The global set is configuration, installed from src/db/appConfig.ts so a
+  // production install gets exactly the same rows — see installAppConfig.
+  await installAppConfig(knex);
+
+  // A branch override, which is sample data rather than configuration: it is
+  // here to show the mechanism, not because Halifax needs it.
   await knex('message_templates').insert([
-    {
-      code: 'service_complete',
-      channel: 'email',
-      branch_id: null,
-      subject: '{{address_line1}} — {{service_type}} complete',
-      body:
-        'Hi {{customer_first_name}},\n\n' +
-        '{{service_type}} at {{address_line1}}, {{city}} was completed at ' +
-        '{{completed_at}}.\nOperator: {{operator_name}}\n\nPhotos:\n{{photo_list}}',
-    },
-    {
-      // The office copy. A branch manager reading "Hi Harold, your driveway is
-      // clear" is not a notification.
-      code: 'service_complete_internal',
-      channel: 'email',
-      branch_id: null,
-      subject: '[{{branch_name}}] {{address_line1}} — {{service_type}} complete',
-      body:
-        '{{service_type}} at {{address_line1}}, {{city}} was completed at ' +
-        '{{completed_at}} by {{operator_name}}.\n\nPhotos:\n{{photo_list}}',
-    },
-    {
-      code: 'en_route',
-      channel: 'email',
-      branch_id: null,
-      subject: 'On the way to {{address_line1}}',
-      body:
-        'Hi {{customer_first_name}}, {{operator_name}} is on the way to ' +
-        '{{address_line1}} now.',
-    },
-    {
-      code: 'en_route',
-      channel: 'sms',
-      branch_id: null,
-      subject: null,
-      body: '{{operator_name}} is on the way to {{address_line1}} now.',
-    },
-    {
-      code: 'review_request',
-      channel: 'email',
-      branch_id: null,
-      subject: 'How did we do at {{address_line1}}?',
-      body:
-        'Hi {{customer_first_name}},\n\nHow did we do? One tap, no form:\n\n' +
-        '1 star  {{rating_url_1}}\n2 stars {{rating_url_2}}\n' +
-        '3 stars {{rating_url_3}}\n4 stars {{rating_url_4}}\n' +
-        '5 stars {{rating_url_5}}\n\n— {{branch_name}}',
-    },
-    {
-      code: 'review_request',
-      channel: 'sms',
-      branch_id: null,
-      subject: null,
-      body:
-        'How did we do at {{address_line1}}? Tap to rate: ' +
-        '1 {{rating_url_1}} 3 {{rating_url_3}} 5 {{rating_url_5}}',
-    },
-    {
-      // The alert that makes the gate worth having: a poor rating reaches a
-      // person instead of a public star.
-      code: 'low_rating_internal',
-      channel: 'email',
-      branch_id: null,
-      subject: '[{{branch_name}}] {{rating}}-star rating from {{customer_name}}',
-      body:
-        '{{customer_name}} rated a recent visit {{rating}} out of 5.\n\n' +
-        'Email: {{customer_email}}\nPhone: {{customer_phone}}\n\n' +
-        'Call them before they tell everyone else.',
-    },
-    {
-      code: 'payment_failed',
-      channel: 'email',
-      branch_id: null,
-      subject: 'We could not process your payment',
-      body:
-        'Hi {{customer_first_name}}, the card on file for {{address_line1}} was ' +
-        'declined for {{amount}}. Service continues — please update your card ' +
-        'when you get a moment.',
-    },
-    {
-      code: 'renewal_reminder',
-      channel: 'email',
-      branch_id: null,
-      subject: 'Your {{address_line1}} snow contract is up for renewal',
-      body:
-        'Hi {{customer_first_name}}, your season at {{address_line1}} ends on ' +
-        '{{season_end}}. Reply and we will get next winter booked in.',
-    },
-    {
-      code: 'document_expiring',
-      channel: 'email',
-      branch_id: null,
-      subject: '{{label}} expires in {{days_left}} {{day_word}}',
-      body:
-        'Hi {{first_name}}, your {{label}} expires on {{expires_on}}.' +
-        '{{required_note}} Please upload a current copy before then.',
-    },
-    {
-      code: 'document_expiring_internal',
-      channel: 'email',
-      branch_id: null,
-      subject: '[{{branch_name}}] {{operator_name}}: {{label}} expires in {{days_left}} {{day_word}}',
-      body:
-        '{{operator_name}} at {{branch_name}} has a {{label}} expiring on ' +
-        '{{expires_on}}.',
-    },
-    {
-      code: 'operator_suspended',
-      channel: 'email',
-      branch_id: null,
-      subject: 'Your account has been suspended',
-      body:
-        'Hi {{first_name}}, a required document has expired, so you cannot be ' +
-        'assigned work until it is replaced and approved. Please upload a ' +
-        'current copy as soon as you can.',
-    },
-    {
-      code: 'operator_suspended_internal',
-      channel: 'email',
-      branch_id: null,
-      subject: '[{{branch_name}}] Operator suspended: {{operator_name}}',
-      body:
-        '{{operator_name}} has been suspended automatically because a required ' +
-        'document expired. They are out of the assignable pool until it is ' +
-        'replaced.',
-    },
-    {
-      code: 'invoice_sent',
-      channel: 'email',
-      branch_id: null,
-      subject: 'Your invoice for {{address_line1}}',
-      body:
-        'Hi {{customer_first_name}},\n\nYour invoice for {{billing_period_start}} ' +
-        'to {{billing_period_end}} at {{address_line1}} comes to ${{amount_due}}, ' +
-        'due {{due_date}}.\n\n— {{branch_name}}',
-    },
-    {
-      code: 'invoice_overdue',
-      channel: 'email',
-      branch_id: null,
-      subject: 'Your {{address_line1}} invoice is past due',
-      body:
-        'Hi {{customer_first_name}},\n\n${{amount_outstanding}} for ' +
-        '{{address_line1}} was due on {{due_date}} and is still outstanding. ' +
-        'Service continues — please settle up when you can.\n\n— {{branch_name}}',
-    },
-    {
-      // The link the customer taps to put a card on file. Nobody reads a card
-      // number or a CVV out loud on a doorstep.
-      code: 'card_setup_request',
-      channel: 'email',
-      branch_id: null,
-      subject: 'Add a card for {{address_line1}}',
-      body:
-        'Hi {{customer_first_name}},\n\nTo set up billing for ' +
-        '{{address_line1}}, add your card here:\n\n{{card_url}}\n\n' +
-        'The page belongs to our payment provider — your card details never ' +
-        'reach us.\n\n— {{branch_name}}',
-    },
-    {
-      code: 'card_setup_request',
-      channel: 'sms',
-      branch_id: null,
-      subject: null,
-      body:
-        '{{branch_name}}: add your card for {{address_line1}} here — {{card_url}}',
-    },
-    {
-      code: 'payment_failed_internal',
-      channel: 'email',
-      branch_id: null,
-      subject: '[{{branch_name}}] Payment failed for {{customer_name}}',
-      body:
-        '{{method}} payment of ${{amount}} for {{address_line1}} failed: ' +
-        '{{failure_reason}}.\n\nCustomer: {{customer_name}}\n' +
-        'Email: {{customer_email}}\nPhone: {{customer_phone}}',
-    },
     {
       // A branch override, to show the mechanism works. Halifax signs off
       // differently; everything else falls back to the global rows above.

@@ -28,7 +28,8 @@
     "test:watch": "bash scripts/test-setup.sh --watch",
     "job:scheduler": "tsx src/jobs/scheduler.ts",
     "secrets": "tsx src/ops/secrets.ts",
-    "preflight": "tsx src/ops/preflight.ts"
+    "preflight": "tsx src/ops/preflight.ts",
+    "bootstrap": "tsx src/ops/bootstrap.ts"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",
