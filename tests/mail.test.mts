@@ -11,8 +11,8 @@ import { startMailSink } from './helpers/mailSink';
 const sink = await startMailSink();
 
 process.env.MAIL_DRIVER = 'smtp';
-process.env.MAIL_FROM = 'Avalanche <billing@avalanche.test>';
-process.env.MAIL_REPLY_TO = 'office@avalanche.test';
+process.env.MAIL_FROM = 'Drift <billing@drift.test>';
+process.env.MAIL_REPLY_TO = 'office@drift.test';
 process.env.SMTP_HOST = '127.0.0.1';
 process.env.SMTP_PORT = String(sink.port);
 process.env.SMTP_SECURE = 'false';
@@ -64,8 +64,8 @@ describe('delivering mail', () => {
     const mail = sink.received();
     assert.equal(mail.length, 1);
     assert.equal(mail[0]?.envelope_to[0], 'harold@example.test');
-    assert.match(mail[0]?.from ?? '', /billing@avalanche\.test/);
-    assert.equal(mail[0]?.reply_to, 'office@avalanche.test');
+    assert.match(mail[0]?.from ?? '', /billing@drift\.test/);
+    assert.equal(mail[0]?.reply_to, 'office@drift.test');
     assert.equal(mail[0]?.subject, 'Your invoice');
     assert.match(mail[0]?.body ?? '', /January bill/);
     // The header that ties the provider's copy back to our row.

@@ -115,7 +115,7 @@ settingsRouter.post(
     try {
       result = await deliverSms(
         body.to,
-        body.body ?? 'Avalanche CRM test message. If you got this, SMS is working.',
+        body.body ?? 'Drift CRM test message. If you got this, SMS is working.',
         { ignoreEnabled: true },
       );
     } catch (err) {

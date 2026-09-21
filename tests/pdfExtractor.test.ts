@@ -44,9 +44,9 @@ describe('reading text back out of a PDF', () => {
   });
 
   it('reads hex-encoded glyph runs, which is what pdfkit writes', () => {
-    // "Avalanche" as the WinAnsi codes pdfkit addresses glyphs by.
-    const pdf = wrap('BT [<41> 40 <76> 20 <616c616e636865> 0] TJ ET', '\n');
-    assert.match(pdfText(pdf), /Avalanche/);
+    // "Drift" as the WinAnsi codes pdfkit addresses glyphs by.
+    const pdf = wrap('BT [<44> 40 <72> 20 <696674> 0] TJ ET', '\n');
+    assert.match(pdfText(pdf), /Drift/);
   });
 
   it('survives a stream whose data ends in a carriage return', () => {

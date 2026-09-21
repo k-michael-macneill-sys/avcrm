@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { useAuth } from '@/auth/AuthContext';
 import { cn } from '@/lib/utils';
 import { ThemeToggle } from '@/theme/ThemeToggle';
+import logo from '@/assets/drift-logo.jpg';
 
 interface NavItem {
   to: string;
@@ -52,9 +53,9 @@ export function Shell(): JSX.Element {
   return (
     <div className="grid min-h-screen grid-cols-[224px_minmax(0,1fr)] max-[720px]:grid-cols-1">
       <aside className="flex flex-col gap-6 border-r border-border bg-background/70 p-3.5 backdrop-blur-xl">
-        <p className="px-2 text-sm font-semibold text-foreground">
-          <span className="text-primary">❄</span> Avalanche CRM
-        </p>
+        <div className="px-2">
+          <img src={logo} alt="Drift Property Services" className="h-9 w-auto rounded-md" />
+        </div>
 
         <nav aria-label="Sections" className="flex flex-col gap-0.5">
           {items.map(({ to, label, icon: Icon, end }) => (

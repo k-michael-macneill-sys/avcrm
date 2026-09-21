@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { useAuth } from '@/auth/AuthContext';
 import { ApiError } from '@/lib/api';
 import { ThemeToggle } from '@/theme/ThemeToggle';
+import logo from '@/assets/drift-logo.jpg';
 
 const SEED_ACCOUNT: [string, string] = ['corporate@avcrm.test', 'Corporate — add the first branch and crew from here'];
 
@@ -44,9 +45,7 @@ export function Login(): JSX.Element {
         <ThemeToggle />
       </div>
       <div className="glass-card w-full max-w-sm rounded-2xl border border-border bg-card/60 p-7 shadow-2xl backdrop-blur-xl">
-        <p className="mb-1 text-sm font-semibold text-foreground">
-          <span className="text-primary">❄</span> Avalanche CRM
-        </p>
+        <img src={logo} alt="Drift Property Services" className="mb-3 h-12 w-auto rounded-md" />
         <h1 className="mb-4 mt-1 text-2xl font-semibold tracking-tight">Sign in</h1>
 
         <form onSubmit={onSubmit} className="flex flex-col gap-1">

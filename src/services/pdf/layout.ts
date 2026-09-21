@@ -26,7 +26,7 @@ export function newDocument(title: string, subject: string): Doc {
   const doc = new PDFDocument({
     size: 'LETTER',
     margin: PAGE_MARGIN,
-    info: { Title: title, Subject: subject, Creator: 'Avalanche CRM' },
+    info: { Title: title, Subject: subject, Creator: 'Drift CRM' },
     autoFirstPage: true,
     // Page numbers cannot be written until the page count is known, which
     // means holding the pages rather than streaming them out as they finish.
@@ -49,7 +49,7 @@ export function toBuffer(doc: Doc): Promise<Buffer> {
 
 /** The company block and the document's name, top of page one. */
 export function letterhead(doc: Doc, branchName: string, documentTitle: string): void {
-  doc.font('Helvetica-Bold').fontSize(18).text('Avalanche', PAGE_MARGIN, PAGE_MARGIN);
+  doc.font('Helvetica-Bold').fontSize(18).text('Drift', PAGE_MARGIN, PAGE_MARGIN);
   doc.font('Helvetica').fontSize(9).fillColor(MUTED).text(`${branchName} branch`);
 
   doc

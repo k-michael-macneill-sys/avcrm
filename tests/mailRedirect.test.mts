@@ -9,10 +9,10 @@ import { startMailSink } from './helpers/mailSink';
 const sink = await startMailSink();
 
 process.env.MAIL_DRIVER = 'smtp';
-process.env.MAIL_FROM = 'Avalanche <billing@avalanche.test>';
+process.env.MAIL_FROM = 'Drift <billing@drift.test>';
 process.env.SMTP_HOST = '127.0.0.1';
 process.env.SMTP_PORT = String(sink.port);
-process.env.MAIL_REDIRECT_TO = 'staging@avalanche.test';
+process.env.MAIL_REDIRECT_TO = 'staging@drift.test';
 
 const { db, resetDatabase } = await import('./helpers/database');
 const { buildWorld } = await import('./helpers/fixtures');
@@ -46,7 +46,7 @@ describe('MAIL_REDIRECT_TO', () => {
     assert.equal(mail.length, 1);
     // A staging database is a copy of production, real addresses and all.
     // Without this, the first queue drain after a restore emails them.
-    assert.equal(mail[0]?.envelope_to[0], 'staging@avalanche.test');
+    assert.equal(mail[0]?.envelope_to[0], 'staging@drift.test');
     // The real recipient has to survive the redirect or the copy is useless.
     assert.match(mail[0]?.subject ?? '', /\[to: priya\.raman@example\.test\] Your invoice/);
   });

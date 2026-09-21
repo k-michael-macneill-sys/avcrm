@@ -12,16 +12,16 @@ import { generateSecretValues } from '../src/ops/secrets';
 function goodEnv(): Record<string, string> {
   const { POSTGRES_PASSWORD, JWT_SECRET, SECRETS_KEY } = generateSecretValues();
   return {
-    DOMAIN: 'crm.avalanche.ca',
-    ACME_EMAIL: 'office@avalanche.ca',
-    APP_BASE_URL: 'https://crm.avalanche.ca',
+    DOMAIN: 'crm.driftproperty.ca',
+    ACME_EMAIL: 'office@driftproperty.ca',
+    APP_BASE_URL: 'https://crm.driftproperty.ca',
     POSTGRES_PASSWORD,
     JWT_SECRET,
     SECRETS_KEY,
     DATABASE_URL: `postgres://avcrm:${POSTGRES_PASSWORD}@postgres:5432/avcrm`,
     TRUST_PROXY: 'true',
     MAIL_DRIVER: 'smtp',
-    MAIL_FROM: 'Avalanche <billing@avalanche.ca>',
+    MAIL_FROM: 'Drift <billing@driftproperty.ca>',
     SMTP_HOST: 'smtp.postmarkapp.com',
     SMTP_USER: 'user',
     SMTP_PASSWORD: 'pass',
@@ -57,7 +57,7 @@ describe('the deploy preflight', () => {
       JWT_SECRET: '',
       DATABASE_URL: 'postgres://avcrm:PASSWORD_FROM_ABOVE@postgres:5432/avcrm',
       MAIL_DRIVER: 'smtp',
-      MAIL_FROM: 'Avalanche <billing@example.ca>',
+      MAIL_FROM: 'Drift <billing@example.ca>',
     });
 
     for (const setting of [
@@ -73,7 +73,7 @@ describe('the deploy preflight', () => {
   });
 
   it('catches a staging valve left open, which silently writes to nobody', () => {
-    assert.ok(errors({ ...goodEnv(), MAIL_REDIRECT_TO: 'staging@avalanche.ca' }).includes('MAIL_REDIRECT_TO'));
+    assert.ok(errors({ ...goodEnv(), MAIL_REDIRECT_TO: 'staging@driftproperty.ca' }).includes('MAIL_REDIRECT_TO'));
     assert.ok(errors({ ...goodEnv(), SMS_REDIRECT_TO: '+19025550123' }).includes('SMS_REDIRECT_TO'));
   });
 
@@ -88,7 +88,7 @@ describe('the deploy preflight', () => {
   });
 
   it('catches a customer-facing link that is not https', () => {
-    assert.ok(errors({ ...goodEnv(), APP_BASE_URL: 'http://crm.avalanche.ca' }).includes('APP_BASE_URL'));
+    assert.ok(errors({ ...goodEnv(), APP_BASE_URL: 'http://crm.driftproperty.ca' }).includes('APP_BASE_URL'));
   });
 
   it('catches a database host that only resolves on a laptop', () => {

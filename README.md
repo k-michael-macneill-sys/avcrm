@@ -1,4 +1,4 @@
-# avcrm — Avalanche CRM
+# avcrm — Drift Property Services CRM
 
 Snow and ice removal CRM for a multi-branch operation: a JSON API, four scheduled
 jobs, and a browser client that runs on top of them.
@@ -881,7 +881,7 @@ one missing environment variable away from emailing real customers.
 
 ```bash
 MAIL_DRIVER=smtp
-MAIL_FROM="Avalanche CRM <no-reply@example.test>"
+MAIL_FROM="Drift CRM <no-reply@example.test>"
 SMTP_HOST=smtp.postmarkapp.com
 SMTP_USER=…
 SMTP_PASSWORD=…

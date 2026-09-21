@@ -114,7 +114,7 @@ const MESSAGEBIRD: ProviderDefinition = {
     + 'be a number or, where the country allows it, a short alphanumeric name.',
   fields: [
     { name: 'access_key', label: 'Access key', required: true, secret: true },
-    { name: 'from', label: 'Send from', required: true, placeholder: 'Avalanche' },
+    { name: 'from', label: 'Send from', required: true, placeholder: 'Drift' },
   ],
   build: (v, m) => ({
     url: 'https://rest.messagebird.com/messages',
@@ -134,7 +134,7 @@ const VONAGE: ProviderDefinition = {
   fields: [
     { name: 'api_key', label: 'API key', required: true },
     { name: 'api_secret', label: 'API secret', required: true, secret: true },
-    { name: 'from', label: 'Send from', required: true, placeholder: 'Avalanche' },
+    { name: 'from', label: 'Send from', required: true, placeholder: 'Drift' },
   ],
   build: (v, m) => ({
     url: 'https://rest.nexmo.com/sms/json',
