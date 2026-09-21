@@ -2,8 +2,9 @@
 
 # ---- build ---------------------------------------------------------------
 # Dev dependencies live here and nowhere else: TypeScript compiles the API to
-# dist/ and the browser client to public/assets/, and neither the compiler nor
-# the test suite has any business in the image that runs in production.
+# dist/, Vite builds the browser client to client/dist/, and neither the
+# compiler nor the test suite has any business in the image that runs in
+# production.
 FROM node:22-slim AS build
 
 WORKDIR /app
@@ -19,9 +20,9 @@ RUN apt-get update \
 COPY package.json package-lock.json ./
 RUN npm ci
 
-COPY tsconfig.json tsconfig.web.json ./
+COPY tsconfig.json ./
 COPY src ./src
-COPY web ./web
+COPY client ./client
 COPY public ./public
 
 RUN npm run build
@@ -48,6 +49,7 @@ ENV STORAGE_LOCAL_DIR=/data/storage
 
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+COPY --from=build /app/client/dist ./client/dist
 COPY --from=build /app/public ./public
 COPY package.json ./
 

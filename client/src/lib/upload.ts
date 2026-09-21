@@ -1,0 +1,130 @@
+import * as api from '@/lib/api';
+
+/**
+ * Sending a file, in the two steps the API asks for: get a target, PUT the
+ * bytes to it. The second step deliberately does not carry the session token
+ * — the signed URL is the permission, so this works unchanged the day the
+ * target points at a bucket instead of at us.
+ */
+
+export type UploadPurpose =
+  | 'signature'
+  | 'service_photo'
+  | 'operator_document'
+  | 'contract_pdf'
+  | 'invoice_pdf';
+
+interface UploadTarget {
+  upload_id: string;
+  key: string;
+  upload_url: string;
+  method: 'PUT';
+  content_type: string;
+  max_bytes: number;
+  expires_at: string;
+}
+
+/** Returns the stored key, which is what every table records. */
+export async function uploadBlob(
+  purpose: UploadPurpose,
+  blob: Blob,
+  fileName: string | null = null,
+): Promise<string> {
+  const target = await api.post<UploadTarget>('/uploads', {
+    purpose,
+    content_type: blob.type || 'application/octet-stream',
+    file_name: fileName,
+  });
+
+  if (blob.size > target.max_bytes) {
+    throw new api.ApiError(
+      400,
+      'bad_request',
+      `That file is ${formatBytes(blob.size)}; the limit is ${formatBytes(target.max_bytes)}`,
+      [],
+    );
+  }
+
+  const response = await fetch(target.upload_url, {
+    method: target.method,
+    headers: { 'Content-Type': target.content_type },
+    body: blob,
+  });
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    const error = (payload.error ?? {}) as Record<string, unknown>;
+    throw new api.ApiError(
+      response.status,
+      String(error.code ?? 'error'),
+      String(error.message ?? 'That upload failed'),
+      [],
+    );
+  }
+
+  return target.key;
+}
+
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} kB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/**
+ * Reading a file back.
+ *
+ * `/files/:key` is authorized by the session, and a browser does not put an
+ * Authorization header on an <img src> or a plain link — so stored files are
+ * fetched with the token and handed to the page as blob URLs.
+ */
+export async function fetchFile(key: string): Promise<Blob> {
+  const auth = api.token();
+  const response = await fetch(`/files/${key}`, {
+    headers: auth ? { Authorization: `Bearer ${auth}` } : {},
+  });
+  if (!response.ok) {
+    throw new api.ApiError(
+      response.status,
+      'not_found',
+      response.status === 403 ? 'You cannot open that file' : 'That file is not on file',
+      [],
+    );
+  }
+  return response.blob();
+}
+
+/** Opens a stored file in a new tab, with the session behind it. */
+export async function openFile(key: string, fileName: string): Promise<void> {
+  const blob = await fetchFile(key);
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.target = '_blank';
+  anchor.rel = 'noopener';
+  anchor.download = fileName;
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+/**
+ * Fetches a generated document and saves it. Same reason as fetchFile: the
+ * route is authorized by the session, and a plain link carries no header.
+ */
+export async function downloadDocument(path: string, fileName: string): Promise<void> {
+  const auth = api.token();
+  const response = await fetch(path, { headers: auth ? { Authorization: `Bearer ${auth}` } : {} });
+  if (!response.ok) {
+    throw new Error(
+      response.status === 403
+        ? 'You cannot open that document'
+        : `The document could not be generated (${response.status})`,
+    );
+  }
+  const url = URL.createObjectURL(await response.blob());
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}

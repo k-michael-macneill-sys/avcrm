@@ -60,15 +60,20 @@ export function createApp(): Express {
    * /customers is an endpoint, and the UI needs its own space rather than a
    * fight over it. Resolved from this file so it works the same whether the
    * process started from src/ under tsx or dist/ after a build.
+   *
+   * Built by Vite into client/dist, not into public/: public/ also holds
+   * card-complete.html, a standalone page outside the SPA that a full
+   * `emptyOutDir` build must never be able to overwrite or delete.
    */
   const publicDir = path.resolve(__dirname, '..', 'public');
+  const clientDir = path.resolve(__dirname, '..', 'client', 'dist');
   // redirect:false so a bare /app is served by the route below rather than
   // bounced to /app/ first.
-  app.use('/app', express.static(publicDir, { index: false, redirect: false }));
+  app.use('/app', express.static(clientDir, { index: false, redirect: false }));
 
   // Client routing: anything under /app that is not a file is a screen.
   app.get(/^\/app(?:\/.*)?$/, (_req, res) => {
-    res.sendFile(path.join(publicDir, 'index.html'));
+    res.sendFile(path.join(clientDir, 'index.html'));
   });
 
   // Where the processor sends the customer after they have entered a card.

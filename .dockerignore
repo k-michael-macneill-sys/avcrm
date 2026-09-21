@@ -1,7 +1,7 @@
 # Everything the image builds for itself, plus everything it must never carry.
 node_modules
 dist
-public/assets
+client/dist
 storage
 storage-test
 tests
