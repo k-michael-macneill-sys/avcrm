@@ -69,8 +69,8 @@ export async function seed(knex: Knex): Promise<void> {
   await knex('users').insert({
     email: 'corporate@avcrm.test',
     password_hash,
-    first_name: 'Corporate',
-    last_name: 'Admin',
+    first_name: 'ADMIN',
+    last_name: '',
     phone: null,
     role: 'corporate',
     branch_id: null,
