@@ -48,6 +48,12 @@ export const QUOTE_STATUSES = [
 ] as const;
 export type QuoteStatus = (typeof QUOTE_STATUSES)[number];
 
+/**
+ * The service agreement currently being signed. Bumped when the wording
+ * changes, so every contract records which version its customer agreed to.
+ */
+export const CURRENT_TERMS_VERSION = '2026-09-01';
+
 export const CONTRACT_STATUSES = ['active', 'cancelled', 'completed'] as const;
 export type ContractStatus = (typeof CONTRACT_STATUSES)[number];
 
@@ -93,6 +99,7 @@ export const TEMPLATE_CODES = [
   'invoice_sent',
   'invoice_overdue',
   'card_setup_request',
+  'signing_request',
   // Internal copies. A branch manager reading "Hi Harold, your driveway is
   // clear" is not a notification, so the office wording is its own template
   // rather than the customer's text sent to a second address.
@@ -139,6 +146,14 @@ export const CARD_SETUP_STATUSES = [
   'cancelled',
 ] as const;
 export type CardSetupStatus = (typeof CARD_SETUP_STATUSES)[number];
+
+export const SIGNING_REQUEST_STATUSES = [
+  'sent',
+  'completed',
+  'expired',
+  'cancelled',
+] as const;
+export type SigningRequestStatus = (typeof SIGNING_REQUEST_STATUSES)[number];
 
 export const UPLOAD_STATUSES = ['pending', 'stored'] as const;
 export type UploadStatus = (typeof UPLOAD_STATUSES)[number];
@@ -266,10 +281,18 @@ export interface Quote {
   billing_type: BillingType;
   initial_price: string;
   discounted_price: string;
+  /**
+   * What they pay every month after the first visit. Monthly contracts only —
+   * seasonal is a single payment, so this is null on those.
+   */
+  recurring_price: string | null;
   season_start: string;
   season_end: string;
   status: QuoteStatus;
   notes: string | null;
+  addon_salt: boolean;
+  addon_vehicle: boolean;
+  addon_stairs: boolean;
   created_at: Date;
   updated_at: Date;
 }
@@ -475,6 +498,26 @@ export interface CardSetup {
   status: CardSetupStatus;
   payment_method_last4: string | null;
   payment_method_brand: string | null;
+  requested_by_user_id: string | null;
+  expires_at: Date;
+  completed_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+/**
+ * An invitation to sign a quote from somewhere other than the rep's phone.
+ * The link carries a signed token with its own expiry; this row is what
+ * makes it single-use, and the record of what came of it.
+ */
+export interface SigningRequest {
+  id: string;
+  quote_id: string;
+  customer_id: string;
+  branch_id: string;
+  contract_id: string | null;
+  sent_to: string;
+  status: SigningRequestStatus;
   requested_by_user_id: string | null;
   expires_at: Date;
   completed_at: Date | null;

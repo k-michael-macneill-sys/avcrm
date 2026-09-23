@@ -26,7 +26,7 @@ export default defineConfig({
       // Every top-level resource the API owns (see src/routes/index.ts),
       // proxied to the API server in dev so a relative fetch('/customers')
       // from the client reaches it without a CORS dance.
-      '^/(auth|uploads|files|branches|users|operators|document-requirements|customers|properties|pricing-guide|quotes|checklist-requirements|contracts|work-orders|message-templates|message-log|review-requests|card-setups|invoices|payments|reports|settings|audit-log|webhooks|health|ready|card-complete)(/|$)':
+      '^/(auth|public|sales|uploads|files|branches|users|operators|document-requirements|customers|properties|pricing-guide|quotes|checklist-requirements|contracts|work-orders|message-templates|message-log|review-requests|card-setups|invoices|payments|reports|settings|audit-log|webhooks|health|ready|card-complete)(/|$)':
         {
           target: 'http://127.0.0.1:3000',
           changeOrigin: true,

@@ -118,6 +118,13 @@ const envSchema = z.object({
   UPLOAD_URL_TTL_SECONDS: z.coerce.number().int().min(30).max(3600).default(900),
 
   SEED_PASSWORD: z.string().min(8).default('Password123!'),
+
+  /**
+   * The browser key for the leads map. Public by design — it ships to every
+   * browser that opens the map — so what protects it is the referrer and API
+   * restrictions set on it in Google Cloud, not secrecy.
+   */
+  GOOGLE_MAPS_API_KEY: z.string().trim().min(1).optional(),
 });
 
 /**
@@ -241,6 +248,9 @@ export const config = {
   },
   seed: {
     password: env.SEED_PASSWORD,
+  },
+  maps: {
+    googleApiKey: env.GOOGLE_MAPS_API_KEY ?? null,
   },
 } as const;
 

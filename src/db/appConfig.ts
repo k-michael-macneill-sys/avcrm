@@ -313,6 +313,18 @@ export const MESSAGE_TEMPLATES: MessageTemplateRow[] = [
         '{{branch_name}}: add your card for {{address_line1}} here — {{card_url}}',
     },
     {
+      // The online equivalent of handing someone the phone at their door.
+      code: 'signing_request',
+      channel: 'email',
+      branch_id: null,
+      subject: 'Your snow clearing agreement for {{address_line1}}',
+      body:
+        'Hi {{customer_first_name}},\n\nYour agreement for {{address_line1}} is ' +
+        'ready to sign:\n\n{{signing_url}}\n\nThe page shows the full terms and ' +
+        'what you will be charged, and takes your signature and card in one go. ' +
+        'The link is yours alone — please do not forward it.\n\n— {{branch_name}}',
+    },
+    {
       code: 'payment_failed_internal',
       channel: 'email',
       branch_id: null,

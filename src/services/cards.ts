@@ -90,7 +90,8 @@ export interface CardRequestResult {
 export async function requestCard(
   contractId: string,
   scope: BranchScope,
-  actorId: string,
+  /** Null when the customer asked for it themselves, from their signing page. */
+  actorId: string | null,
   db: Knex = defaultDb,
 ): Promise<CardRequestResult> {
   const contract = await contractFor(contractId, scope, db);

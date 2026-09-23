@@ -30,7 +30,7 @@ const TRANSITIONS: Record<ContractStatus, ContractStatus[]> = {
  * token was captured, and capturing a token means it is ticked. Everything
  * else on the list is config the office can change without touching code.
  */
-const CARD_ON_FILE = 'card_on_file';
+export const CARD_ON_FILE = 'card_on_file';
 
 /**
  * Everything except payment_method_token. Reads go through this so the token
@@ -220,6 +220,13 @@ export async function createContract(
         checked_at: checked.get(requirement.code) === true ? signedAt : null,
       })),
     );
+
+    // Somebody with a signed contract is not a lead any more. Only ever
+    // forwards: a churned customer who signs again is a separate question,
+    // and not one a signature should answer silently.
+    await trx('customers')
+      .where({ id: property.customer_id, status: 'lead' })
+      .update({ status: 'active' });
 
     if (quote.status !== 'accepted') {
       await trx('quotes').where({ id: quote.id }).update({ status: 'accepted' });
