@@ -1,6 +1,7 @@
 import { Link, useParams } from 'react-router-dom';
 import type { Contract, Customer, Property, Quote } from '../../../src/types/models';
 import { PageHeader } from '@/components/PageHeader';
+import { Button } from '@/components/ui/button';
 import { Section } from '@/components/Section';
 import { DataTable } from '@/components/DataTable';
 import { StatusPill } from '@/components/StatusPill';
@@ -37,6 +38,13 @@ export function CustomerDetail(): JSX.Element {
       <PageHeader
         title={`${customer.first_name} ${customer.last_name}`}
         subtitle={customer.email ?? customer.phone ?? 'No contact on file'}
+        actions={
+          customer.status === 'lead' ? (
+            <Button asChild>
+              <Link to={`/customers/new?lead=${customer.id}`}>Sign up</Link>
+            </Button>
+          ) : undefined
+        }
       />
 
       <Section title="Details" className="mb-4">

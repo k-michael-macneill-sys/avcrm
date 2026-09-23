@@ -8,6 +8,8 @@ import { Dashboard } from '@/routes/Dashboard';
 import { Reports } from '@/routes/Reports';
 import { Customers } from '@/routes/Customers';
 import { CustomerDetail } from '@/routes/CustomerDetail';
+import { NewCustomer } from '@/routes/NewCustomer';
+import { Sign } from '@/routes/Sign';
 import { Quotes } from '@/routes/Quotes';
 import { QuoteDetail } from '@/routes/QuoteDetail';
 import { Contracts } from '@/routes/Contracts';
@@ -29,11 +31,14 @@ export default function App(): JSX.Element {
         <AuthProvider>
           <Routes>
             <Route path="/login" element={<Login />} />
+            {/* The customer's own page from an emailed agreement: no login. */}
+            <Route path="/sign/:token" element={<Sign />} />
             <Route element={<RequireAuth />}>
               <Route element={<Shell />}>
                 <Route index element={<Dashboard />} />
 
                 <Route path="customers" element={<Customers />} />
+                <Route path="customers/new" element={<NewCustomer />} />
                 <Route path="customers/:id" element={<CustomerDetail />} />
 
                 <Route path="quotes" element={<Quotes />} />

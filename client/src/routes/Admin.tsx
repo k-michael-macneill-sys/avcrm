@@ -6,6 +6,7 @@ import { InlineForm } from '@/components/InlineForm';
 import { Loading, ErrorNotice } from '@/components/Misc';
 import { useQuery } from '@/lib/useQuery';
 import * as api from '@/lib/api';
+import { PROVINCES } from '@/lib/sales';
 
 /**
  * Where the company itself is set up: its branches, and the people who work
@@ -18,7 +19,6 @@ import * as api from '@/lib/api';
  * before they arrive, created here by the person who hired them.
  */
 
-const PROVINCES = ['AB', 'BC', 'MB', 'NB', 'NL', 'NS', 'NT', 'NU', 'ON', 'PE', 'QC', 'SK', 'YT'];
 
 /**
  * Three practical roles over the two the database has.
