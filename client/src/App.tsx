@@ -11,6 +11,7 @@ import { Customers } from '@/routes/Customers';
 import { CustomerDetail } from '@/routes/CustomerDetail';
 import { NewCustomer } from '@/routes/NewCustomer';
 import { Sign } from '@/routes/Sign';
+import { Leads } from '@/routes/Leads';
 import { Quotes } from '@/routes/Quotes';
 import { QuoteDetail } from '@/routes/QuoteDetail';
 import { Contracts } from '@/routes/Contracts';
@@ -40,6 +41,14 @@ export default function App(): JSX.Element {
             <Route element={<RequireAuth />}>
               <Route element={<Shell />}>
                 <Route index element={<Dashboard />} />
+                <Route
+                  path="leads"
+                  element={
+                    <RoleOnly roles={SELLERS} title="Sales only" message="The door-knocking map is for sales reps and the office.">
+                      <Leads />
+                    </RoleOnly>
+                  }
+                />
 
                 <Route path="customers" element={<RoleOnly roles={SELLERS} title="Sales only" message="Customers, quotes and contracts are the sales side. Your visits are under Dispatch."><Customers /></RoleOnly>} />
                 <Route path="customers/new" element={<RoleOnly roles={SELLERS} title="Sales only" message="Customers, quotes and contracts are the sales side. Your visits are under Dispatch."><NewCustomer /></RoleOnly>} />

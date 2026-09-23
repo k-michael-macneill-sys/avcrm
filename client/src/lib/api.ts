@@ -143,6 +143,11 @@ export async function patch<T>(path: string, body: unknown): Promise<T> {
   return payload.data;
 }
 
+/** DELETE answers 204 with no body. */
+export async function del(path: string): Promise<void> {
+  await request<void>('DELETE', path);
+}
+
 export interface Session {
   token: string;
   user: PublicUser;

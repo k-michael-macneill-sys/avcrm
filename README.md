@@ -171,11 +171,22 @@ TOKEN=$(curl -s -X POST localhost:3000/auth/login \
 curl -s localhost:3000/customers -H "Authorization: Bearer $TOKEN"
 ```
 
-Two roles, per the spec:
+Three roles:
 
 - **corporate** — sees all branches and all roll-up reporting. Creates users,
-  reviews documents, manages branches.
-- **operator** — hard-scoped to their own `branch_id`.
+  reviews documents, manages branches. Adding a branch also takes the owner
+  password in `BRANCH_PASSWORD` (unset locks it), because branch managers are
+  corporate too.
+- **sales** — a door-to-door rep, hard-scoped to their own `branch_id`. The
+  leads map, customers, quotes, contracts and the sign-up flow.
+- **operator** — clears driveways, hard-scoped to their own `branch_id`.
+  Dispatch, their visits and their document vault.
+
+Selling and clearing are split by writes, not reads (`writesOnlyFor` in
+`src/middleware/auth.ts`): only corporate and sales may create or change
+customers, properties, quotes, contracts and card requests; only corporate
+and operators may change visits. Reads stay shared within a branch — an
+operator needs the address of the house they are clearing.
 
 The scoping is enforced in middleware at the query layer, not in the UI.
 `resolveBranchScope` (`src/middleware/auth.ts`) is the only place that decides
@@ -454,6 +465,35 @@ billing_type)`, read-only over the API like `document_requirements`.
 screen opens with. It returns a null price rather than an error when the branch
 has no row for that driveway size — an unpriced size is a gap in config, not a
 failed request — and the rep can always override it.
+
+## Signing up a customer, and the leads map
+
+**Add customer** (`/app/customers/new`) is three pages. Page one is the
+customer and the service address. Page two is the upsells (salt, vehicle
+package, stairs — flags on the quote, no price of their own), monthly or
+seasonal billing, and three prices: *initial* (the list price the discount is
+shown against), *discounted* (what the first visit costs) and, for monthly,
+*recurring* (every month after). A recurring price under $100 gets a second
+look but is never refused. Nothing is written until the rep leaves page two;
+then `POST /sales/deals` creates the customer, property and quote in one
+transaction. Customers stay leads until they sign.
+
+Page three either takes the signature on the rep's screen and goes straight
+to the Stripe card page (or records cash or cheque taken for a seasonal
+contract), or sends **email completion**: a single-use signed link
+(`/app/sign/:token`, 14 days) where the customer confirms the terms, signs and
+adds their card themselves. The billing run charges the discounted price for
+the first period and the recurring price after it.
+
+**Leads** (`/app/leads`) is a Google Map. Tap a house: *Not home*, *Not
+interested*, *Lead* (optionally with a name and number, which files a lead
+customer at that address), or *Add customer*, which opens the sign-up with the
+address filled in. Tapping an existing pin is a revisit and counts the knock.
+Signed customers are green pins drawn from their property, with what they pay
+for and the permanent job notes — `GET /leads/customers`, which operators may
+read too; door-knock pins are for sales and corporate only. The map needs
+`GOOGLE_MAPS_API_KEY`: a browser key with the Maps JavaScript and Geocoding
+APIs enabled, restricted to the site's address in Google Cloud.
 
 ## Work orders and the completion gate
 

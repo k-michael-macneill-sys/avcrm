@@ -48,8 +48,10 @@ const customerSchema = z
     phone: z.string().trim().max(40).nullable().default(null),
     preferred_contact: z.enum(PREFERRED_CONTACTS).default('email'),
     notes: z.string().trim().max(5000).nullable().default(null),
-    // Signing today, so active rather than the lead default.
-    status: z.enum(CUSTOMER_STATUSES).default('active'),
+    // A lead until they sign: signing the contract is what makes them
+    // active, so somebody who walks away at page three is not counted as a
+    // customer — or pinned as one on the map.
+    status: z.enum(CUSTOMER_STATUSES).default('lead'),
   })
   .refine((v) => v.preferred_contact !== 'email' || !!v.email, {
     message: 'email is required when preferred_contact is "email"',
@@ -117,6 +119,8 @@ const openDealSchema = z
     customer_id: z.string().uuid().optional(),
     property: propertySchema,
     quote: quoteSchema,
+    /** The map pin this sign-up started from, if it did. */
+    lead_pin_id: z.string().uuid().optional(),
   })
   .refine((v) => !!v.customer !== !!v.customer_id, {
     message: 'Provide either customer (new) or customer_id (an existing lead), not both',
@@ -147,6 +151,7 @@ salesRouter.post(
         customer_id: body.customer_id,
         property: body.property,
         quote: body.quote,
+        lead_pin_id: body.lead_pin_id,
       },
       resolveActor(req),
     );

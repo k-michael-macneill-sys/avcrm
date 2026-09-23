@@ -160,6 +160,10 @@ export const SIGNING_REQUEST_STATUSES = [
 ] as const;
 export type SigningRequestStatus = (typeof SIGNING_REQUEST_STATUSES)[number];
 
+/** How a door went. A signed customer is drawn from their property instead. */
+export const PIN_STATUSES = ['not_home', 'not_interested', 'lead'] as const;
+export type PinStatus = (typeof PIN_STATUSES)[number];
+
 export const UPLOAD_STATUSES = ['pending', 'stored'] as const;
 export type UploadStatus = (typeof UPLOAD_STATUSES)[number];
 
@@ -542,6 +546,27 @@ export interface IntegrationSetting {
   is_enabled: boolean;
   settings: Record<string, string>;
   secret_ciphertext: string | null;
+  updated_by_user_id: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+/** A house a rep has knocked on, and how it went. */
+export interface LeadPin {
+  id: string;
+  branch_id: string;
+  latitude: string;
+  longitude: string;
+  address_line1: string | null;
+  city: string | null;
+  province: string | null;
+  postal_code: string | null;
+  status: PinStatus;
+  notes: string | null;
+  customer_id: string | null;
+  knock_count: number;
+  last_knocked_at: Date;
+  created_by_user_id: string | null;
   updated_by_user_id: string | null;
   created_at: Date;
   updated_at: Date;

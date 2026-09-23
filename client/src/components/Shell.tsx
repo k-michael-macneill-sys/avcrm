@@ -10,6 +10,7 @@ import {
   Building2,
   Settings as SettingsIcon,
   LogOut,
+  MapPin,
 } from 'lucide-react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -36,6 +37,7 @@ const CORPORATE: UserRole[] = ['corporate'];
 
 const NAV: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ALL, end: true },
+  { to: '/leads', label: 'Leads', icon: MapPin, roles: SELLERS },
   { to: '/customers', label: 'Customers', icon: Users, roles: SELLERS },
   { to: '/quotes', label: 'Quotes', icon: FileText, roles: SELLERS },
   { to: '/contracts', label: 'Contracts', icon: ClipboardCheck, roles: SELLERS },

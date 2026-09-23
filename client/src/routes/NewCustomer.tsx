@@ -458,6 +458,8 @@ function SaleStep({
               customer: contact,
               ...(isCorporate ? { branch_id: customer.branch_id } : {}),
             }),
+        // The map pin this sign-up started from, so it follows the customer.
+        ...(stringParam('pin') ? { lead_pin_id: stringParam('pin') } : {}),
         property: {
           address_line1: customer.address_line1.trim(),
           address_line2: customer.address_line2.trim() || null,
@@ -634,6 +636,10 @@ function SaleStep({
       </Dialog>
     </Section>
   );
+}
+
+function stringParam(name: string): string | null {
+  return new URLSearchParams(window.location.search).get(name);
 }
 
 function numberParam(name: string): number | null {

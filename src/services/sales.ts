@@ -7,8 +7,9 @@ import { applyBranchScope } from '../utils/scope';
 import type { AuditActor } from './audit';
 import { createCustomer, type CustomerInput } from './customers';
 import { sendInvoice } from './invoices';
+import { linkPinToCustomer } from './leads';
 import { recordPayment } from './payments';
-import { createProperty, type PropertyInput } from './properties';
+import { createProperty, findDuplicateAddress, type PropertyInput } from './properties';
 import { createQuote, type QuoteInput } from './quotes';
 
 /**
@@ -33,6 +34,7 @@ export interface OpenDealInput {
   customer_id?: string;
   property: PropertyInput;
   quote: Omit<QuoteInput, 'status'>;
+  lead_pin_id?: string;
 }
 
 export interface OpenDealResult {
@@ -66,7 +68,7 @@ export async function openDeal(
       : // Both checked above: a new customer always has a branch by here.
         await createCustomer(branchId!, createdByUserId, input.customer!, trx);
 
-    const property = await createProperty(customer.id, scope, input.property, trx);
+    const property = await propertyFor(customer.id, scope, input.property, trx);
 
     // 'presented' rather than 'draft': the rep is standing there showing it,
     // and a draft cannot be signed.
@@ -78,6 +80,10 @@ export async function openDeal(
       actor,
       trx,
     );
+
+    if (input.lead_pin_id) {
+      await linkPinToCustomer(input.lead_pin_id, customer.id, scope, trx);
+    }
 
     return { customer, property, quote };
   });
@@ -138,6 +144,36 @@ export async function settleCollectedPayment(
   );
 
   return settled;
+}
+
+/**
+ * A lead often already has their house on file — dropped from the map, or
+ * added when they were first logged. Signing them up uses that house rather
+ * than tripping over it as a duplicate; anybody else's house at the same
+ * address is still refused.
+ */
+async function propertyFor(
+  customerId: string,
+  scope: BranchScope,
+  input: PropertyInput,
+  db: Knex,
+): Promise<Property> {
+  const existing = await findDuplicateAddress(input.postal_code, input.address_line1, scope, db);
+  if (existing?.customer_id !== customerId) {
+    return createProperty(customerId, scope, input, db);
+  }
+
+  // What the rep filled in at sign-up is the latest word on the house.
+  const patch: Record<string, unknown> = { address_line2: input.address_line2 };
+  if (input.latitude !== null) patch.latitude = input.latitude.toFixed(6);
+  if (input.longitude !== null) patch.longitude = input.longitude.toFixed(6);
+  if (input.access_notes !== null) patch.access_notes = input.access_notes;
+
+  const [updated] = await db('properties')
+    .where({ id: existing.property_id })
+    .update(patch)
+    .returning('*');
+  return updated as Property;
 }
 
 async function existingCustomer(

@@ -60,7 +60,8 @@ describe('opening a deal from the sales wizard', () => {
     const { customer, property, quote } = reply.body.data;
     // A rep's deal lands in their own branch without them naming it.
     assert.equal(customer.branch_id, world.branches.kingston);
-    assert.equal(customer.status, 'active');
+    // Not a customer until they sign.
+    assert.equal(customer.status, 'lead');
     assert.equal(property.address_line2, 'Unit 2');
     // The permanent notes live on the property, for every future visit.
     assert.equal(property.access_notes, 'Gate code 1234. Pile snow left.');
