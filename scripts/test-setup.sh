@@ -24,6 +24,7 @@ export JWT_SECRET='test-secret-that-is-long-enough-for-the-schema'
 export MAIL_DRIVER=log
 export PAYMENT_GATEWAY=manual
 export GOOGLE_REVIEW_URL='https://example.test/review'
+export BRANCH_PASSWORD='test-owner-password'
 export APP_BASE_URL='http://127.0.0.1:3000'
 export STORAGE_LOCAL_DIR="${STORAGE_LOCAL_DIR:-./storage-test}"
 unset SMS_API_BASE SMS_REDIRECT_TO MAIL_REDIRECT_TO STRIPE_SECRET_KEY || true

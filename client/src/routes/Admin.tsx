@@ -1,5 +1,15 @@
+import * as React from 'react';
+import { Plus } from 'lucide-react';
 import type { Branch, PublicUser } from '../../../src/types/models';
 import { PageHeader } from '@/components/PageHeader';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Section } from '@/components/Section';
 import { DataTable } from '@/components/DataTable';
 import { InlineForm } from '@/components/InlineForm';
@@ -91,12 +101,19 @@ export function Admin(): JSX.Element {
 }
 
 function BranchCard({ branches, onDone }: { branches: Branch[]; onDone: () => void }): JSX.Element {
+  const [open, setOpen] = React.useState(false);
+
   return (
     <Section title="Branches" className="mb-4">
+      <div className="mb-3 flex justify-end">
+        <Button type="button" onClick={() => setOpen(true)}>
+          <Plus className="size-4" /> Add branch
+        </Button>
+      </div>
       <DataTable
         rowKey={(row) => row.id}
         rows={branches}
-        emptyMessage="No branches yet. Add the first one below."
+        emptyMessage="No branches yet. Use Add branch to create the first one."
         columns={[
           { header: 'Branch', cell: (b) => b.name },
           { header: 'Province', cell: (b) => b.province },
@@ -105,34 +122,48 @@ function BranchCard({ branches, onDone }: { branches: Branch[]; onDone: () => vo
         ]}
       />
 
-      <h3 className="mb-2 mt-4 text-sm font-semibold text-foreground">Add a branch</h3>
-      <InlineForm
-        submitLabel="Add branch"
-        specs={[
-          { name: 'name', label: 'Branch name', required: true, placeholder: 'Kingston' },
-          {
-            name: 'province',
-            label: 'Province',
-            type: 'select',
-            required: true,
-            options: PROVINCES.map((p) => ({ value: p, label: p })),
-          },
-          {
-            name: 'timezone',
-            label: 'Timezone',
-            value: 'America/Toronto',
-            help: 'Decides when a scheduled visit falls, and when the nightly jobs consider a day to have ended.',
-          },
-        ]}
-        onSubmit={(values) =>
-          api.post('/branches', {
-            name: values.name,
-            province: values.province,
-            timezone: values.timezone || 'America/Toronto',
-          })
-        }
-        onDone={onDone}
-      />
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Add a branch</DialogTitle>
+            <DialogDescription>
+              Only the owner can add branches, so this asks for the owner password.
+            </DialogDescription>
+          </DialogHeader>
+          <InlineForm
+            submitLabel="Add branch"
+            specs={[
+              { name: 'name', label: 'Branch name', required: true, placeholder: 'Halifax' },
+              {
+                name: 'province',
+                label: 'Province',
+                type: 'select',
+                required: true,
+                options: PROVINCES.map((p) => ({ value: p, label: p })),
+              },
+              {
+                name: 'timezone',
+                label: 'Timezone',
+                value: 'America/Toronto',
+                help: 'Decides when a scheduled visit falls, and when the nightly jobs consider a day to have ended.',
+              },
+              { name: 'owner_password', label: 'Owner password', type: 'password', required: true },
+            ]}
+            onSubmit={(values) =>
+              api.post('/branches', {
+                name: values.name,
+                province: values.province,
+                timezone: values.timezone || 'America/Toronto',
+                owner_password: values.owner_password ?? '',
+              })
+            }
+            onDone={() => {
+              setOpen(false);
+              onDone();
+            }}
+          />
+        </DialogContent>
+      </Dialog>
     </Section>
   );
 }

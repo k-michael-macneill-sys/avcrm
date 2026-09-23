@@ -125,6 +125,14 @@ const envSchema = z.object({
    * restrictions set on it in Google Cloud, not secrecy.
    */
   GOOGLE_MAPS_API_KEY: z.string().trim().min(1).optional(),
+
+  /**
+   * The owner's password for adding a branch. A second lock on top of the
+   * corporate role, because branch managers are corporate too and a new
+   * branch is the owner's decision. Unset means nobody can add one — the
+   * safe way for a missing setting to fail.
+   */
+  BRANCH_PASSWORD: z.string().min(4).optional(),
 });
 
 /**
@@ -252,6 +260,7 @@ export const config = {
   maps: {
     googleApiKey: env.GOOGLE_MAPS_API_KEY ?? null,
   },
+  branchPassword: env.BRANCH_PASSWORD ?? null,
 } as const;
 
 export type Config = typeof config;
