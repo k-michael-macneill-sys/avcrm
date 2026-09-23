@@ -52,13 +52,13 @@ describe('opening a deal from the sales wizard', () => {
 
   it('creates the customer, property and presented quote in one go', async () => {
     const world = h.world();
-    const token = await login(h.server(), world.emails.operator);
+    const token = await login(h.server(), world.emails.sales);
 
     const reply = await call(h.server(), 'POST', '/sales/deals', { token, body: deal() });
 
     assert.equal(reply.status, 201, JSON.stringify(reply.body));
     const { customer, property, quote } = reply.body.data;
-    // An operator's deal lands in their own branch without them naming it.
+    // A rep's deal lands in their own branch without them naming it.
     assert.equal(customer.branch_id, world.branches.kingston);
     assert.equal(customer.status, 'active');
     assert.equal(property.address_line2, 'Unit 2');
@@ -74,7 +74,7 @@ describe('opening a deal from the sales wizard', () => {
 
   it('leaves nothing behind when the last step fails', async () => {
     const world = h.world();
-    const token = await login(h.server(), world.emails.operator);
+    const token = await login(h.server(), world.emails.sales);
     const body = deal({ customer: { last_name: 'Halfway' } });
     // Passes validation, then trips the discount check in the database.
     body.quote.discounted_price = 200;
@@ -88,7 +88,7 @@ describe('opening a deal from the sales wizard', () => {
 
   it('refuses a recurring price on seasonal billing', async () => {
     const world = h.world();
-    const token = await login(h.server(), world.emails.operator);
+    const token = await login(h.server(), world.emails.sales);
 
     const reply = await call(h.server(), 'POST', '/sales/deals', {
       token,
@@ -101,8 +101,8 @@ describe('opening a deal from the sales wizard', () => {
 
   it('writes a deal against a lead already on file, and signing makes them active', async () => {
     const world = h.world();
-    const token = await login(h.server(), world.emails.operator);
-    const lead = await makeCustomer(world.branches.kingston, world.users.operator);
+    const token = await login(h.server(), world.emails.sales);
+    const lead = await makeCustomer(world.branches.kingston, world.users.sales);
     await db('customers').where({ id: lead.customer_id }).update({ status: 'lead' });
 
     const { customer: _unused, ...rest } = deal();
@@ -133,7 +133,7 @@ describe('opening a deal from the sales wizard', () => {
 
   it('bills the first month at the discounted price and the rest at the recurring price', async () => {
     const world = h.world();
-    const token = await login(h.server(), world.emails.operator);
+    const token = await login(h.server(), world.emails.sales);
     const opened = await call(h.server(), 'POST', '/sales/deals', { token, body: deal() });
     const quoteId = opened.body.data.quote.id;
 
@@ -163,7 +163,7 @@ describe('opening a deal from the sales wizard', () => {
 
   it('settles cash taken at the door against a seasonal contract', async () => {
     const world = h.world();
-    const token = await login(h.server(), world.emails.operator);
+    const token = await login(h.server(), world.emails.sales);
     const opened = await call(h.server(), 'POST', '/sales/deals', {
       token,
       body: deal({
@@ -211,7 +211,7 @@ describe('signing by emailed link', () => {
 
   async function sentLink() {
     const world = h.world();
-    const token = await login(h.server(), world.emails.operator);
+    const token = await login(h.server(), world.emails.sales);
     const opened = await call(h.server(), 'POST', '/sales/deals', { token, body: deal() });
     const quoteId = opened.body.data.quote.id as string;
 
@@ -303,11 +303,76 @@ describe('signing by emailed link', () => {
   it('replaces an outstanding link when a new one is sent', async () => {
     const world = h.world();
     const { quoteId, linkToken } = await sentLink();
-    const token = await login(h.server(), world.emails.operator);
+    const token = await login(h.server(), world.emails.sales);
 
     await call(h.server(), 'POST', `/sales/quotes/${quoteId}/signing-request`, { token });
 
     const stale = await call(h.server(), 'GET', `/public/sign/${linkToken}`);
     assert.equal(stale.status, 401);
+  });
+});
+
+describe('who sells and who clears', () => {
+  const h = harness();
+
+  it('refuses to let an operator sign a customer up', async () => {
+    const world = h.world();
+    const token = await login(h.server(), world.emails.operator);
+
+    const deal_ = await call(h.server(), 'POST', '/sales/deals', { token, body: deal() });
+    assert.equal(deal_.status, 403);
+
+    const lead = await call(h.server(), 'POST', '/customers', {
+      token,
+      body: { first_name: 'No', last_name: 'Sale', email: 'no@example.test' },
+    });
+    assert.equal(lead.status, 403);
+  });
+
+  it('still lets an operator read the property they are clearing', async () => {
+    const world = h.world();
+    const made = await makeCustomer(world.branches.kingston, world.users.sales);
+    const token = await login(h.server(), world.emails.operator);
+
+    const reply = await call(h.server(), 'GET', `/properties/${made.property_id}`, { token });
+    assert.equal(reply.status, 200);
+  });
+
+  it('refuses to let a sales rep dispatch or work a visit', async () => {
+    const world = h.world();
+    const token = await login(h.server(), world.emails.sales);
+
+    const reply = await call(h.server(), 'POST', '/work-orders', {
+      token,
+      body: { contract_id: '00000000-0000-4000-8000-000000000000', scheduled_for: new Date().toISOString() },
+    });
+    assert.equal(reply.status, 403);
+  });
+
+  it('keeps a rep to their own branch', async () => {
+    const world = h.world();
+    const elsewhere = await makeCustomer(world.branches.halifax, world.users.halifaxSales);
+    const token = await login(h.server(), world.emails.sales);
+
+    const reply = await call(h.server(), 'GET', `/customers/${elsewhere.customer_id}`, { token });
+    assert.equal(reply.status, 404);
+  });
+
+  it('will not create a sales rep without a branch', async () => {
+    const world = h.world();
+    const token = await login(h.server(), world.emails.corporate);
+
+    const reply = await call(h.server(), 'POST', '/users', {
+      token,
+      body: {
+        email: 'drifter@example.test',
+        password: 'Password123!',
+        first_name: 'No',
+        last_name: 'Branch',
+        role: 'sales',
+      },
+    });
+    assert.equal(reply.status, 400);
+    assert.match(JSON.stringify(reply.body), /sales rep must belong to a branch/);
   });
 });

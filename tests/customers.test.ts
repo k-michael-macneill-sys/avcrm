@@ -17,7 +17,7 @@ describe('customers and the addresses they own', () => {
   };
 
   it('files a new customer against the branch of whoever is signed in', async () => {
-    const token = await login(h.server(), h.world().emails.operator);
+    const token = await login(h.server(), h.world().emails.sales);
     const reply = await call(h.server(), 'POST', '/customers', {
       token,
       body: newCustomer,
@@ -26,16 +26,16 @@ describe('customers and the addresses they own', () => {
     assert.equal(reply.status, 201);
     // The branch comes from who is signed in, not from the request body.
     assert.equal(reply.body.data.branch_id, h.world().branches.kingston);
-    assert.equal(reply.body.data.created_by_user_id, h.world().users.operator);
+    assert.equal(reply.body.data.created_by_user_id, h.world().users.sales);
   });
 
   it('warns before a rep signs an address that is already on the books', async () => {
     const world = h.world();
-    await makeCustomer(world.branches.kingston, world.users.operator, {
+    await makeCustomer(world.branches.kingston, world.users.sales, {
       address_line1: '212 Johnson St',
     });
 
-    const token = await login(h.server(), world.emails.operator);
+    const token = await login(h.server(), world.emails.sales);
     const check = await call(
       h.server(),
       'GET',
@@ -52,9 +52,9 @@ describe('customers and the addresses they own', () => {
 
   it('refuses the duplicate itself, with the existing one in the error', async () => {
     const world = h.world();
-    const existing = await makeCustomer(world.branches.kingston, world.users.operator);
+    const existing = await makeCustomer(world.branches.kingston, world.users.sales);
 
-    const token = await login(h.server(), world.emails.operator);
+    const token = await login(h.server(), world.emails.sales);
     const reply = await call(h.server(), 'POST', '/properties', {
       token,
       body: {
@@ -74,9 +74,9 @@ describe('customers and the addresses they own', () => {
 
   it('deletes a customer nobody has signed', async () => {
     const world = h.world();
-    const made = await makeCustomer(world.branches.kingston, world.users.operator);
+    const made = await makeCustomer(world.branches.kingston, world.users.sales);
 
-    const token = await login(h.server(), world.emails.operator);
+    const token = await login(h.server(), world.emails.sales);
     const reply = await call(h.server(), 'DELETE', `/customers/${made.customer_id}`, { token });
 
     assert.equal(reply.status, 204);
@@ -85,8 +85,8 @@ describe('customers and the addresses they own', () => {
 
   it('refuses to delete one with a contract, rather than failing at the database', async () => {
     const world = h.world();
-    const made = await makeCustomer(world.branches.kingston, world.users.operator);
-    const quote = await makeQuote(made.property_id, world.users.operator, { status: 'accepted' });
+    const made = await makeCustomer(world.branches.kingston, world.users.sales);
+    const quote = await makeQuote(made.property_id, world.users.sales, { status: 'accepted' });
     await db('contracts').insert({
       quote_id: quote,
       customer_id: made.customer_id,
@@ -97,7 +97,7 @@ describe('customers and the addresses they own', () => {
       status: 'active',
     });
 
-    const token = await login(h.server(), world.emails.operator);
+    const token = await login(h.server(), world.emails.sales);
     const reply = await call(h.server(), 'DELETE', `/customers/${made.customer_id}`, { token });
 
     // A foreign key violation is a 409 with an explanation, never a 500.
@@ -112,7 +112,7 @@ describe('customers and the addresses they own', () => {
       address_line1: '5560 Cornwallis St',
     });
 
-    const token = await login(h.server(), world.emails.operator);
+    const token = await login(h.server(), world.emails.sales);
     const check = await call(
       h.server(),
       'GET',

@@ -8,7 +8,12 @@
  * the TypeScript unions and the Zod schemas in the routes.
  */
 
-export const USER_ROLES = ['corporate', 'operator'] as const;
+/**
+ * corporate: every branch, all of the office work.
+ * sales: knocks doors and signs customers up, in one branch.
+ * operator: drives the route and clears driveways, in one branch.
+ */
+export const USER_ROLES = ['corporate', 'operator', 'sales'] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 
 export const ONBOARDING_STATUSES = [

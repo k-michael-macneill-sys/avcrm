@@ -32,6 +32,8 @@ export interface World {
     operator: string;
     halifaxOperator: string;
     pending: string;
+    sales: string;
+    halifaxSales: string;
   };
   emails: {
     corporate: string;
@@ -39,6 +41,8 @@ export interface World {
     operator: string;
     halifaxOperator: string;
     pending: string;
+    sales: string;
+    halifaxSales: string;
   };
 }
 
@@ -109,6 +113,25 @@ export async function buildWorld(): Promise<World> {
         branch_id: kingston,
         onboarding_status: 'pending',
       },
+      {
+        // Knocks doors in Kingston: signs customers up, never drives a route.
+        email: 'sam.sales@test.local',
+        password_hash,
+        first_name: 'Sam',
+        last_name: 'Seller',
+        role: 'sales',
+        branch_id: kingston,
+        onboarding_status: 'approved',
+      },
+      {
+        email: 'hal.sales@test.local',
+        password_hash,
+        first_name: 'Hal',
+        last_name: 'Seller',
+        role: 'sales',
+        branch_id: halifax,
+        onboarding_status: 'approved',
+      },
     ])
     .returning(['id', 'email']);
 
@@ -128,6 +151,8 @@ export async function buildWorld(): Promise<World> {
       operator: idFor('otto@test.local'),
       halifaxOperator: idFor('hana@test.local'),
       pending: idFor('pat@test.local'),
+      sales: idFor('sam.sales@test.local'),
+      halifaxSales: idFor('hal.sales@test.local'),
     },
     emails: {
       corporate: 'corporate@test.local',
@@ -135,6 +160,8 @@ export async function buildWorld(): Promise<World> {
       operator: 'otto@test.local',
       halifaxOperator: 'hana@test.local',
       pending: 'pat@test.local',
+      sales: 'sam.sales@test.local',
+      halifaxSales: 'hal.sales@test.local',
     },
   };
 }

@@ -17,38 +17,51 @@ import { Button } from '@/components/ui/button';
 import { useAuth } from '@/auth/AuthContext';
 import { cn } from '@/lib/utils';
 import { ThemeToggle } from '@/theme/ThemeToggle';
+import type { UserRole } from '../../../src/types/models';
 import logo from '@/assets/drift-logo.jpg';
 
 interface NavItem {
   to: string;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
-  corporateOnly?: boolean;
+  /** Who sees it. Selling and clearing are different jobs. */
+  roles: UserRole[];
   end?: boolean;
 }
 
+const ALL: UserRole[] = ['corporate', 'sales', 'operator'];
+const SELLERS: UserRole[] = ['corporate', 'sales'];
+const CREW: UserRole[] = ['corporate', 'operator'];
+const CORPORATE: UserRole[] = ['corporate'];
+
 const NAV: NavItem[] = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
-  { to: '/customers', label: 'Customers', icon: Users },
-  { to: '/quotes', label: 'Quotes', icon: FileText },
-  { to: '/contracts', label: 'Contracts', icon: ClipboardCheck },
-  { to: '/work-orders', label: 'Dispatch', icon: Truck },
-  { to: '/invoices', label: 'Invoices', icon: Receipt, corporateOnly: true },
-  { to: '/operators', label: 'Crew', icon: HardHat },
-  { to: '/reports', label: 'Reports', icon: BarChart3, corporateOnly: true },
-  { to: '/admin', label: 'Company', icon: Building2, corporateOnly: true },
-  { to: '/settings', label: 'Settings', icon: SettingsIcon, corporateOnly: true },
+  { to: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ALL, end: true },
+  { to: '/customers', label: 'Customers', icon: Users, roles: SELLERS },
+  { to: '/quotes', label: 'Quotes', icon: FileText, roles: SELLERS },
+  { to: '/contracts', label: 'Contracts', icon: ClipboardCheck, roles: SELLERS },
+  { to: '/work-orders', label: 'Dispatch', icon: Truck, roles: CREW },
+  { to: '/invoices', label: 'Invoices', icon: Receipt, roles: CORPORATE },
+  { to: '/operators', label: 'Crew', icon: HardHat, roles: CREW },
+  { to: '/reports', label: 'Reports', icon: BarChart3, roles: CORPORATE },
+  { to: '/admin', label: 'Company', icon: Building2, roles: CORPORATE },
+  { to: '/settings', label: 'Settings', icon: SettingsIcon, roles: CORPORATE },
 ];
+
+const ROLE_LABEL: Record<UserRole, string> = {
+  corporate: 'Corporate',
+  sales: 'Sales rep',
+  operator: 'Operator',
+};
 
 function initials(firstName: string, lastName: string): string {
   return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
 }
 
 export function Shell(): JSX.Element {
-  const { user, isCorporate, signOut } = useAuth();
+  const { user, signOut } = useAuth();
   if (!user) return <Outlet />;
 
-  const items = NAV.filter((item) => !item.corporateOnly || isCorporate);
+  const items = NAV.filter((item) => item.roles.includes(user.role));
 
   return (
     <div className="grid min-h-screen grid-cols-[224px_minmax(0,1fr)] max-[720px]:grid-cols-1">
@@ -87,7 +100,7 @@ export function Shell(): JSX.Element {
                   {user.first_name} {user.last_name}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {user.role === 'corporate' ? 'Corporate' : 'Operator'}
+                  {ROLE_LABEL[user.role]}
                 </p>
               </div>
             </div>

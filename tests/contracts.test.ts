@@ -25,9 +25,9 @@ describe('signing a contract at the door', () => {
 
   async function sellable() {
     const world = h.world();
-    const made = await makeCustomer(world.branches.kingston, world.users.operator);
-    const quote = await makeQuote(made.property_id, world.users.operator, { status: 'presented' });
-    const token = await login(h.server(), world.emails.operator);
+    const made = await makeCustomer(world.branches.kingston, world.users.sales);
+    const quote = await makeQuote(made.property_id, world.users.sales, { status: 'presented' });
+    const token = await login(h.server(), world.emails.sales);
     return { ...made, quote, token };
   }
 
@@ -141,7 +141,7 @@ describe('signing a contract at the door', () => {
     });
     assert.equal(first.status, 201);
 
-    const second = await makeQuote(property_id, h.world().users.operator, { status: 'presented' });
+    const second = await makeQuote(property_id, h.world().users.sales, { status: 'presented' });
     const reply = await call(h.server(), 'POST', '/contracts', {
       token,
       body: goodSignature(second),

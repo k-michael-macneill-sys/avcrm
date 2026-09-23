@@ -4,6 +4,7 @@ import {
   requireAuth,
   resolveActor,
   resolveBranchScope,
+  sellersWrite,
 } from '../middleware/auth';
 import { listContracts } from '../services/contracts';
 import {
@@ -22,7 +23,7 @@ import { parse } from '../utils/validate';
 
 export const quotesRouter = Router();
 
-quotesRouter.use(requireAuth);
+quotesRouter.use(requireAuth, sellersWrite);
 
 const idParamSchema = z.object({ id: z.string().uuid('id must be a UUID') });
 

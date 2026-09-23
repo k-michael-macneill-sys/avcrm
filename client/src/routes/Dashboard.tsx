@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
-import type { Invoice, WorkOrder } from '../../../src/types/models';
+import type { Invoice, Quote, WorkOrder } from '../../../src/types/models';
 import { PageHeader } from '@/components/PageHeader';
+import { Button } from '@/components/ui/button';
 import { Section } from '@/components/Section';
 import { Hero, StatRow, StatTile } from '@/components/Stat';
 import { DataTable } from '@/components/DataTable';
@@ -12,14 +13,78 @@ import * as api from '@/lib/api';
 import { count, date, money, percent, relative } from '@/lib/format';
 
 /**
- * Two different screens behind one route, because the two roles open the app
- * for different reasons: corporate wants the roll-up, an operator wants
- * today's work. Showing an operator a company revenue figure they cannot act
- * on — and that the API would refuse them anyway — is not a dashboard.
+ * One route, a different screen per role, because each opens the app for a
+ * different reason: corporate wants the roll-up, a rep wants their deals, an
+ * operator wants today's work. Showing an operator a company revenue figure
+ * they cannot act on — and that the API would refuse them anyway — is not a
+ * dashboard.
  */
 export function Dashboard(): JSX.Element {
-  const { isCorporate } = useAuth();
-  return isCorporate ? <CorporateDashboard /> : <OperatorDashboard />;
+  const { isCorporate, isSales } = useAuth();
+  if (isCorporate) return <CorporateDashboard />;
+  return isSales ? <SalesDashboard /> : <OperatorDashboard />;
+}
+
+function SalesDashboard(): JSX.Element {
+  const { user } = useAuth();
+  const { data, loading, error } = useQuery(
+    () =>
+      Promise.all([
+        api.list<Quote>('/quotes', { created_by_user_id: user?.id, status: 'accepted', page_size: 100 }),
+        api.list<Quote>('/quotes', { created_by_user_id: user?.id, status: 'presented', page_size: 25 }),
+      ]),
+    [user?.id],
+  );
+
+  if (loading) return <Loading />;
+  if (error) return <ErrorNotice message={error} />;
+  if (!data || !user) return <Loading />;
+
+  const [signed, waiting] = data;
+  const monthlyValue = signed.data.reduce((sum, q) => sum + Number(q.recurring_price ?? 0), 0);
+
+  return (
+    <>
+      <PageHeader
+        title={`Hi, ${user.first_name}`}
+        subtitle="Your deals"
+        actions={
+          <Button asChild>
+            <Link to="/customers/new">Add customer</Link>
+          </Button>
+        }
+      />
+      <Hero
+        label="Signed"
+        value={count(signed.meta.total)}
+        note={signed.meta.total === 0 ? 'your first one is a door away' : 'agreements you have closed'}
+      />
+      <StatRow>
+        <StatTile label="Waiting to sign" value={count(waiting.meta.total)} note="presented, not signed yet" />
+        <StatTile label="Monthly recurring" value={money(monthlyValue)} note="from your signed monthly deals" />
+      </StatRow>
+
+      <Section title="Waiting on a signature">
+        <DataTable
+          rowKey={(row) => row.id}
+          rows={waiting.data}
+          emptyMessage="Nothing waiting — every agreement you wrote has been signed or answered."
+          columns={[
+            {
+              header: 'Quote',
+              cell: (row) => (
+                <Link className="text-primary hover:underline" to={`/quotes/${row.id}`}>
+                  {row.billing_type === 'monthly' ? 'Monthly' : 'Seasonal'} · {money(row.discounted_price)}
+                </Link>
+              ),
+            },
+            { header: 'Written', cell: (row) => relative(row.created_at) },
+            { header: 'Status', cell: (row) => <StatusPill status={row.status} /> },
+          ]}
+        />
+      </Section>
+    </>
+  );
 }
 
 interface BranchSummary {

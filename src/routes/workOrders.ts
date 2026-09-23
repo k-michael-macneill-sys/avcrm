@@ -5,6 +5,7 @@ import {
   requireCorporate,
   resolveBranchScope,
   resolveCrewActor,
+  crewWrite,
 } from '../middleware/auth';
 import {
   addServicePhoto,
@@ -25,7 +26,7 @@ import { parse } from '../utils/validate';
 
 export const workOrdersRouter = Router();
 
-workOrdersRouter.use(requireAuth);
+workOrdersRouter.use(requireAuth, crewWrite);
 
 const idParamSchema = z.object({ id: z.string().uuid('id must be a UUID') });
 

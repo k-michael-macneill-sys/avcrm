@@ -5,6 +5,10 @@ import * as api from '@/lib/api';
 interface AuthContextValue {
   user: PublicUser | null;
   isCorporate: boolean;
+  /** Knocks doors and signs customers up. */
+  isSales: boolean;
+  /** Drives the route and clears driveways. */
+  isOperator: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => void;
   /** Called from anywhere a 401 surfaces, to bounce back to the login screen. */
@@ -34,6 +38,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }): JSX.E
     () => ({
       user,
       isCorporate: user?.role === 'corporate',
+      isSales: user?.role === 'sales',
+      isOperator: user?.role === 'operator',
       signIn,
       signOut,
       handleUnauthenticated,

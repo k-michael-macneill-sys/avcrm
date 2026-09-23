@@ -27,9 +27,14 @@ import { PROVINCES } from '@/lib/sales';
  * branch's manager — corporate because they need the branch's numbers, tied
  * to a branch because that is whose crew they run.
  */
-type Position = 'operator' | 'branch_manager' | 'corporate';
+type Position = 'sales' | 'operator' | 'branch_manager' | 'corporate';
 
 const POSITIONS: { value: Position; label: string; help: string }[] = [
+  {
+    value: 'sales',
+    label: 'Sales rep — signs customers up',
+    help: 'Sees the leads map and their own branch’s customers, quotes and contracts, and runs the sign-up. Does not see visits or crew.',
+  },
   {
     value: 'operator',
     label: 'Operator — clears driveways',
@@ -54,6 +59,7 @@ function branchName(branches: Branch[], id: string | null): string {
 
 function positionOf(user: PublicUser, branches: Branch[]): string {
   if (user.role === 'operator') return 'Operator';
+  if (user.role === 'sales') return 'Sales rep';
   const managed = branches.find((b) => b.manager_user_id === user.id);
   if (managed) return `Manager, ${managed.name}`;
   return 'Corporate';
@@ -143,7 +149,7 @@ function PeopleCard({
   if (branches.length === 0) {
     return (
       <Section title="People">
-        <p className="text-sm text-muted-foreground">Add a branch first — an operator has to belong to one.</p>
+        <p className="text-sm text-muted-foreground">Add a branch first — sales reps and operators have to belong to one.</p>
       </Section>
     );
   }
@@ -208,7 +214,7 @@ function PeopleCard({
             first_name: values.first_name,
             last_name: values.last_name,
             phone: values.phone || null,
-            role: position === 'operator' ? 'operator' : 'corporate',
+            role: position === 'operator' || position === 'sales' ? position : 'corporate',
             branch_id: branchId,
           });
 

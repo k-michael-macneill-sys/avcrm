@@ -1,6 +1,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth, resolveActor, resolveBranchScope, resolveWriteBranch } from '../middleware/auth';
+import {
+  requireAuth,
+  requireRole,
+  resolveActor,
+  resolveBranchScope,
+  resolveWriteBranch,
+} from '../middleware/auth';
 import { openDeal, settleCollectedPayment } from '../services/sales';
 import { requestSignature } from '../services/signing';
 import { BILLING_TYPES, CUSTOMER_STATUSES, PREFERRED_CONTACTS } from '../types/models';
@@ -16,7 +22,8 @@ import { parse } from '../utils/validate';
  */
 export const salesRouter = Router();
 
-salesRouter.use(requireAuth);
+// Selling only: an operator's job is the route, not the doorstep.
+salesRouter.use(requireAuth, requireRole('corporate', 'sales'));
 
 const money = z
   .number()
