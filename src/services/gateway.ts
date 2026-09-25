@@ -198,7 +198,10 @@ class ManualGateway implements PaymentGateway {
  */
 function gatewayFromEnvironment(): PaymentGateway {
   const square = config.payments.square;
-  if (!square.accessToken) return new ManualGateway();
+  if (!square.accessToken) {
+    logger.info('Square from the environment: off (SQUARE_ACCESS_TOKEN is not set)');
+    return new ManualGateway();
+  }
 
   // Logged rather than thrown: the build runs migrations with this same
   // configuration, and a throw there fails the deploy and leaves the old
@@ -217,6 +220,7 @@ function gatewayFromEnvironment(): PaymentGateway {
     return new ManualGateway();
   }
 
+  logger.info(`Square from the environment: on (${square.environment})`);
   return new SquareGateway({
     environment: square.environment,
     application_id: square.applicationId,

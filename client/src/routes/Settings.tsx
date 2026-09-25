@@ -52,6 +52,13 @@ interface PaymentSettings extends IntegrationSettings {
   webhook_url: string;
   currency: string;
   env_gateway: string;
+  env_square: {
+    environment: string;
+    access_token: boolean;
+    application_id: boolean;
+    location_id: boolean;
+    webhook_signature_key: boolean;
+  };
 }
 
 const NONE = 'none';
@@ -102,6 +109,23 @@ export function Settings(): JSX.Element {
             <code className="break-all text-xs">{payments.webhook_url}</code>
           </Field>
           <Field label="Billing currency">{payments.currency}</Field>
+          <Field label="Server (Render) Square settings">
+            <span className="text-xs">
+              SQUARE_ENVIRONMENT: {payments.env_square.environment} ·{' '}
+              {(
+                [
+                  ['SQUARE_ACCESS_TOKEN', payments.env_square.access_token],
+                  ['SQUARE_APPLICATION_ID', payments.env_square.application_id],
+                  ['SQUARE_LOCATION_ID', payments.env_square.location_id],
+                  ['SQUARE_WEBHOOK_SIGNATURE_KEY', payments.env_square.webhook_signature_key],
+                ] as const
+              ).map(([name, set]) => (
+                <span key={name} className={set ? 'text-good' : 'text-critical'}>
+                  {name}: {set ? 'set' : 'missing'}{' '}
+                </span>
+              ))}
+            </span>
+          </Field>
         </FieldList>
       </IntegrationSection>
       <PaymentTestSection />

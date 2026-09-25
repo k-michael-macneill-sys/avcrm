@@ -163,6 +163,15 @@ settingsRouter.get(
         webhook_url: `${config.messaging.appBaseUrl}/webhooks/square`,
         currency: config.payments.currency.toUpperCase(),
         env_gateway: envGateway.name,
+        // Which SQUARE_* variables the server process can see — never their
+        // values — so a missing one on Render is visible from here.
+        env_square: {
+          environment: config.payments.square.environment,
+          access_token: Boolean(config.payments.square.accessToken),
+          application_id: Boolean(config.payments.square.applicationId),
+          location_id: Boolean(config.payments.square.locationId),
+          webhook_signature_key: Boolean(config.payments.square.webhookSignatureKey),
+        },
       },
     });
   }),
