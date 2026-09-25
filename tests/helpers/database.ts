@@ -21,6 +21,8 @@ const TABLES = [
   'payments',
   'invoices',
   'review_requests',
+  'meta_messages',
+  'meta_conversations',
   'message_log',
   'message_templates',
   'service_photos',

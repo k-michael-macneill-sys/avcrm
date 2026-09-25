@@ -105,39 +105,7 @@ export const DOCUMENT_REQUIREMENTS: DocumentRequirementRow[] = [
     },
 ];
 
-export const CHECKLIST_REQUIREMENTS: ChecklistRequirementRow[] = [
-    { code: 'card_on_file', label: 'Card on file', is_required: false, sort_order: 1 },
-    {
-      code: 'terms_reviewed',
-      label: 'Terms and conditions reviewed',
-      is_required: true,
-      sort_order: 2,
-    },
-    {
-      code: 'service_window_explained',
-      label: 'Service window explained',
-      is_required: true,
-      sort_order: 3,
-    },
-    {
-      code: 'access_notes_captured',
-      label: 'Access notes captured',
-      is_required: false,
-      sort_order: 4,
-    },
-    {
-      code: 'photos_taken',
-      label: 'Property photos taken',
-      is_required: false,
-      sort_order: 5,
-    },
-    {
-      code: 'contact_confirmed',
-      label: 'Contact details confirmed',
-      is_required: true,
-      sort_order: 6,
-    },
-];
+export const CHECKLIST_REQUIREMENTS: ChecklistRequirementRow[] = [];
 
 /**
  * The global set. A row carrying a branch_id overrides the global row for the
@@ -314,6 +282,18 @@ export const MESSAGE_TEMPLATES: MessageTemplateRow[] = [
         '{{branch_name}}: add your card for {{address_line1}} here — {{card_url}}',
     },
     {
+      // The online equivalent of handing someone the phone at their door.
+      code: 'signing_request',
+      channel: 'email',
+      branch_id: null,
+      subject: 'Your snow clearing agreement for {{address_line1}}',
+      body:
+        'Hi {{customer_first_name}},\n\nYour agreement for {{address_line1}} is ' +
+        'ready to sign:\n\n{{signing_url}}\n\nThe page shows the full terms and ' +
+        'what you will be charged, and takes your signature and card in one go. ' +
+        'The link is yours alone — please do not forward it.\n\n— {{branch_name}}',
+    },
+    {
       code: 'payment_failed_internal',
       channel: 'email',
       branch_id: null,
@@ -344,11 +324,15 @@ export async function installAppConfig(knex: Knex): Promise<ConfigInstalled> {
     .ignore()
     .returning('code');
 
-  const checklist = await knex('checklist_requirements')
-    .insert(CHECKLIST_REQUIREMENTS)
-    .onConflict('code')
-    .ignore()
-    .returning('code');
+  // knex refuses an insert of no rows ("The query is empty"), and the list is
+  // deliberately empty now — that crash failed every Render build.
+  const checklist = CHECKLIST_REQUIREMENTS.length
+    ? await knex('checklist_requirements')
+        .insert(CHECKLIST_REQUIREMENTS)
+        .onConflict('code')
+        .ignore()
+        .returning('code')
+    : [];
 
   // Keyed on the partial unique index over the global rows: one template per
   // code and channel where no branch has overridden it.

@@ -1,6 +1,11 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth, resolveActor, resolveBranchScope } from '../middleware/auth';
+import {
+  requireAuth,
+  resolveActor,
+  resolveBranchScope,
+  sellersWrite,
+} from '../middleware/auth';
 import {
   changeContractStatus,
   createContract,
@@ -17,7 +22,7 @@ import { parse } from '../utils/validate';
 
 export const contractsRouter = Router();
 
-contractsRouter.use(requireAuth);
+contractsRouter.use(requireAuth, sellersWrite);
 
 const idParamSchema = z.object({ id: z.string().uuid('id must be a UUID') });
 

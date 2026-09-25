@@ -1,6 +1,10 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth, resolveBranchScope } from '../middleware/auth';
+import {
+  requireAuth,
+  resolveBranchScope,
+  sellersWrite,
+} from '../middleware/auth';
 import { completeSetup, getCardSetup, listCardSetups, requestCard } from '../services/cards';
 import { CARD_SETUP_STATUSES } from '../types/models';
 import { asyncHandler } from '../utils/async';
@@ -10,7 +14,7 @@ import { parse } from '../utils/validate';
 
 export const cardSetupsRouter = Router();
 
-cardSetupsRouter.use(requireAuth);
+cardSetupsRouter.use(requireAuth, sellersWrite);
 
 const idParamSchema = z.object({ id: z.string().uuid('id must be a UUID') });
 

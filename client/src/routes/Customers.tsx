@@ -7,6 +7,7 @@ import { StatusPill } from '@/components/StatusPill';
 import { Disclosure } from '@/components/Disclosure';
 import { InlineForm } from '@/components/InlineForm';
 import { Loading, ErrorNotice } from '@/components/Misc';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -50,11 +51,14 @@ export function Customers(): JSX.Element {
         title="Customers"
         subtitle={`${customers.meta.total} on the books`}
         actions={
-          isCorporate ? (
-            <Disclosure label="New customer">
-              <NewCustomerForm branches={branches} onDone={reload} />
+          <>
+            <Disclosure label="Add lead">
+              <NewLeadForm branches={branches} showBranch={isCorporate} onDone={reload} />
             </Disclosure>
-          ) : undefined
+            <Button asChild>
+              <Link to="/customers/new">Add customer</Link>
+            </Button>
+          </>
         }
       />
 
@@ -116,34 +120,47 @@ export function Customers(): JSX.Element {
   );
 }
 
-function NewCustomerForm({ branches, onDone }: { branches: Branch[]; onDone: () => void }): JSX.Element {
+/**
+ * Somebody interested who is not signing today — "come back after the first
+ * snowfall". Just enough to find them again; the full sign-up runs later from
+ * their page.
+ */
+function NewLeadForm({
+  branches,
+  showBranch,
+  onDone,
+}: {
+  branches: Branch[];
+  showBranch: boolean;
+  onDone: () => void;
+}): JSX.Element {
   const navigate = useNavigate();
   return (
     <InlineForm
-      submitLabel="Add customer"
+      submitLabel="Add lead"
       specs={[
         { name: 'first_name', label: 'First name', required: true },
         { name: 'last_name', label: 'Last name', required: true },
-        { name: 'email', label: 'Email', type: 'email' },
+        { name: 'email', label: 'Email', type: 'email', required: true },
         { name: 'phone', label: 'Phone' },
         {
           name: 'preferred_contact',
           label: 'Preferred contact',
           type: 'select',
           options: PREFERRED_CONTACTS.map((c) => ({ value: c, label: c })),
+          help: 'Choosing "sms" or "both" also needs a phone number.',
         },
-        {
-          name: 'branch_id',
-          label: 'Branch',
-          type: 'select',
-          options: branches.map((b) => ({ value: b.id, label: b.name })),
-        },
-        {
-          name: 'status',
-          label: 'Status',
-          type: 'select',
-          options: CUSTOMER_STATUSES.map((s) => ({ value: s, label: s })),
-        },
+        ...(showBranch
+          ? [
+              {
+                name: 'branch_id',
+                label: 'Branch',
+                type: 'select' as const,
+                options: branches.map((b) => ({ value: b.id, label: b.name })),
+              },
+            ]
+          : []),
+        { name: 'notes', label: 'Notes', type: 'textarea' },
       ]}
       onSubmit={async (values) => {
         const created = await api.post<Customer>('/customers', {
@@ -152,8 +169,9 @@ function NewCustomerForm({ branches, onDone }: { branches: Branch[]; onDone: () 
           email: values.email || null,
           phone: values.phone || null,
           preferred_contact: values.preferred_contact,
-          branch_id: values.branch_id,
-          status: values.status,
+          notes: values.notes || null,
+          status: 'lead',
+          ...(showBranch ? { branch_id: values.branch_id } : {}),
         });
         navigate(`/customers/${created.id}`);
       }}

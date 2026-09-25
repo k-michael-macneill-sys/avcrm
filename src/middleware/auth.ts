@@ -130,6 +130,28 @@ export function requireRole(...roles: UserRole[]): RequestHandler {
 export const requireCorporate = requireRole('corporate');
 
 /**
+ * Lets anyone signed in read, and only these roles change anything. Reads
+ * are shared on purpose — an operator needs the address of the house they
+ * are clearing, a rep wants to see whether their customer's driveway got
+ * done — but selling and clearing are different jobs.
+ */
+export function writesOnlyFor(...roles: UserRole[]): RequestHandler {
+  const guard = requireRole(...roles);
+  return (req, res, next) => {
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      next();
+      return;
+    }
+    guard(req, res, next);
+  };
+}
+
+/** Customers, properties, quotes, contracts and cards: the sales side. */
+export const sellersWrite = writesOnlyFor('corporate', 'sales');
+/** Visits, their status and photos: the crew side. */
+export const crewWrite = writesOnlyFor('corporate', 'operator');
+
+/**
  * Which branches this request may READ.
  *
  * Corporate sees every branch by default, and may narrow to one with

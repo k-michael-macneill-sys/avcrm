@@ -10,7 +10,9 @@ import { logger } from './utils/logger';
  * A database with no users in it cannot be signed into, and every route that
  * would create the first one needs a session it is impossible to get. On a
  * host with no shell there is nothing to run by hand either, so the first boot
- * against an empty database lays down the sample data and, with it, a way in.
+ * against an empty database installs the app configuration and one corporate
+ * account, and with it a way in. Branches, crew and customers are not seeded:
+ * they are the operator's own, added through the app after the first sign-in.
  *
  * Only ever on an empty database: the seed wipes the tables it owns, and the
  * guard inside it refuses outright once a single user exists.
@@ -19,9 +21,9 @@ async function seedIfEmpty(): Promise<void> {
   const existingUser = await db('users').first('id');
   if (existingUser) return;
 
-  logger.warn('No users found — seeding sample data so this install can be signed into');
+  logger.warn('No users found — installing the first login so this install can be signed into');
   await seed(db);
-  logger.warn('Seeded. Sign in as corporate@avcrm.test and change the password.');
+  logger.warn('Installed. Sign in as corporate@avcrm.test and change the password.');
 }
 
 async function main(): Promise<void> {

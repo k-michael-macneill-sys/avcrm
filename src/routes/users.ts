@@ -94,11 +94,11 @@ usersRouter.patch(
     const target = await db('users').where({ id }).first('id', 'role', 'branch_id');
     if (!target) throw notFound('User not found');
 
-    // The users_operator_needs_branch_check constraint backs this up, but a
-    // 400 with a sentence beats a raw constraint error.
+    // The users_field_staff_need_branch_check constraint backs this up, but
+    // a 400 with a sentence beats a raw constraint error.
     const nextBranch = body.branch_id === undefined ? target.branch_id : body.branch_id;
-    if (target.role === 'operator' && !nextBranch) {
-      throw badRequest('An operator must belong to a branch');
+    if (target.role !== 'corporate' && !nextBranch) {
+      throw badRequest('Field staff must belong to a branch');
     }
 
     const [user] = await db('users')

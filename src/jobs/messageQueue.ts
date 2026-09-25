@@ -1,11 +1,13 @@
 import { closeConnection } from '../db/client';
 import { sendQueued, type QueueSummary } from '../services/messages';
+import { sendQueuedMeta } from '../services/metaMessaging';
 import { closeTransport } from '../services/notifications';
 import { logger } from '../utils/logger';
 
 /**
- * The outbound worker. Drains message_log until there is nothing left to
- * claim, then exits.
+ * The outbound worker. Drains message_log, and the Facebook and Instagram
+ * replies waiting in meta_messages, until there is nothing left to claim in
+ * either, then exits.
  *
  * Run it from cron every minute, or wrap it in a loop as a long-lived
  * process — the claim uses FOR UPDATE SKIP LOCKED and a lease, so several
@@ -25,14 +27,17 @@ export async function runMessageQueue(): Promise<QueueSummary> {
   // Keep going while a pass still finds work, so one run empties a backlog
   // rather than trickling a batch per minute.
   for (;;) {
-    const pass = await sendQueued();
-    total.claimed += pass.claimed;
-    total.sent += pass.sent;
-    total.failed += pass.failed;
-    total.retrying += pass.retrying;
-    total.rejected += pass.rejected;
+    let claimed = 0;
+    for (const pass of [await sendQueued(), await sendQueuedMeta()]) {
+      total.claimed += pass.claimed;
+      total.sent += pass.sent;
+      total.failed += pass.failed;
+      total.retrying += pass.retrying;
+      total.rejected += pass.rejected;
+      claimed += pass.claimed;
+    }
 
-    if (pass.claimed === 0) break;
+    if (claimed === 0) break;
   }
 
   logger.info(total, 'Message queue drained');

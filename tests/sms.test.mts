@@ -215,7 +215,7 @@ describe('connecting a text message provider', () => {
           url: `${gateway.url}/custom/send`,
           content_type: 'json',
           auth_header_name: 'x-api-key',
-          from: 'AVALANCHE',
+          from: 'DRIFT',
           body_template:
             '{"destination":"{{to}}","sender":"{{from}}","message":"{{body}}"}',
           message_id_path: 'result.reference',
@@ -233,7 +233,7 @@ describe('connecting a text message provider', () => {
     assert.equal(reply.status, 200);
     const sent = gateway.sent()[0];
     assert.equal(sent?.provider, 'custom');
-    assert.equal(sent?.from, 'AVALANCHE');
+    assert.equal(sent?.from, 'DRIFT');
     // The template is filled in by substitution, so a quote in the message
     // must not be able to break out of the string it sits in.
     assert.equal(sent?.body, awkward);

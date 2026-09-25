@@ -1,4 +1,4 @@
-# avcrm — Avalanche CRM
+# avcrm — Drift Property Services CRM
 
 Snow and ice removal CRM for a multi-branch operation: a JSON API, four scheduled
 jobs, and a browser client that runs on top of them.
@@ -23,8 +23,7 @@ Build order from the spec, and what exists today:
 | — | Browser client on top of the API | **done** |
 | — | File storage: signature capture, photos, documents | **done** |
 | — | Real SMTP mail transport | **done** |
-| — | Card capture and charging through Stripe | **done** |
-| — | Square, connected from Settings; customer pay links; signed one-year autopay | **done** |
+| — | Square, from the environment or connected from Settings; customer pay links; signed one-year autopay | **done** |
 | — | SMS provider, connected by an administrator | **done** |
 | — | Invoice and service report PDFs | **done** |
 | — | Automated test suite | **done** |
@@ -52,7 +51,7 @@ npm run dev           # tsx watch, port 3000
 ```
 
 Then open **http://localhost:3000/app** and sign in as `corporate@avcrm.test`
-with the seeded password. The login screen lists the other accounts.
+with the seeded password (see [Seed accounts](#seed-accounts)).
 
 Verify:
 
@@ -146,36 +145,19 @@ than sending them, like everything else.
 
 ## Seed accounts
 
-All seeded users share the password in `SEED_PASSWORD` (default `Password123!`).
+The seed installs no sample business data — no demo branches, crew or
+customers. All of that is the operator's own, added through the app itself
+(Company admin → Add a branch / Add someone, and Add customer on the
+Customers screen) once they have signed in. The one thing a fresh database
+cannot bootstrap through its own UI is the first login, so the seed creates
+exactly one account for that:
 
 | Email | Role | Branch | Notes |
 | --- | --- | --- | --- |
-| `corporate@avcrm.test` | corporate | — | Sees every branch |
-| `kingston.manager@avcrm.test` | corporate | Kingston | Branch manager |
-| `halifax.manager@avcrm.test` | corporate | Halifax | Branch manager |
-| `otto@avcrm.test` | operator | Kingston | Fully compliant, assignable |
-| `nina@avcrm.test` | operator | Kingston | Abstract expires in 21 days |
-| `pat@avcrm.test` | operator | Halifax | Documents submitted, awaiting review |
+| `corporate@avcrm.test` | corporate | — | Sees every branch; add the first one from here |
 
-The seed also lays down a rate card per branch and six quotes spread across the
-lifecycle: three signed into active contracts (two with a card on file, one
-paid upfront by cheque), one still a draft, one declined, and one presented and
-sitting with the customer — that last one is what the signature screen has to
-work on.
-
-Six work orders sit on those contracts, including three completed with their
-before and after photos, one skipped with a reason, and one unassigned in
-Halifax because that branch has no approved operator yet.
-
-Two review requests are already answered — five stars routed to the public
-page, two stars routed to the branch manager — and one finished visit is
-deliberately left unasked, so `npm run job:review-requests` has something to
-pick up on a fresh seed.
-
-Both seasonal contracts are already invoiced: one paid by cheque, one overdue
-with a declined card against it. The monthly contract has no invoice yet,
-because its season has not started — run `npm run job:billing -- 2027-01-20`
-to watch the periods get raised.
+It shares the password in `SEED_PASSWORD` (default `Password123!`). Sign in,
+change the password, then add branches, crew and customers as they come in.
 
 ## Auth and permissions
 
@@ -189,11 +171,22 @@ TOKEN=$(curl -s -X POST localhost:3000/auth/login \
 curl -s localhost:3000/customers -H "Authorization: Bearer $TOKEN"
 ```
 
-Two roles, per the spec:
+Three roles:
 
 - **corporate** — sees all branches and all roll-up reporting. Creates users,
-  reviews documents, manages branches.
-- **operator** — hard-scoped to their own `branch_id`.
+  reviews documents, manages branches. Adding a branch also takes the owner
+  password in `BRANCH_PASSWORD` (unset locks it), because branch managers are
+  corporate too.
+- **sales** — a door-to-door rep, hard-scoped to their own `branch_id`. The
+  leads map, customers, quotes, contracts and the sign-up flow.
+- **operator** — clears driveways, hard-scoped to their own `branch_id`.
+  Dispatch, their visits and their document vault.
+
+Selling and clearing are split by writes, not reads (`writesOnlyFor` in
+`src/middleware/auth.ts`): only corporate and sales may create or change
+customers, properties, quotes, contracts and card requests; only corporate
+and operators may change visits. Reads stay shared within a branch — an
+operator needs the address of the house they are clearing.
 
 The scoping is enforced in middleware at the query layer, not in the UI.
 `resolveBranchScope` (`src/middleware/auth.ts`) is the only place that decides
@@ -365,8 +358,13 @@ A suspension is only lifted by corporate, never by the automatic refresh.
 | GET | `/card-setups` | any | `contract_id`, `customer_id`, `status` |
 | POST | `/card-setups` | any | Asks the customer for a card; returns the link |
 | POST | `/card-setups/:id/refresh` | any | Asks the processor whether they finished yet |
-| POST | `/webhooks/stripe` | **public** | Signature-verified; refuses anything unsigned |
 | POST | `/webhooks/square` | **public** | Signature-verified against the saved key |
+| GET | `/webhooks/meta` | **public** | Meta's subscription handshake; checks `META_VERIFY_TOKEN` |
+| POST | `/webhooks/meta` | **public** | Facebook/Instagram messages; `X-Hub-Signature-256` verified against `META_APP_SECRET` |
+| GET | `/meta/conversations` | corporate, sales | Paginated inbox; `platform`, `customer_id`, `unassigned=true` |
+| PATCH | `/meta/conversations/:id` | corporate, sales | Route to a branch (corporate) or link a customer |
+| GET | `/meta/conversations/:id/messages` | corporate, sales | The thread, oldest first |
+| POST | `/meta/conversations/:id/messages` | corporate, sales | Queues a reply; `202`, the worker sends it |
 | GET | `/invoices/:id/pay-link` | any | The customer's link to pay this invoice |
 | GET | `/portal/invoices/:token` | **public** | What the pay page shows; the token is the capability |
 | POST | `/portal/invoices/:token/pay` | **public** | Pays the balance from a Square card nonce |
@@ -483,6 +481,35 @@ screen opens with. It returns a null price rather than an error when the branch
 has no row for that driveway size — an unpriced size is a gap in config, not a
 failed request — and the rep can always override it.
 
+## Signing up a customer, and the leads map
+
+**Add customer** (`/app/customers/new`) is three pages. Page one is the
+customer and the service address. Page two is the upsells (salt, vehicle
+package, stairs — flags on the quote, no price of their own), monthly or
+seasonal billing, and three prices: *initial* (the list price the discount is
+shown against), *discounted* (what the first visit costs) and, for monthly,
+*recurring* (every month after). A recurring price under $100 gets a second
+look but is never refused. Nothing is written until the rep leaves page two;
+then `POST /sales/deals` creates the customer, property and quote in one
+transaction. Customers stay leads until they sign.
+
+Page three either takes the signature on the rep's screen and goes straight
+to the Stripe card page (or records cash or cheque taken for a seasonal
+contract), or sends **email completion**: a single-use signed link
+(`/app/sign/:token`, 14 days) where the customer confirms the terms, signs and
+adds their card themselves. The billing run charges the discounted price for
+the first period and the recurring price after it.
+
+**Leads** (`/app/leads`) is a Google Map. Tap a house: *Not home*, *Not
+interested*, *Lead* (optionally with a name and number, which files a lead
+customer at that address), or *Add customer*, which opens the sign-up with the
+address filled in. Tapping an existing pin is a revisit and counts the knock.
+Signed customers are green pins drawn from their property, with what they pay
+for and the permanent job notes — `GET /leads/customers`, which operators may
+read too; door-knock pins are for sales and corporate only. The map needs
+`GOOGLE_MAPS_API_KEY`: a browser key with the Maps JavaScript and Geocoding
+APIs enabled, restricted to the site's address in Google Cloud.
+
 ## Work orders and the completion gate
 
 A contract is a promise; a work order is one visit against it. The property
@@ -550,9 +577,8 @@ caller ──enqueue──► message_log (queued) ──worker──► provide
 
 **Templates** are seeded config with `{{mustache}}` tokens. A row with a
 `branch_id` overrides the global row for the same code and channel, so a
-branch can reword a message without a deploy — the seed ships one Halifax
-override of `service_complete` to show the mechanism. An unknown or empty
-token renders blank and logs a warning: mailing a customer a literal
+branch can reword a message without a deploy. An unknown or empty token
+renders blank and logs a warning: mailing a customer a literal
 `{{customer_first_name}}` is worse than a gap.
 
 **Rendering happens at enqueue, not at send.** The rendered subject and body
@@ -910,7 +936,7 @@ one missing environment variable away from emailing real customers.
 
 ```bash
 MAIL_DRIVER=smtp
-MAIL_FROM="Avalanche CRM <no-reply@example.test>"
+MAIL_FROM="Drift CRM <no-reply@example.test>"
 SMTP_HOST=smtp.postmarkapp.com
 SMTP_USER=…
 SMTP_PASSWORD=…
@@ -958,33 +984,44 @@ that has never talked to an SMTP server is a transport nobody has tested.
 
 ## Payments
 
-Card handling is a port with two drivers, chosen by `PAYMENT_GATEWAY`:
+Card handling is a single processor, Square, which can be configured two
+ways:
 
-- **`manual`** (the default) is the system as it was: `POST /invoices/:id/payments`
-  records what a processor, a cheque or an e-transfer says happened. Nothing
-  here talks to anyone. Asking it to charge a card returns `NOT_CONFIGURED`
-  rather than pretending.
-- **`stripe`** actually moves money.
+- **From the environment** — set `SQUARE_ACCESS_TOKEN` (and the fields below
+  it) and this install charges through Square with nothing to click through
+  first. This is what a single-branch install uses by default.
+- **From Settings** — a corporate user connects it at **Settings → Card
+  payments**, the same way an SMS provider is. Once switched on there it
+  takes precedence over the environment, which is how a multi-branch account
+  overrides what one branch's `.env` sets as the default.
+
+With neither set, `POST /invoices/:id/payments` records what a processor, a
+cheque or an e-transfer says happened, same as it always could — nothing
+here talks to anyone, and asking it to charge a card returns
+`NOT_CONFIGURED` rather than pretending.
 
 ```
-PAYMENT_GATEWAY=stripe
 PAYMENT_CURRENCY=cad
-STRIPE_SECRET_KEY=sk_live_…
-STRIPE_WEBHOOK_SECRET=whsec_…
+SQUARE_ENVIRONMENT=production
+SQUARE_APPLICATION_ID=sq0idp-…
+SQUARE_LOCATION_ID=L…
+SQUARE_ACCESS_TOKEN=EAAA…
+SQUARE_WEBHOOK_SIGNATURE_KEY=…
 ```
 
-Both keys are required when the gateway is `stripe` — config refuses to start
-without them rather than failing at the first charge. `STRIPE_API_HOST`,
-`STRIPE_API_PORT` and `STRIPE_API_PROTOCOL` exist only to point the SDK at the
-stand-in used by the test suite.
+`SQUARE_APPLICATION_ID` and `SQUARE_LOCATION_ID` are required once
+`SQUARE_ACCESS_TOKEN` is set — config refuses to start without them rather
+than failing at the first charge. `SQUARE_WEBHOOK_SIGNATURE_KEY` is optional,
+but without it a refund made in the Square Dashboard is never recorded here.
+`SQUARE_API_BASE` exists only to point the driver at the stand-in used by the
+test suite.
 
-### Square
+Treat `SQUARE_ACCESS_TOKEN` like any other password: it belongs only in your
+local, gitignored `.env`, never in a file that gets committed. If one is ever
+pasted somewhere that ends up in git history, rotate it in the Square
+Developer Console immediately — git history does not forget.
 
-Square is connected by a corporate user at **Settings → Card payments**, not in
-`.env`, the same way an SMS provider is. Once it is switched on there it is the
-processor: new card requests, the billing job's automatic charges, and the
-customer pay link all go through it. `PAYMENT_GATEWAY` still decides what
-happens when it is off.
+### Connecting it from Settings
 
 From the Square Developer Console, open your application and copy:
 
@@ -999,18 +1036,19 @@ From the Square Developer Console, open your application and copy:
 Save, then press **Check connection**: it asks Square about the location with
 the saved token and confirms the currency, without moving any money.
 
-Square has no hosted "save a card" page the way Stripe Checkout does. Its
-equivalent is the Web Payments SDK — Square's own card form, drawn in an
-iframe on `public/pay.html`. The card is typed into Square's frame, and only a
-single-use nonce reaches this server, which exchanges it for a stored card or
-a payment. The no-card-data rule below holds for Square as it does for Stripe.
+Square has no hosted "save a card" page. Instead there is the Web Payments
+SDK — Square's own card form, drawn in an iframe on `public/pay.html`. The
+card is typed into Square's frame, and only a single-use nonce reaches this
+server, which exchanges it for a stored card or a payment. The no-card-data
+rule below holds throughout.
 
 Card tokens and customer ids are recorded per processor
-(`contracts.payment_method_provider`, `customers.square_customer_id`). A card
-saved through Stripe cannot be charged through Square: the charge is refused
-with a message saying to ask the customer again, and the billing job skips it.
-A refund goes back through the processor that took the money, not just onto
-the invoice.
+(`contracts.payment_method_provider`, `customers.square_customer_id`). A
+contract whose card was saved under a different processor — including one
+from before Square was the only option — cannot be charged: the charge is
+refused with a message saying to ask the customer again, and the billing job
+skips it. A refund goes back through the processor that took the money, not
+just onto the invoice.
 
 ### The customer pay link
 
@@ -1086,11 +1124,11 @@ Completing one writes `payment_method_token`, `payment_method_last4` and
 transaction**, because the contract service treats a token on file and that
 box as a single fact and will not let them disagree.
 
-**The later upgrade is tap-to-pay.** Stripe Terminal turns the rep's phone into
-a contactless reader, so the customer taps their own card or watch and there is
-still no number to read out. It needs a native iOS/Android app — the reader SDK
-cannot run in a browser — so it is a second client against this same API, not a
-change to it. The hosted link works today on any phone.
+**The later upgrade is tap-to-pay.** Square Terminal turns the rep's phone
+into a contactless reader, so the customer taps their own card or watch and
+there is still no number to read out. It needs a native iOS/Android app — the
+reader SDK cannot run in a browser — so it is a second client against this
+same API, not a change to it. The hosted link works today on any phone.
 
 ### Charging
 
@@ -1112,37 +1150,51 @@ from the payment rows as it always has.
 
 ### Webhooks
 
-`POST /webhooks/stripe` is public, because the processor has no account here.
+`POST /webhooks/square` is public, because the processor has no account here.
 What makes it trustworthy is the signature, so the route is mounted **before**
 `express.json` and reads a raw `Buffer`: a parsed and re-serialised body is not
 the bytes that were signed, and the check would fail on honest traffic while
-still passing nothing useful. An unsigned or forged request is a 400.
+still passing nothing useful. An unsigned or forged request is a 400. It is
+checked against the signature key however Square is configured — from the
+environment or from Settings — even while Square is switched off, because
+money already taken through it still has to reconcile.
 
 It handles four events:
 
 | Event | What it does |
 | --- | --- |
-| `checkout.session.completed` | Finishes the card capture |
-| `payment_intent.succeeded` | Reconciles a charge we already booked |
-| `payment_intent.payment_failed` | Marks the payment failed with the reason |
-| `charge.refunded` | Flips the payment to `refunded` |
+| `payment.created` / `payment.updated` | Reconciles a charge we already booked, once it settles |
+| `refund.created` / `refund.updated` | Flips the payment to `refunded` once the refund completes |
 
-Stripe redelivers, so every handler is keyed on the provider's own id and doing
+Square redelivers, so every handler is keyed on the provider's own id and doing
 it twice changes nothing.
 
 ### Verifying it
 
-`tests/payments.test.mts` runs against a stand-in that speaks Stripe's own
-request and response shapes, including the 402 `card_error` a real decline
-produces. It drives the whole path: ask for a card, complete the capture,
-charge the saved card, take a decline, refund by webhook, and refuse an
-unsigned or forged one. The real SDK builds, signs and parses every request;
-only the far end is fake.
+Two suites run against stand-ins that speak Square's own request and response
+shapes, including the errors a real decline produces:
 
-It asserts against the database, not just the responses: that the customer
-exists at the processor, that the link was queued, that the stored token is a
-`pm_…` and never a card number, that the checklist box ticked itself, and that
-a replayed webhook leaves one payment row.
+- `tests/square.test.mts` covers the Settings-configured path end to end — an
+  administrator connecting it, a customer paying from their invoice link,
+  signing the autopay agreement, and what the office does after (refunds,
+  webhooks, the connection check).
+- `tests/payments.test.mts` covers the same card, charge and webhook path
+  configured purely from `SQUARE_*` environment variables, with no Settings
+  row at all — proving that path works on its own for a single-branch
+  install.
+
+Both drive the real path: ask for a card, complete the capture on the
+customer's own page, charge the saved card, take a decline, refund by
+webhook, and refuse an unsigned or forged one. They assert against the
+database, not just the responses: that the customer exists at the processor,
+that the link was queued, that the stored token is a Square card id and never
+a card number, and that a replayed webhook leaves one payment row.
+
+`scripts/test-setup.sh` unsets every `SQUARE_*` variable before the suite
+runs, even though the two files above set their own pointed at a stand-in —
+otherwise a developer's own `.env`, which may carry a real access token,
+would leak into every other test file's `envGateway` and let a plain test run
+reach the real Square API.
 
 ### Known gaps
 
@@ -1316,16 +1368,82 @@ for.
 - One provider for the whole company. Per-branch numbers would be a `branch_id`
   on the settings row.
 
+## Facebook and Instagram messages
+
+Direct messages to the Facebook Page, and to the Instagram business account
+linked to it, land in `meta_conversations` and `meta_messages`: one
+conversation per person per platform, and every message in and out of it.
+
+**Setting it up.** In the Meta app dashboard, add the Messenger product (and
+Instagram messaging, if the account is linked), subscribe the Page to the
+`messages` and `message_echoes` fields, and point the webhook at
+`https://<your domain>/webhooks/meta`. Then set, in Render or `.env`:
+
+| Variable | What it is |
+| --- | --- |
+| `META_PAGE_ACCESS_TOKEN` | The Page's access token. Sends replies. Without it, replying answers 503. |
+| `META_APP_SECRET` | The app secret. Every webhook's `X-Hub-Signature-256` is checked against it; without it every delivery is refused. |
+| `META_VERIFY_TOKEN` | Any string you choose; type the same one into the dashboard when subscribing. |
+| `META_GRAPH_API_BASE` | Optional. Defaults to `https://graph.facebook.com/v19.0`. |
+
+**Incoming.** The webhook checks the signature over the raw body — it is
+mounted before the JSON parser, like Stripe's — then stores each message.
+Meta redelivers anything it did not get a 200 for, so storage is idempotent
+on Meta's message id. A photo or voice note with no text is stored as
+`[image]`, `[audio]` and so on. Replies somebody types into Meta's own inbox
+come back as echoes and are stored as outbound, so the thread here is whole.
+
+**Which branch.** A message says which Page it reached, not which town the
+sender is in. With one active branch, new conversations go straight to it.
+With several, they wait unassigned: corporate sees them
+(`GET /meta/conversations?unassigned=true`) and routes them with `PATCH`,
+and linking a customer routes the conversation to that customer's branch.
+Sales reps see only their own branch's conversations; operators none.
+
+**Replying** follows the message queue's rule: nothing talks to Meta inside a
+request. `POST /meta/conversations/:id/messages` writes a `queued` row and
+answers 202, and `job:message-queue` — which now drains `meta_messages` as
+well as `message_log`, with the same claim, lease and retry budget — sends
+it. A rate limit or an outage is retried; a refusal that will not change (the
+person blocked the Page, the token is bad) fails at once with Meta's reason
+in `error`.
+
+Meta only allows a reply within **24 hours** of the person's last message.
+The endpoint checks that first and answers 409 rather than queueing
+something certain to fail.
+
+### Verifying it
+
+`tests/metaMessaging.test.mts` runs against a stand-in Graph API
+(`tests/helpers/graphApi.ts`) that checks the bearer token and answers with
+Meta's own error shape. It covers the handshake, unsigned, wrongly signed and
+tampered deliveries, redeliveries, Instagram versus Page, branch routing and
+scoping, the 24-hour window, a permanent refusal against a retried rate
+limit, and the echo of our own reply arriving before and after the worker
+records it.
+
+### Known gaps
+
+- **No screen yet.** The API is complete; the inbox page in the app is the
+  next step.
+- **No names.** Meta identifies people by a Page-scoped id. Showing their
+  name means a Graph API profile lookup per new conversation, which is not
+  done yet, so a conversation is anonymous until someone links a customer.
+- **Text only, one Page.** Outbound attachments, message tags for replies
+  after 24 hours (`HUMAN_AGENT` needs Meta's approval), and more than one
+  Page are not handled.
+
 ## What is mocked
 
 Nothing is mocked any more. Email goes out over SMTP ([Mail](#mail)), text
 messages go through whichever gateway an administrator connects
-([Text messages](#text-messages)), and cards are charged through Stripe
+([Text messages](#text-messages)), and cards are charged through Square
 ([Payments](#payments)).
 
 Two of those are off by default, which is not the same as mocked: an install
-with no SMS provider connected and `PAYMENT_GATEWAY=manual` queues, renders and
-logs everything it would have sent, and records payments as a system of record.
+with no SMS provider connected and no Square credentials anywhere queues,
+renders and logs everything it would have sent, and records payments as a
+system of record.
 That is a deliberate state — it is what a new install should do before anyone
 has opened an account — and switching it on is configuration rather than code.
 
@@ -1379,7 +1497,7 @@ Five steps, in this order:
 ```bash
 cp deploy/env.example .env
 npm run secrets                # generates the three it cannot guess
-$EDITOR .env                   # paste those in, plus DOMAIN, SMTP, Stripe
+$EDITOR .env                   # paste those in, plus DOMAIN, SMTP, Square
 npm run preflight              # refuses to bless a half-filled .env
 docker compose up -d --build
 
@@ -1408,8 +1526,8 @@ through the API: signing in needs a user, creating a user needs a corporate
 session, creating a branch needs a corporate session, and self-signup is off
 (and only ever made a pending operator anyway). Every route in is a dead end.
 The development seed would solve it and deliberately refuses to run with
-`NODE_ENV=production`, which is right — nobody wants Harold Bell and six
-sample quotes in their real database.
+`NODE_ENV=production` once a single user exists, which is right — it wipes
+every table it owns, and a production database is not something to wipe.
 
 So `bootstrap` does the three things a new install cannot do for itself:
 installs the configuration the application treats as given (document

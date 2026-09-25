@@ -12,22 +12,23 @@ import { generateSecretValues } from '../src/ops/secrets';
 function goodEnv(): Record<string, string> {
   const { POSTGRES_PASSWORD, JWT_SECRET, SECRETS_KEY } = generateSecretValues();
   return {
-    DOMAIN: 'crm.avalanche.ca',
-    ACME_EMAIL: 'office@avalanche.ca',
-    APP_BASE_URL: 'https://crm.avalanche.ca',
+    DOMAIN: 'crm.driftproperty.ca',
+    ACME_EMAIL: 'office@driftproperty.ca',
+    APP_BASE_URL: 'https://crm.driftproperty.ca',
     POSTGRES_PASSWORD,
     JWT_SECRET,
     SECRETS_KEY,
     DATABASE_URL: `postgres://avcrm:${POSTGRES_PASSWORD}@postgres:5432/avcrm`,
     TRUST_PROXY: 'true',
     MAIL_DRIVER: 'smtp',
-    MAIL_FROM: 'Avalanche <billing@avalanche.ca>',
+    MAIL_FROM: 'Drift <billing@driftproperty.ca>',
     SMTP_HOST: 'smtp.postmarkapp.com',
     SMTP_USER: 'user',
     SMTP_PASSWORD: 'pass',
-    PAYMENT_GATEWAY: 'stripe',
-    STRIPE_SECRET_KEY: 'sk_live_realkey',
-    STRIPE_WEBHOOK_SECRET: 'whsec_real',
+    SQUARE_ENVIRONMENT: 'production',
+    SQUARE_APPLICATION_ID: 'sq0idp-realapp',
+    SQUARE_LOCATION_ID: 'L_REAL',
+    SQUARE_ACCESS_TOKEN: 'EAAAl_realtoken',
     BACKUP_OFFSITE_CMD: 'rclone copy "$1" remote:backups',
   };
 }
@@ -57,7 +58,7 @@ describe('the deploy preflight', () => {
       JWT_SECRET: '',
       DATABASE_URL: 'postgres://avcrm:PASSWORD_FROM_ABOVE@postgres:5432/avcrm',
       MAIL_DRIVER: 'smtp',
-      MAIL_FROM: 'Avalanche <billing@example.ca>',
+      MAIL_FROM: 'Drift <billing@example.ca>',
     });
 
     for (const setting of [
@@ -73,7 +74,7 @@ describe('the deploy preflight', () => {
   });
 
   it('catches a staging valve left open, which silently writes to nobody', () => {
-    assert.ok(errors({ ...goodEnv(), MAIL_REDIRECT_TO: 'staging@avalanche.ca' }).includes('MAIL_REDIRECT_TO'));
+    assert.ok(errors({ ...goodEnv(), MAIL_REDIRECT_TO: 'staging@driftproperty.ca' }).includes('MAIL_REDIRECT_TO'));
     assert.ok(errors({ ...goodEnv(), SMS_REDIRECT_TO: '+19025550123' }).includes('SMS_REDIRECT_TO'));
   });
 
@@ -88,7 +89,7 @@ describe('the deploy preflight', () => {
   });
 
   it('catches a customer-facing link that is not https', () => {
-    assert.ok(errors({ ...goodEnv(), APP_BASE_URL: 'http://crm.avalanche.ca' }).includes('APP_BASE_URL'));
+    assert.ok(errors({ ...goodEnv(), APP_BASE_URL: 'http://crm.driftproperty.ca' }).includes('APP_BASE_URL'));
   });
 
   it('catches a database host that only resolves on a laptop', () => {
@@ -100,8 +101,12 @@ describe('the deploy preflight', () => {
     );
   });
 
-  it('catches test Stripe keys on a live gateway', () => {
-    assert.ok(errors({ ...goodEnv(), STRIPE_SECRET_KEY: 'sk_test_abc' }).includes('STRIPE_SECRET_KEY'));
+  it('catches sandbox Square credentials on a live deploy', () => {
+    assert.ok(errors({ ...goodEnv(), SQUARE_ENVIRONMENT: 'sandbox' }).includes('SQUARE_ENVIRONMENT'));
+  });
+
+  it('catches a Square token with no location to take payments at', () => {
+    assert.ok(errors({ ...goodEnv(), SQUARE_LOCATION_ID: '' }).includes('SQUARE_LOCATION_ID'));
   });
 
   it('catches a secret someone typed instead of generated', () => {
@@ -127,6 +132,6 @@ describe('the deploy preflight', () => {
     assert.deepEqual(errors(noBackup), []);
 
     assert.ok(warnings({ ...goodEnv(), TRUST_PROXY: 'false' }).includes('TRUST_PROXY'));
-    assert.ok(warnings({ ...goodEnv(), PAYMENT_GATEWAY: 'manual' }).includes('PAYMENT_GATEWAY'));
+    assert.ok(warnings({ ...goodEnv(), SQUARE_ACCESS_TOKEN: '' }).includes('SQUARE_ACCESS_TOKEN'));
   });
 });

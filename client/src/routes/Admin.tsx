@@ -1,11 +1,22 @@
+import * as React from 'react';
+import { Plus } from 'lucide-react';
 import type { Branch, PublicUser } from '../../../src/types/models';
 import { PageHeader } from '@/components/PageHeader';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Section } from '@/components/Section';
 import { DataTable } from '@/components/DataTable';
 import { InlineForm } from '@/components/InlineForm';
 import { Loading, ErrorNotice } from '@/components/Misc';
 import { useQuery } from '@/lib/useQuery';
 import * as api from '@/lib/api';
+import { PROVINCES } from '@/lib/sales';
 
 /**
  * Where the company itself is set up: its branches, and the people who work
@@ -18,7 +29,6 @@ import * as api from '@/lib/api';
  * before they arrive, created here by the person who hired them.
  */
 
-const PROVINCES = ['AB', 'BC', 'MB', 'NB', 'NL', 'NS', 'NT', 'NU', 'ON', 'PE', 'QC', 'SK', 'YT'];
 
 /**
  * Three practical roles over the two the database has.
@@ -27,9 +37,14 @@ const PROVINCES = ['AB', 'BC', 'MB', 'NB', 'NL', 'NS', 'NT', 'NU', 'ON', 'PE', '
  * branch's manager — corporate because they need the branch's numbers, tied
  * to a branch because that is whose crew they run.
  */
-type Position = 'operator' | 'branch_manager' | 'corporate';
+type Position = 'sales' | 'operator' | 'branch_manager' | 'corporate';
 
 const POSITIONS: { value: Position; label: string; help: string }[] = [
+  {
+    value: 'sales',
+    label: 'Sales rep — signs customers up',
+    help: 'Sees the leads map and their own branch’s customers, quotes and contracts, and runs the sign-up. Does not see visits or crew.',
+  },
   {
     value: 'operator',
     label: 'Operator — clears driveways',
@@ -54,6 +69,7 @@ function branchName(branches: Branch[], id: string | null): string {
 
 function positionOf(user: PublicUser, branches: Branch[]): string {
   if (user.role === 'operator') return 'Operator';
+  if (user.role === 'sales') return 'Sales rep';
   const managed = branches.find((b) => b.manager_user_id === user.id);
   if (managed) return `Manager, ${managed.name}`;
   return 'Corporate';
@@ -85,12 +101,19 @@ export function Admin(): JSX.Element {
 }
 
 function BranchCard({ branches, onDone }: { branches: Branch[]; onDone: () => void }): JSX.Element {
+  const [open, setOpen] = React.useState(false);
+
   return (
     <Section title="Branches" className="mb-4">
+      <div className="mb-3 flex justify-end">
+        <Button type="button" onClick={() => setOpen(true)}>
+          <Plus className="size-4" /> Add branch
+        </Button>
+      </div>
       <DataTable
         rowKey={(row) => row.id}
         rows={branches}
-        emptyMessage="No branches yet. Add the first one below."
+        emptyMessage="No branches yet. Use Add branch to create the first one."
         columns={[
           { header: 'Branch', cell: (b) => b.name },
           { header: 'Province', cell: (b) => b.province },
@@ -99,34 +122,48 @@ function BranchCard({ branches, onDone }: { branches: Branch[]; onDone: () => vo
         ]}
       />
 
-      <h3 className="mb-2 mt-4 text-sm font-semibold text-foreground">Add a branch</h3>
-      <InlineForm
-        submitLabel="Add branch"
-        specs={[
-          { name: 'name', label: 'Branch name', required: true, placeholder: 'Kingston' },
-          {
-            name: 'province',
-            label: 'Province',
-            type: 'select',
-            required: true,
-            options: PROVINCES.map((p) => ({ value: p, label: p })),
-          },
-          {
-            name: 'timezone',
-            label: 'Timezone',
-            value: 'America/Toronto',
-            help: 'Decides when a scheduled visit falls, and when the nightly jobs consider a day to have ended.',
-          },
-        ]}
-        onSubmit={(values) =>
-          api.post('/branches', {
-            name: values.name,
-            province: values.province,
-            timezone: values.timezone || 'America/Toronto',
-          })
-        }
-        onDone={onDone}
-      />
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Add a branch</DialogTitle>
+            <DialogDescription>
+              Only the owner can add branches, so this asks for the owner password.
+            </DialogDescription>
+          </DialogHeader>
+          <InlineForm
+            submitLabel="Add branch"
+            specs={[
+              { name: 'name', label: 'Branch name', required: true, placeholder: 'Halifax' },
+              {
+                name: 'province',
+                label: 'Province',
+                type: 'select',
+                required: true,
+                options: PROVINCES.map((p) => ({ value: p, label: p })),
+              },
+              {
+                name: 'timezone',
+                label: 'Timezone',
+                value: 'America/Toronto',
+                help: 'Decides when a scheduled visit falls, and when the nightly jobs consider a day to have ended.',
+              },
+              { name: 'owner_password', label: 'Owner password', type: 'password', required: true },
+            ]}
+            onSubmit={(values) =>
+              api.post('/branches', {
+                name: values.name,
+                province: values.province,
+                timezone: values.timezone || 'America/Toronto',
+                owner_password: values.owner_password ?? '',
+              })
+            }
+            onDone={() => {
+              setOpen(false);
+              onDone();
+            }}
+          />
+        </DialogContent>
+      </Dialog>
     </Section>
   );
 }
@@ -143,7 +180,7 @@ function PeopleCard({
   if (branches.length === 0) {
     return (
       <Section title="People">
-        <p className="text-sm text-muted-foreground">Add a branch first — an operator has to belong to one.</p>
+        <p className="text-sm text-muted-foreground">Add a branch first — sales reps and operators have to belong to one.</p>
       </Section>
     );
   }
@@ -208,7 +245,7 @@ function PeopleCard({
             first_name: values.first_name,
             last_name: values.last_name,
             phone: values.phone || null,
-            role: position === 'operator' ? 'operator' : 'corporate',
+            role: position === 'operator' || position === 'sales' ? position : 'corporate',
             branch_id: branchId,
           });
 

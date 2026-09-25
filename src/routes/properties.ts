@@ -1,6 +1,10 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth, resolveBranchScope } from '../middleware/auth';
+import {
+  requireAuth,
+  resolveBranchScope,
+  sellersWrite,
+} from '../middleware/auth';
 import {
   createProperty,
   deleteProperty,
@@ -15,7 +19,7 @@ import { parse } from '../utils/validate';
 
 export const propertiesRouter = Router();
 
-propertiesRouter.use(requireAuth);
+propertiesRouter.use(requireAuth, sellersWrite);
 
 const idParamSchema = z.object({ id: z.string().uuid('id must be a UUID') });
 

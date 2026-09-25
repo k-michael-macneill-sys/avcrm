@@ -36,10 +36,15 @@ export interface QuoteInput {
   billing_type: BillingType;
   initial_price: number;
   discounted_price: number;
+  /** Monthly only, and what every period after the first one is billed at. */
+  recurring_price: number | null;
   season_start: string;
   season_end: string;
   status: QuoteStatus;
   notes: string | null;
+  addon_salt: boolean;
+  addon_vehicle: boolean;
+  addon_stairs: boolean;
 }
 
 /** Quotes are scoped through their property's customer's branch. */
@@ -124,6 +129,7 @@ export async function createQuote(
           property_id: propertyId,
           created_by_user_id: createdByUserId,
           ...priceFields(input),
+          ...addonFields(input),
           season_start: input.season_start,
           season_end: input.season_end,
           status: input.status,
@@ -158,7 +164,7 @@ export async function updateQuote(
   actor: AuditActor,
   db: Knex = defaultDb,
 ): Promise<Quote> {
-  const patch: Record<string, unknown> = { ...priceFields(input) };
+  const patch: Record<string, unknown> = { ...priceFields(input), ...addonFields(input) };
   if (input.season_start !== undefined) patch.season_start = input.season_start;
   if (input.season_end !== undefined) patch.season_end = input.season_end;
   if (input.notes !== undefined) patch.notes = input.notes;
@@ -281,8 +287,8 @@ export function assertTransition(from: QuoteStatus, to: QuoteStatus): void {
  * Money reaches the database as a fixed 2-decimal string. JSON gives us a
  * float; rounding it here means no binary fraction ever lands in numeric.
  */
-function priceFields(input: Partial<QuoteInput>): Record<string, string> {
-  const out: Record<string, string> = {};
+function priceFields(input: Partial<QuoteInput>): Record<string, string | null> {
+  const out: Record<string, string | null> = {};
   if (input.billing_type !== undefined) out.billing_type = input.billing_type;
   if (input.initial_price !== undefined) {
     out.initial_price = input.initial_price.toFixed(2);
@@ -290,6 +296,19 @@ function priceFields(input: Partial<QuoteInput>): Record<string, string> {
   if (input.discounted_price !== undefined) {
     out.discounted_price = input.discounted_price.toFixed(2);
   }
+  if (input.recurring_price !== undefined) {
+    out.recurring_price =
+      input.recurring_price === null ? null : input.recurring_price.toFixed(2);
+  }
+  return out;
+}
+
+/** The add-ons are all optional and all default to off. */
+function addonFields(input: Partial<QuoteInput>): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  if (input.addon_salt !== undefined) out.addon_salt = input.addon_salt;
+  if (input.addon_vehicle !== undefined) out.addon_vehicle = input.addon_vehicle;
+  if (input.addon_stairs !== undefined) out.addon_stairs = input.addon_stairs;
   return out;
 }
 
@@ -301,6 +320,11 @@ function translate(err: unknown): unknown {
     }
     if (constraint === 'quotes_season_check') {
       return badRequest('season_end must fall after season_start');
+    }
+    if (constraint === 'quotes_recurring_billing_type_check') {
+      return badRequest(
+        'recurring_price applies to monthly billing only: seasonal is one payment',
+      );
     }
   }
   return err;

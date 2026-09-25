@@ -8,7 +8,12 @@
  * the TypeScript unions and the Zod schemas in the routes.
  */
 
-export const USER_ROLES = ['corporate', 'operator'] as const;
+/**
+ * corporate: every branch, all of the office work.
+ * sales: knocks doors and signs customers up, in one branch.
+ * operator: drives the route and clears driveways, in one branch.
+ */
+export const USER_ROLES = ['corporate', 'operator', 'sales'] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 
 export const ONBOARDING_STATUSES = [
@@ -47,6 +52,12 @@ export const QUOTE_STATUSES = [
   'expired',
 ] as const;
 export type QuoteStatus = (typeof QUOTE_STATUSES)[number];
+
+/**
+ * The service agreement currently being signed. Bumped when the wording
+ * changes, so every contract records which version its customer agreed to.
+ */
+export const CURRENT_TERMS_VERSION = '2026-09-01';
 
 export const CONTRACT_STATUSES = ['active', 'cancelled', 'completed'] as const;
 export type ContractStatus = (typeof CONTRACT_STATUSES)[number];
@@ -93,6 +104,7 @@ export const TEMPLATE_CODES = [
   'invoice_sent',
   'invoice_overdue',
   'card_setup_request',
+  'signing_request',
   // Internal copies. A branch manager reading "Hi Harold, your driveway is
   // clear" is not a notification, so the office wording is its own template
   // rather than the customer's text sent to a second address.
@@ -141,6 +153,29 @@ export const CARD_SETUP_STATUSES = [
   'cancelled',
 ] as const;
 export type CardSetupStatus = (typeof CARD_SETUP_STATUSES)[number];
+
+export const SIGNING_REQUEST_STATUSES = [
+  'sent',
+  'completed',
+  'expired',
+  'cancelled',
+] as const;
+export type SigningRequestStatus = (typeof SIGNING_REQUEST_STATUSES)[number];
+
+/** How a door went. A signed customer is drawn from their property instead. */
+export const PIN_STATUSES = ['not_home', 'not_interested', 'lead'] as const;
+export type PinStatus = (typeof PIN_STATUSES)[number];
+
+/** Where a direct message came from. */
+export const META_PLATFORMS = ['facebook', 'instagram'] as const;
+export type MetaPlatform = (typeof META_PLATFORMS)[number];
+
+export const META_DIRECTIONS = ['inbound', 'outbound'] as const;
+export type MetaDirection = (typeof META_DIRECTIONS)[number];
+
+/** Inbound is only ever `received`; outbound moves through the queue. */
+export const META_MESSAGE_STATUSES = ['received', 'queued', 'sent', 'failed'] as const;
+export type MetaMessageStatus = (typeof META_MESSAGE_STATUSES)[number];
 
 export const UPLOAD_STATUSES = ['pending', 'stored'] as const;
 export type UploadStatus = (typeof UPLOAD_STATUSES)[number];
@@ -269,10 +304,18 @@ export interface Quote {
   billing_type: BillingType;
   initial_price: string;
   discounted_price: string;
+  /**
+   * What they pay every month after the first visit. Monthly contracts only —
+   * seasonal is a single payment, so this is null on those.
+   */
+  recurring_price: string | null;
   season_start: string;
   season_end: string;
   status: QuoteStatus;
   notes: string | null;
+  addon_salt: boolean;
+  addon_vehicle: boolean;
+  addon_stairs: boolean;
   created_at: Date;
   updated_at: Date;
 }
@@ -499,6 +542,26 @@ export interface CardSetup {
 }
 
 /**
+ * An invitation to sign a quote from somewhere other than the rep's phone.
+ * The link carries a signed token with its own expiry; this row is what
+ * makes it single-use, and the record of what came of it.
+ */
+export interface SigningRequest {
+  id: string;
+  quote_id: string;
+  customer_id: string;
+  branch_id: string;
+  contract_id: string | null;
+  sent_to: string;
+  status: SigningRequestStatus;
+  requested_by_user_id: string | null;
+  expires_at: Date;
+  completed_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+/**
  * An integration an administrator configures at runtime — which SMS provider
  * this company uses, and the credentials for it. Secrets are encrypted into
  * `secret_ciphertext` and never appear in an API response.
@@ -511,6 +574,56 @@ export interface IntegrationSetting {
   settings: Record<string, string>;
   secret_ciphertext: string | null;
   updated_by_user_id: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+/** A house a rep has knocked on, and how it went. */
+export interface LeadPin {
+  id: string;
+  branch_id: string;
+  latitude: string;
+  longitude: string;
+  address_line1: string | null;
+  city: string | null;
+  province: string | null;
+  postal_code: string | null;
+  status: PinStatus;
+  notes: string | null;
+  customer_id: string | null;
+  knock_count: number;
+  last_knocked_at: Date;
+  created_by_user_id: string | null;
+  updated_by_user_id: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+/** One person talking to the Page, on one platform. */
+export interface MetaConversation {
+  id: string;
+  branch_id: string | null;
+  customer_id: string | null;
+  platform: MetaPlatform;
+  external_user_id: string;
+  last_inbound_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+/** A direct message, either way. Outbound rows double as the send queue. */
+export interface MetaMessage {
+  id: string;
+  conversation_id: string;
+  direction: MetaDirection;
+  message_text: string;
+  external_message_id: string | null;
+  status: MetaMessageStatus;
+  sent_by_user_id: string | null;
+  sent_at: Date | null;
+  error: string | null;
+  attempts: number;
+  last_attempt_at: Date | null;
   created_at: Date;
   updated_at: Date;
 }

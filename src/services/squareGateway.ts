@@ -19,15 +19,15 @@ import type {
 /**
  * Square, over its REST API.
  *
- * Square has no hosted "save a card" page the way Stripe Checkout does. Its
- * equivalent is the Web Payments SDK: Square's own card form, drawn in an
- * iframe on our page, which hands back a single-use nonce. So the link a
+ * Square has no hosted "save a card" page. Instead there is the Web Payments
+ * SDK: Square's own card form, drawn in an iframe on our page, which hands
+ * back a single-use nonce. So the link a
  * customer is sent opens /pay/…, the card is typed into Square's frame, and
  * only the nonce reaches this server — which is then exchanged for a stored
  * card or a payment. No card number or CVV touches this code.
  *
- * Credentials come from the settings screen, not the environment, so this is
- * built per request from what is stored.
+ * Credentials come from either the settings screen or the environment — see
+ * gateway.ts — so this is built per request from whichever supplied them.
  */
 
 const SQUARE_VERSION = '2025-01-23';
@@ -121,7 +121,7 @@ export class SquareGateway implements PaymentGateway {
   }
 
   private get baseUrl(): string {
-    return config.payments.squareApiBase ?? API_BASE[this.environment];
+    return config.payments.square.apiBase ?? API_BASE[this.environment];
   }
 
   private get locationId(): string {

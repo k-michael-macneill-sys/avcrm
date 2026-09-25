@@ -4,6 +4,7 @@ import {
   requireAuth,
   resolveActor,
   resolveBranchScope,
+  sellersWrite,
 } from '../middleware/auth';
 import { listContracts } from '../services/contracts';
 import {
@@ -22,7 +23,7 @@ import { parse } from '../utils/validate';
 
 export const quotesRouter = Router();
 
-quotesRouter.use(requireAuth);
+quotesRouter.use(requireAuth, sellersWrite);
 
 const idParamSchema = z.object({ id: z.string().uuid('id must be a UUID') });
 
@@ -54,17 +55,29 @@ const listQuerySchema = paginationSchema.extend({
   created_by_user_id: z.string().uuid().optional(),
 });
 
+/**
+ * What the visit includes beyond clearing the drive. No prices of their own:
+ * the rep prices the job as a whole, and these tell the crew what to bring.
+ */
+const addonFields = {
+  addon_salt: z.boolean().default(false),
+  addon_vehicle: z.boolean().default(false),
+  addon_stairs: z.boolean().default(false),
+};
+
 const createBodySchema = z
   .object({
     property_id: z.string().uuid(),
     billing_type: z.enum(BILLING_TYPES),
     initial_price: money,
     discounted_price: money,
+    recurring_price: money.nullable().default(null),
     season_start: isoDate,
     season_end: isoDate,
     // A quote can be written up in advance or presented on the spot.
     status: z.enum(['draft', 'presented']).default('draft'),
     notes: z.string().trim().max(5000).nullable().default(null),
+    ...addonFields,
   })
   .refine((v) => v.discounted_price <= v.initial_price, {
     message: 'discounted_price cannot be higher than initial_price',
@@ -73,15 +86,23 @@ const createBodySchema = z
   .refine((v) => v.season_end > v.season_start, {
     message: 'season_end must fall after season_start',
     path: ['season_end'],
+  })
+  .refine((v) => v.recurring_price === null || v.billing_type === 'monthly', {
+    message: 'recurring_price applies to monthly billing only: seasonal is one payment',
+    path: ['recurring_price'],
   });
 
 const updateBodySchema = z.object({
   billing_type: z.enum(BILLING_TYPES).optional(),
   initial_price: money.optional(),
   discounted_price: money.optional(),
+  recurring_price: money.nullable().optional(),
   season_start: isoDate.optional(),
   season_end: isoDate.optional(),
   notes: z.string().trim().max(5000).nullable().optional(),
+  addon_salt: z.boolean().optional(),
+  addon_vehicle: z.boolean().optional(),
+  addon_stairs: z.boolean().optional(),
 });
 
 const statusBodySchema = z.object({ status: z.enum(QUOTE_STATUSES) });

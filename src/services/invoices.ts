@@ -83,6 +83,7 @@ interface BillableContract {
   signed_at: Date;
   billing_type: string;
   discounted_price: string;
+  recurring_price: string | null;
   season_start: string;
   season_end: string;
 }
@@ -103,6 +104,7 @@ async function billableContract(
       'customers.branch_id',
       'quotes.billing_type',
       'quotes.discounted_price',
+      'quotes.recurring_price',
       'quotes.season_start',
       'quotes.season_end',
     ])) as BillableContract | undefined;
@@ -152,6 +154,15 @@ export async function generateInvoicesForContract(
       : periods.filter((period) => period.start <= asOf);
 
   const raised: Invoice[] = [];
+  // What the rep sold: a first visit at the discounted price, then a monthly
+  // amount for the rest of the season. A contract quoted before there was a
+  // recurring price, or one where the rep left it blank, bills the same
+  // amount all season — which is what it did before this existed.
+  const firstPeriodStart = periods[0]?.start;
+  const amountFor = (periodStart: string): string =>
+    periodStart === firstPeriodStart || contract.recurring_price === null
+      ? contract.discounted_price
+      : contract.recurring_price;
 
   for (const period of dueNow) {
     if (alreadyBilled.has(period.start)) continue;
@@ -170,7 +181,7 @@ export async function generateInvoicesForContract(
           branch_id: contract.branch_id,
           billing_period_start: period.start,
           billing_period_end: period.end,
-          amount_due: contract.discounted_price,
+          amount_due: amountFor(period.start),
           amount_paid: '0',
           status: 'draft',
           due_date: addDays(termsFrom, PAYMENT_TERMS_DAYS),

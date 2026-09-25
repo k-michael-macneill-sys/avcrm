@@ -35,7 +35,6 @@ interface ContractRow {
   email: string | null;
   phone: string | null;
   preferred_contact: string;
-  stripe_customer_id: string | null;
   square_customer_id: string | null;
   address_line1: string;
 }
@@ -64,7 +63,6 @@ async function contractFor(
       'customers.email',
       'customers.phone',
       'customers.preferred_contact',
-      'customers.stripe_customer_id',
       'customers.square_customer_id',
       'branches.name as branch_name',
       'properties.address_line1',
@@ -92,7 +90,8 @@ export interface CardRequestResult {
 export async function requestCard(
   contractId: string,
   scope: BranchScope,
-  actorId: string,
+  /** Null when the customer asked for it themselves, from their signing page. */
+  actorId: string | null,
   db: Knex = defaultDb,
 ): Promise<CardRequestResult> {
   const contract = await contractFor(contractId, scope, db);
@@ -187,7 +186,11 @@ export function isSquareSession(sessionId: string): boolean {
 }
 
 /**
- * Asks Stripe whether a hosted session has finished, and records it if so.
+ * Asks the processor configured in the environment whether a hosted session
+ * has finished, and records it if so. A no-op for Square, whose sessions
+ * finish from the customer's page rather than a lookup here — see
+ * isSquareSession above — but left generic for any future processor that
+ * works the way a hosted checkout does.
  *
  * Idempotent — the webhook and a manual refresh can both call it.
  */

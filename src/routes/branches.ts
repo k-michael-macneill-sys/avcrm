@@ -1,10 +1,12 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
+import { config } from '../config';
 import { db } from '../db/client';
 import { requireAuth, requireCorporate } from '../middleware/auth';
 import { BRANCH_STATUSES } from '../types/models';
 import { asyncHandler } from '../utils/async';
-import { badRequest, notFound } from '../utils/errors';
+import { badRequest, forbidden, notFound } from '../utils/errors';
 import { parse } from '../utils/validate';
 
 export const branchesRouter = Router();
@@ -14,6 +16,8 @@ branchesRouter.use(requireAuth);
 const idParamSchema = z.object({ id: z.string().uuid('id must be a UUID') });
 
 const createSchema = z.object({
+  /** The owner's password; see BRANCH_PASSWORD. Never stored. */
+  owner_password: z.string().max(200),
   name: z.string().trim().min(1).max(120),
   province: z.string().trim().min(2).max(60),
   // IANA zone name; drives scheduling and automation send times.
@@ -45,7 +49,8 @@ branchesRouter.post(
   '/',
   requireCorporate,
   asyncHandler(async (req, res) => {
-    const body = parse(createSchema, req.body);
+    const { owner_password, ...body } = parse(createSchema, req.body);
+    assertOwnerPassword(owner_password);
     const [branch] = await db('branches').insert(body).returning('*');
     res.status(201).json({ data: branch });
   }),
@@ -77,3 +82,21 @@ branchesRouter.patch(
     res.json({ data: branch });
   }),
 );
+
+/**
+ * Compared in constant time, so how long a wrong guess takes to be refused
+ * says nothing about how close it was.
+ */
+function assertOwnerPassword(given: string): void {
+  const expected = config.branchPassword;
+  if (!expected) {
+    throw forbidden(
+      'Adding branches is locked until the owner sets BRANCH_PASSWORD on the server',
+    );
+  }
+  const a = createHash('sha256').update(given).digest();
+  const b = createHash('sha256').update(expected).digest();
+  if (!timingSafeEqual(a, b)) {
+    throw forbidden('That owner password is not right');
+  }
+}

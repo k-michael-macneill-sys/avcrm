@@ -316,7 +316,6 @@ interface ChargeableRow {
   payment_method_token: string | null;
   payment_method_provider: string | null;
   autopay_expires_on: string | null;
-  stripe_customer_id: string | null;
   square_customer_id: string | null;
   customer_name: string;
 }
@@ -361,7 +360,6 @@ export async function chargeInvoice(
       'contracts.payment_method_token',
       'contracts.payment_method_provider',
       'contracts.autopay_expires_on',
-      'customers.stripe_customer_id',
       'customers.square_customer_id',
       db.raw("customers.first_name || ' ' || customers.last_name as customer_name"),
     ])) as ChargeableRow | undefined;

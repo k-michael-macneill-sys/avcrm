@@ -78,8 +78,8 @@ export async function createUser(
     throw conflict('A user with that email already exists');
   }
 
-  if (input.role === 'operator' && !input.branch_id) {
-    throw badRequest('An operator must belong to a branch');
+  if (input.role !== 'corporate' && !input.branch_id) {
+    throw badRequest(`${input.role === 'sales' ? 'A sales rep' : 'An operator'} must belong to a branch`);
   }
 
   if (input.branch_id) {

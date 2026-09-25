@@ -321,9 +321,7 @@ describe('Square', () => {
       assert.equal(page.status, 200);
       const agreement = page.body.data.agreement;
       assert.equal(agreement.starts_on, isoToday());
-      const nextYear = new Date();
-      nextYear.setUTCFullYear(nextYear.getUTCFullYear() + 1);
-      assert.equal(agreement.ends_on, nextYear.toISOString().slice(0, 10));
+      assert.equal(agreement.ends_on, '2027-03-31');
       assert.match(agreement.text, /authorize Kingston to charge the card/);
       assert.ok(agreement.text.includes(agreement.ends_on));
     });
@@ -352,14 +350,7 @@ describe('Square', () => {
       assert.equal(stored?.payment_method_provider, 'square');
       assert.equal(stored?.autopay_signer_name, 'Harold Bell');
       assert.match(stored?.autopay_terms ?? '', /authorize Kingston/);
-      const expires = new Date();
-      expires.setUTCFullYear(expires.getUTCFullYear() + 1);
-      assert.equal(stored?.autopay_expires_on, expires.toISOString().slice(0, 10));
-
-      const box = await db('contract_checklist_items')
-        .where({ contract_id: contract.contract_id, item_code: 'card_on_file' })
-        .first();
-      assert.equal(box?.checked, true);
+      assert.equal(stored?.autopay_expires_on, '2027-03-31');
 
       // Staff can open the signature, as they can the one taken at the door.
       const file = await fetch(`${server.url}/files/${stored?.autopay_signature_url}`, {

@@ -176,6 +176,15 @@ export async function createProperty(
     throw badRequest('customer_id does not match a customer you can access');
   }
 
+  // Checked before the insert rather than after it fails: this runs inside
+  // other transactions (a deal, a lead from the map), and after a failed
+  // statement Postgres refuses every query until rollback — including the
+  // one that would say who already has the address.
+  const existing = await findDuplicateAddress(input.postal_code, input.address_line1, scope, db);
+  if (existing) {
+    throw conflict('That address is already on the books', existing);
+  }
+
   try {
     const [property] = await db('properties')
       .insert({ customer_id: customerId, ...normalize(input) })
@@ -185,14 +194,10 @@ export async function createProperty(
     }
     return property;
   } catch (err) {
+    // Two reps signing the same house at the same moment: the index is the
+    // backstop the check above cannot be.
     if (isPgError(err, PG_UNIQUE_VIOLATION)) {
-      const existing = await findDuplicateAddress(
-        input.postal_code,
-        input.address_line1,
-        scope,
-        db,
-      );
-      throw conflict('That address is already on the books', existing ?? undefined);
+      throw conflict('That address is already on the books');
     }
     throw err;
   }

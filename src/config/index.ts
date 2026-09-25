@@ -11,6 +11,13 @@ const booleanish = z
   .enum(['true', 'false', '1', '0'])
   .transform((v) => v === 'true' || v === '1');
 
+/**
+ * An optional setting where a blank line (`KEY=`, as the example env files
+ * ship them) means "not set" rather than "set to nothing, and invalid".
+ */
+const blankIsUnset = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), schema.optional());
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3000),
@@ -95,26 +102,29 @@ const envSchema = z.object({
   SMTP_USER: z.string().optional(),
   SMTP_PASSWORD: z.string().optional(),
 
-  // Taking money. `manual` records what a processor or a rep with a cheque
-  // says happened, which is what an install without Stripe credentials can
-  // honestly do. `stripe` actually charges.
-  PAYMENT_GATEWAY: z.enum(['manual', 'stripe']).default('manual'),
+  // Taking money, through Square. An install can be configured either way —
+  // or both: these five give a default processor with no admin needed to
+  // click through Settings first, and a corporate user connecting Square at
+  // Settings -> Card payments overrides this once it is switched on. With
+  // neither set, the install is `manual`: it records what a rep with a
+  // cheque says happened and refuses to pretend it charged anything.
   PAYMENT_CURRENCY: z.string().trim().length(3).toLowerCase().default('cad'),
-  STRIPE_SECRET_KEY: z.string().trim().min(1).optional(),
-  STRIPE_WEBHOOK_SECRET: z.string().trim().min(1).optional(),
+  SQUARE_ENVIRONMENT: blankIsUnset(
+    z.preprocess((v) => (typeof v === 'string' ? v.trim().toLowerCase() : v), z.enum(['sandbox', 'production'])),
+  ),
+  SQUARE_APPLICATION_ID: blankIsUnset(z.string().trim().min(1)),
+  SQUARE_LOCATION_ID: blankIsUnset(z.string().trim().min(1)),
+  SQUARE_ACCESS_TOKEN: blankIsUnset(z.string().trim().min(1)),
   /**
-   * Points the SDK somewhere other than api.stripe.com — at stripe-mock, or
-   * at the stand-in scripts/stripe-fake.js runs. Leave unset for real Stripe.
+   * Optional, but without it a refund made in the Square Dashboard is never
+   * recorded here — see the field of the same name under Settings.
    */
-  STRIPE_API_HOST: z.string().trim().min(1).optional(),
-  STRIPE_API_PORT: z.coerce.number().int().min(1).max(65535).optional(),
-  STRIPE_API_PROTOCOL: z.enum(['http', 'https']).default('https'),
+  SQUARE_WEBHOOK_SIGNATURE_KEY: blankIsUnset(z.string().trim().min(1)),
   /**
-   * Square is connected from the settings screen, not here. This only points
-   * the driver at a stand-in instead of Square's own API; leave it unset
-   * anywhere real money matters.
+   * Points the driver at the test suite's stand-in instead of Square's own
+   * API. Leave unset anywhere real money matters.
    */
-  SQUARE_API_BASE: z.string().trim().url().optional(),
+  SQUARE_API_BASE: blankIsUnset(z.string().trim().url()),
 
   // Object storage. `local` writes to disk and is the default because it
   // needs no credentials and works offline; `s3` is the seam for a bucket.
@@ -124,6 +134,38 @@ const envSchema = z.object({
   UPLOAD_URL_TTL_SECONDS: z.coerce.number().int().min(30).max(3600).default(900),
 
   SEED_PASSWORD: z.string().min(8).default('Password123!'),
+
+  /**
+   * The browser key for the leads map. Public by design — it ships to every
+   * browser that opens the map — so what protects it is the referrer and API
+   * restrictions set on it in Google Cloud, not secrecy.
+   */
+  GOOGLE_MAPS_API_KEY: blankIsUnset(z.string().trim().min(1)),
+
+  /**
+   * The owner's password for adding a branch. A second lock on top of the
+   * corporate role, because branch managers are corporate too and a new
+   * branch is the owner's decision. Unset means nobody can add one — the
+   * safe way for a missing setting to fail.
+   */
+  BRANCH_PASSWORD: blankIsUnset(z.string().min(4)),
+
+  /**
+   * Facebook Page and Instagram direct messages. The Page access token sends
+   * replies; the app secret is what webhook signatures are checked against;
+   * the verify token is the string Meta echoes back when the webhook is
+   * first subscribed. Each part fails closed on its own: no token, no
+   * sending; no secret, every webhook is refused.
+   */
+  META_PAGE_ACCESS_TOKEN: blankIsUnset(z.string().trim().min(1)),
+  META_APP_SECRET: blankIsUnset(z.string().trim().min(1)),
+  META_VERIFY_TOKEN: blankIsUnset(z.string().trim().min(1)),
+  /**
+   * The Graph API version root. Overridable so the driver can be verified
+   * against a stand-in, and so a version bump is a setting rather than a
+   * deploy.
+   */
+  META_GRAPH_API_BASE: z.string().trim().url().default('https://graph.facebook.com/v19.0'),
 });
 
 /**
@@ -147,20 +189,6 @@ const checkedSchema = envSchema.superRefine((env, ctx) => {
       path: ['MAIL_FROM'],
       message: 'is required when MAIL_DRIVER=smtp',
     });
-  }
-}).superRefine((env, ctx) => {
-  if (env.PAYMENT_GATEWAY !== 'stripe') return;
-
-  // Without the webhook secret we would take money and never hear how it
-  // went, which is worse than not taking it.
-  for (const key of ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'] as const) {
-    if (!env[key]) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: [key],
-        message: 'is required when PAYMENT_GATEWAY=stripe',
-      });
-    }
   }
 });
 
@@ -213,16 +241,15 @@ export const config = {
     uploadTtlSeconds: env.UPLOAD_URL_TTL_SECONDS,
   },
   payments: {
-    gateway: env.PAYMENT_GATEWAY,
     currency: env.PAYMENT_CURRENCY,
-    stripe: {
-      secretKey: env.STRIPE_SECRET_KEY ?? '',
-      webhookSecret: env.STRIPE_WEBHOOK_SECRET ?? '',
-      host: env.STRIPE_API_HOST ?? null,
-      port: env.STRIPE_API_PORT ?? null,
-      protocol: env.STRIPE_API_PROTOCOL,
+    square: {
+      environment: env.SQUARE_ENVIRONMENT ?? 'sandbox',
+      applicationId: env.SQUARE_APPLICATION_ID ?? '',
+      locationId: env.SQUARE_LOCATION_ID ?? '',
+      accessToken: env.SQUARE_ACCESS_TOKEN ?? '',
+      webhookSignatureKey: env.SQUARE_WEBHOOK_SIGNATURE_KEY ?? '',
+      apiBase: env.SQUARE_API_BASE?.replace(/\/+$/, '') ?? null,
     },
-    squareApiBase: env.SQUARE_API_BASE?.replace(/\/+$/, '') ?? null,
   },
   mail: {
     driver: env.MAIL_DRIVER,
@@ -248,6 +275,16 @@ export const config = {
   },
   seed: {
     password: env.SEED_PASSWORD,
+  },
+  maps: {
+    googleApiKey: env.GOOGLE_MAPS_API_KEY ?? null,
+  },
+  branchPassword: env.BRANCH_PASSWORD ?? null,
+  meta: {
+    pageAccessToken: env.META_PAGE_ACCESS_TOKEN ?? null,
+    appSecret: env.META_APP_SECRET ?? null,
+    verifyToken: env.META_VERIFY_TOKEN ?? null,
+    graphApiBase: env.META_GRAPH_API_BASE.replace(/\/+$/, ''),
   },
 } as const;
 
