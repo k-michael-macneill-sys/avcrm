@@ -337,7 +337,9 @@ function LeadsMap({ apiKey, branches }: { apiKey: string; branches: Branch[] }):
         ) : null}
       </div>
 
-      <div className="relative h-[calc(100vh-13rem)] min-h-[420px] overflow-hidden rounded-xl border border-border">
+      {/* On a phone the map owns every swipe, so it has to fit between the top bar
+          and the tabs: a map taller than the screen would leave no way to scroll. */}
+      <div className="relative h-[calc(100vh-13rem)] min-h-[420px] overflow-hidden rounded-xl border border-border max-[720px]:h-[calc(100dvh-18.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] max-[720px]:min-h-[300px]">
         {loadError ? (
           <div className="grid h-full place-items-center p-6 text-center text-sm text-muted-foreground">{loadError}</div>
         ) : (
