@@ -82,6 +82,13 @@ export function createApp(): Express {
     res.sendFile(path.join(publicDir, 'card-complete.html'));
   });
 
+  // The customer's pay page and card page: one self-contained file, which
+  // reads its token from the path and asks /portal for the rest.
+  app.get(/^\/pay\/(?:card\/)?[A-Za-z0-9_-]{20,80}$/, (_req, res) => {
+    res.set('Cache-Control', 'private, no-store');
+    res.sendFile(path.join(publicDir, 'pay.html'));
+  });
+
   app.get('/', (_req, res) => res.redirect('/app'));
 
   app.use(notFoundHandler);

@@ -186,8 +186,8 @@ export function inspect(env: Record<string, string | undefined>): Finding[] {
   if (gateway === 'manual' || gateway === '') {
     warn(
       'PAYMENT_GATEWAY',
-      'is manual, so saved cards cannot be charged and the billing job will ' +
-        'raise invoices nobody is billed for automatically.',
+      'is manual. Unless Square is connected under Settings, saved cards cannot ' +
+        'be charged and customers cannot pay from their invoice link.',
     );
   } else if (gateway === 'stripe' && get('STRIPE_SECRET_KEY').startsWith('sk_test_')) {
     error('STRIPE_SECRET_KEY', 'is a test key, so no real money will move');

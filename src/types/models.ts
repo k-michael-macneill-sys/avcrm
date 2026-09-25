@@ -112,6 +112,8 @@ export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
 
 export const PAYMENT_METHODS = [
   'card_on_file',
+  /** Paid by the customer themselves, from the link on their invoice. */
+  'online',
   'etransfer',
   'cheque',
   'cash',
@@ -226,6 +228,7 @@ export interface Customer {
   created_by_user_id: string | null;
   /** Where the processor knows this customer, once they have been asked. */
   stripe_customer_id: string | null;
+  square_customer_id: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -297,6 +300,15 @@ export interface Contract {
   terms_version: string;
   /** A processor token. Raw card data is never stored. */
   payment_method_token: string | null;
+  /** Which processor the token belongs to; a card saved at one cannot be charged at another. */
+  payment_method_provider: string | null;
+  /** The customer's signed consent to automatic charges, good for one year. */
+  autopay_signature_url: string | null;
+  autopay_signer_name: string | null;
+  autopay_terms: string | null;
+  autopay_signed_at: Date | null;
+  autopay_signed_ip: string | null;
+  autopay_expires_on: string | null;
   payment_method_last4: string | null;
   payment_method_brand: string | null;
   pdf_url: string | null;
@@ -433,6 +445,8 @@ export interface Invoice {
   sent_at: Date | null;
   paid_at: Date | null;
   pdf_url: string | null;
+  /** The capability in the customer's pay link. Null until one is sent. */
+  portal_token: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -443,6 +457,8 @@ export interface Payment {
   amount: string;
   method: PaymentMethod;
   provider_transaction_id: string | null;
+  /** The processor that moved the money, when one did. */
+  provider: string | null;
   status: PaymentStatus;
   failure_reason: string | null;
   processed_at: Date | null;

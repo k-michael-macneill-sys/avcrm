@@ -1,3 +1,4 @@
+import * as React from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { PAYMENT_METHODS } from '../../../src/types/models';
 import type { Customer, Invoice, Payment } from '../../../src/types/models';
@@ -85,6 +86,8 @@ export function InvoiceDetail(): JSX.Element {
         </div>
       </Section>
 
+      {invoice.status === 'sent' || invoice.status === 'overdue' ? <PayLink invoiceId={id} /> : null}
+
       <Section title="Payments">
         <DataTable
           rowKey={(row) => row.id}
@@ -155,5 +158,63 @@ export function InvoiceDetail(): JSX.Element {
         )}
       </Section>
     </>
+  );
+}
+
+/**
+ * The link the customer was emailed, for when they would rather have it by
+ * text or read out over the phone. Fetched on demand: asking makes the token
+ * if the invoice has never had one.
+ */
+function PayLink({ invoiceId }: { invoiceId: string }): JSX.Element {
+  const [link, setLink] = React.useState<{ url: string; takes_payments: boolean } | null>(null);
+  const [note, setNote] = React.useState('');
+  const [pending, setPending] = React.useState(false);
+
+  const fetchLink = (): void => {
+    setPending(true);
+    api
+      .get<{ url: string; takes_payments: boolean }>(`/invoices/${invoiceId}/pay-link`)
+      .then(setLink)
+      .catch((err: unknown) => setNote(err instanceof api.ApiError ? err.full : String(err)))
+      .finally(() => setPending(false));
+  };
+
+  const copy = (): void => {
+    if (!link) return;
+    navigator.clipboard.writeText(link.url).then(
+      () => setNote('Copied.'),
+      () => setNote('Could not copy — select the link and copy it by hand.'),
+    );
+  };
+
+  return (
+    <Section title="Customer payment link" className="mb-4">
+      {link ? (
+        <>
+          <p className="mb-2 break-all font-mono text-xs">{link.url}</p>
+          {link.takes_payments ? null : (
+            <p className="mb-2 text-xs text-muted-foreground">
+              No card processor is switched on, so the customer can view this invoice but not pay it
+              online. Connect Square under Settings.
+            </p>
+          )}
+          <Button type="button" size="sm" variant="secondary" onClick={copy}>
+            Copy link
+          </Button>
+        </>
+      ) : (
+        <>
+          <p className="mb-2 text-xs text-muted-foreground">
+            The same link that goes out in the invoice email. The customer can pay from it without
+            an account.
+          </p>
+          <Button type="button" size="sm" variant="secondary" disabled={pending} onClick={fetchLink}>
+            Show the link
+          </Button>
+        </>
+      )}
+      {note ? <p className="mt-2 text-xs text-muted-foreground" aria-live="polite">{note}</p> : null}
+    </Section>
   );
 }

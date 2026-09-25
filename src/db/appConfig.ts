@@ -279,7 +279,7 @@ export const MESSAGE_TEMPLATES: MessageTemplateRow[] = [
       body:
         'Hi {{customer_first_name}},\n\nYour invoice for {{billing_period_start}} ' +
         'to {{billing_period_end}} at {{address_line1}} comes to ${{amount_due}}, ' +
-        'due {{due_date}}.\n\n— {{branch_name}}',
+        'due {{due_date}}.\n\n{{pay_prompt}}: {{pay_url}}\n\n— {{branch_name}}',
     },
     {
       code: 'invoice_overdue',
@@ -289,7 +289,8 @@ export const MESSAGE_TEMPLATES: MessageTemplateRow[] = [
       body:
         'Hi {{customer_first_name}},\n\n${{amount_outstanding}} for ' +
         '{{address_line1}} was due on {{due_date}} and is still outstanding. ' +
-        'Service continues — please settle up when you can.\n\n— {{branch_name}}',
+        'Service continues — please settle up when you can.\n\n' +
+        '{{pay_prompt}}: {{pay_url}}\n\n— {{branch_name}}',
     },
     {
       // The link the customer taps to put a card on file. Nobody reads a card
@@ -301,8 +302,8 @@ export const MESSAGE_TEMPLATES: MessageTemplateRow[] = [
       body:
         'Hi {{customer_first_name}},\n\nTo set up billing for ' +
         '{{address_line1}}, add your card here:\n\n{{card_url}}\n\n' +
-        'The page belongs to our payment provider — your card details never ' +
-        'reach us.\n\n— {{branch_name}}',
+        'The card form belongs to our payment provider — your card details ' +
+        'never reach us.\n\n— {{branch_name}}',
     },
     {
       code: 'card_setup_request',
