@@ -37,6 +37,18 @@ services:
         value: 'false'
       - key: TRUST_PROXY
         value: 'true'
+      # Square. Set these in Render's Environment tab — a local .env file is
+      # never uploaded to Render. sandbox-sq0idb-… IDs pair with sandbox.
+      - key: SQUARE_ENVIRONMENT
+        sync: false
+      - key: SQUARE_APPLICATION_ID
+        sync: false
+      - key: SQUARE_LOCATION_ID
+        sync: false
+      - key: SQUARE_ACCESS_TOKEN
+        sync: false
+      - key: SQUARE_WEBHOOK_SIGNATURE_KEY
+        sync: false
 
   - type: pserv
     name: avcrm-postgres

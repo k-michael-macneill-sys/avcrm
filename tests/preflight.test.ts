@@ -105,6 +105,10 @@ describe('the deploy preflight', () => {
     assert.ok(errors({ ...goodEnv(), SQUARE_ENVIRONMENT: 'sandbox' }).includes('SQUARE_ENVIRONMENT'));
   });
 
+  it('catches a Square token with no location to take payments at', () => {
+    assert.ok(errors({ ...goodEnv(), SQUARE_LOCATION_ID: '' }).includes('SQUARE_LOCATION_ID'));
+  });
+
   it('catches a secret someone typed instead of generated', () => {
     // Long, but barely a dozen distinct characters — a passphrase, not entropy.
     assert.ok(errors({ ...goodEnv(), JWT_SECRET: 'aaaaaaaabbbbbbbbccccccccdddddddd' }).includes('JWT_SECRET'));

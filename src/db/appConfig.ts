@@ -324,11 +324,15 @@ export async function installAppConfig(knex: Knex): Promise<ConfigInstalled> {
     .ignore()
     .returning('code');
 
-  const checklist = await knex('checklist_requirements')
-    .insert(CHECKLIST_REQUIREMENTS)
-    .onConflict('code')
-    .ignore()
-    .returning('code');
+  // knex refuses an insert of no rows ("The query is empty"), and the list is
+  // deliberately empty now — that crash failed every Render build.
+  const checklist = CHECKLIST_REQUIREMENTS.length
+    ? await knex('checklist_requirements')
+        .insert(CHECKLIST_REQUIREMENTS)
+        .onConflict('code')
+        .ignore()
+        .returning('code')
+    : [];
 
   // Keyed on the partial unique index over the global rows: one template per
   // code and channel where no branch has overridden it.

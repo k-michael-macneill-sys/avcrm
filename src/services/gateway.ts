@@ -2,6 +2,7 @@ import type { Knex } from 'knex';
 import { config } from '../config';
 import { db as defaultDb } from '../db/client';
 import { badRequest } from '../utils/errors';
+import { logger } from '../utils/logger';
 import { PAYMENTS_KEY, readIntegration, resolveValues } from './integrations';
 import { SquareGateway } from './squareGateway';
 
@@ -195,15 +196,37 @@ class ManualGateway implements PaymentGateway {
  * settings row has nothing configured, so a payment taken through it still
  * reconciles either way.
  */
-export const envGateway: PaymentGateway = config.payments.square.accessToken
-  ? new SquareGateway({
-      environment: config.payments.square.environment,
-      application_id: config.payments.square.applicationId,
-      location_id: config.payments.square.locationId,
-      access_token: config.payments.square.accessToken,
-      webhook_signature_key: config.payments.square.webhookSignatureKey,
-    })
-  : new ManualGateway();
+function gatewayFromEnvironment(): PaymentGateway {
+  const square = config.payments.square;
+  if (!square.accessToken) return new ManualGateway();
+
+  // Logged rather than thrown: the build runs migrations with this same
+  // configuration, and a throw there fails the deploy and leaves the old
+  // version running with no sign anything went wrong.
+  const missing = [
+    ['SQUARE_APPLICATION_ID', square.applicationId],
+    ['SQUARE_LOCATION_ID', square.locationId],
+  ]
+    .filter(([, value]) => !value)
+    .map(([name]) => name);
+  if (missing.length) {
+    logger.error(
+      { missing },
+      `SQUARE_ACCESS_TOKEN is set but ${missing.join(' and ')} is not, so card payments stay off`,
+    );
+    return new ManualGateway();
+  }
+
+  return new SquareGateway({
+    environment: square.environment,
+    application_id: square.applicationId,
+    location_id: square.locationId,
+    access_token: square.accessToken,
+    webhook_signature_key: square.webhookSignatureKey,
+  });
+}
+
+export const envGateway: PaymentGateway = gatewayFromEnvironment();
 
 /**
  * Square, however it is configured: from the settings screen if a row is

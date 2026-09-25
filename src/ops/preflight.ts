@@ -189,8 +189,15 @@ export function inspect(env: Record<string, string | undefined>): Finding[] {
       'is unset. Unless Square is connected under Settings instead, saved cards ' +
         'cannot be charged and customers cannot pay from their invoice link.',
     );
-  } else if (get('SQUARE_ENVIRONMENT') !== 'production') {
-    error('SQUARE_ENVIRONMENT', 'is not production, so no real money will move');
+  } else {
+    for (const name of ['SQUARE_APPLICATION_ID', 'SQUARE_LOCATION_ID']) {
+      if (get(name) === '') {
+        error(name, 'is empty, but SQUARE_ACCESS_TOKEN is set — card payments stay off without it');
+      }
+    }
+    if (get('SQUARE_ENVIRONMENT').toLowerCase() !== 'production') {
+      error('SQUARE_ENVIRONMENT', 'is not production, so no real money will move');
+    }
   }
 
   // --- keeping the records ------------------------------------------------

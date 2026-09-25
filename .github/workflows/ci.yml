@@ -59,6 +59,17 @@ jobs:
       - name: Build
         run: npm run build
 
+      # What Render's buildCommand runs after the build, against a fresh
+      # database in production mode. A failure here is a failed deploy that
+      # Render reports only in its own event log, while it keeps serving the
+      # previous version — so it has to fail here first.
+      - name: Migrate and seed like a deploy
+        env:
+          NODE_ENV: production
+          DATABASE_URL: postgres://avcrm:avcrm@localhost:5432/avcrm
+          JWT_SECRET: ci-only-secret-long-enough-for-the-schema-check
+        run: npm run migrate && npm run seed && npm run seed
+
   # Proves the thing that actually gets deployed still builds. Catches a
   # missing file in the image long before a server does.
   image:
@@ -72,3 +83,4 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+

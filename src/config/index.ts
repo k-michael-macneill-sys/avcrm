@@ -109,20 +109,22 @@ const envSchema = z.object({
   // neither set, the install is `manual`: it records what a rep with a
   // cheque says happened and refuses to pretend it charged anything.
   PAYMENT_CURRENCY: z.string().trim().length(3).toLowerCase().default('cad'),
-  SQUARE_ENVIRONMENT: z.enum(['sandbox', 'production']).default('sandbox'),
-  SQUARE_APPLICATION_ID: z.string().trim().min(1).optional(),
-  SQUARE_LOCATION_ID: z.string().trim().min(1).optional(),
-  SQUARE_ACCESS_TOKEN: z.string().trim().min(1).optional(),
+  SQUARE_ENVIRONMENT: blankIsUnset(
+    z.preprocess((v) => (typeof v === 'string' ? v.trim().toLowerCase() : v), z.enum(['sandbox', 'production'])),
+  ),
+  SQUARE_APPLICATION_ID: blankIsUnset(z.string().trim().min(1)),
+  SQUARE_LOCATION_ID: blankIsUnset(z.string().trim().min(1)),
+  SQUARE_ACCESS_TOKEN: blankIsUnset(z.string().trim().min(1)),
   /**
    * Optional, but without it a refund made in the Square Dashboard is never
    * recorded here — see the field of the same name under Settings.
    */
-  SQUARE_WEBHOOK_SIGNATURE_KEY: z.string().trim().min(1).optional(),
+  SQUARE_WEBHOOK_SIGNATURE_KEY: blankIsUnset(z.string().trim().min(1)),
   /**
    * Points the driver at the test suite's stand-in instead of Square's own
    * API. Leave unset anywhere real money matters.
    */
-  SQUARE_API_BASE: z.string().trim().url().optional(),
+  SQUARE_API_BASE: blankIsUnset(z.string().trim().url()),
 
   // Object storage. `local` writes to disk and is the default because it
   // needs no credentials and works offline; `s3` is the seam for a bucket.
@@ -188,19 +190,6 @@ const checkedSchema = envSchema.superRefine((env, ctx) => {
       message: 'is required when MAIL_DRIVER=smtp',
     });
   }
-}).superRefine((env, ctx) => {
-  if (!env.SQUARE_ACCESS_TOKEN) return;
-
-  // A processor with a token but no location cannot take a payment.
-  for (const key of ['SQUARE_APPLICATION_ID', 'SQUARE_LOCATION_ID'] as const) {
-    if (!env[key]) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: [key],
-        message: 'is required when SQUARE_ACCESS_TOKEN is set',
-      });
-    }
-  }
 });
 
 const parsed = checkedSchema.safeParse(process.env);
@@ -254,7 +243,7 @@ export const config = {
   payments: {
     currency: env.PAYMENT_CURRENCY,
     square: {
-      environment: env.SQUARE_ENVIRONMENT,
+      environment: env.SQUARE_ENVIRONMENT ?? 'sandbox',
       applicationId: env.SQUARE_APPLICATION_ID ?? '',
       locationId: env.SQUARE_LOCATION_ID ?? '',
       accessToken: env.SQUARE_ACCESS_TOKEN ?? '',

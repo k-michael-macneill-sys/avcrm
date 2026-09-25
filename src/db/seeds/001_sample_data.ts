@@ -19,12 +19,17 @@ export async function seed(knex: Knex): Promise<void> {
   // This seed wipes every table it owns, so in production it is allowed only
   // where there is nothing to lose: a database with no users in it. That is a
   // first deploy, and the alternative there is a login box nobody can get past.
+  //
+  // Render runs this on every build, so an existing install must be a quiet
+  // no-op rather than an error: a throw here failed every deploy after the
+  // first, and Render kept serving the old version with no visible sign.
+  // installAppConfig only adds rows, so it still delivers new templates.
   if (config.isProduction) {
     const existingUser = await knex('users').first('id');
     if (existingUser) {
-      throw new Error(
-        'Refusing to run seeds against a production database that already has users',
-      );
+      await installAppConfig(knex);
+      console.log('Production database already has users: installed new config only, wiped nothing.');
+      return;
     }
   }
 
