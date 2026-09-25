@@ -276,7 +276,7 @@ export function autopayAgreement(
   addressLine1: string,
   startsOn: string = todayIso(),
 ): AutopayAgreement {
-  const endsOn = addMonths(startsOn, AUTOPAY_MONTHS);
+  const endsOn = '2027-03-31';
   const text =
     `By signing below, I confirm my snow clearing service contract with ${branchName} ` +
     `for ${addressLine1}, and I authorize ${branchName} to charge the card I save on ` +

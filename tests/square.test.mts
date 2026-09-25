@@ -321,9 +321,7 @@ describe('Square', () => {
       assert.equal(page.status, 200);
       const agreement = page.body.data.agreement;
       assert.equal(agreement.starts_on, isoToday());
-      const nextYear = new Date();
-      nextYear.setUTCFullYear(nextYear.getUTCFullYear() + 1);
-      assert.equal(agreement.ends_on, nextYear.toISOString().slice(0, 10));
+      assert.equal(agreement.ends_on, '2027-03-31');
       assert.match(agreement.text, /authorize Kingston to charge the card/);
       assert.ok(agreement.text.includes(agreement.ends_on));
     });
