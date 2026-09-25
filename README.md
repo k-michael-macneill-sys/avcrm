@@ -359,6 +359,12 @@ A suspension is only lifted by corporate, never by the automatic refresh.
 | POST | `/card-setups` | any | Asks the customer for a card; returns the link |
 | POST | `/card-setups/:id/refresh` | any | Asks the processor whether they finished yet |
 | POST | `/webhooks/stripe` | **public** | Signature-verified; refuses anything unsigned |
+| GET | `/webhooks/meta` | **public** | Meta's subscription handshake; checks `META_VERIFY_TOKEN` |
+| POST | `/webhooks/meta` | **public** | Facebook/Instagram messages; `X-Hub-Signature-256` verified against `META_APP_SECRET` |
+| GET | `/meta/conversations` | corporate, sales | Paginated inbox; `platform`, `customer_id`, `unassigned=true` |
+| PATCH | `/meta/conversations/:id` | corporate, sales | Route to a branch (corporate) or link a customer |
+| GET | `/meta/conversations/:id/messages` | corporate, sales | The thread, oldest first |
+| POST | `/meta/conversations/:id/messages` | corporate, sales | Queues a reply; `202`, the worker sends it |
 | POST | `/uploads` | any | Asks for somewhere to put a file |
 | PUT | `/uploads/:token` | the token | Sends the bytes; no session, by design |
 | GET | `/files/*` | any | Reads one back, authorized by what it is |
@@ -1251,6 +1257,71 @@ for.
   anything else, and the error will say so, but nothing normalises them first.
 - One provider for the whole company. Per-branch numbers would be a `branch_id`
   on the settings row.
+
+## Facebook and Instagram messages
+
+Direct messages to the Facebook Page, and to the Instagram business account
+linked to it, land in `meta_conversations` and `meta_messages`: one
+conversation per person per platform, and every message in and out of it.
+
+**Setting it up.** In the Meta app dashboard, add the Messenger product (and
+Instagram messaging, if the account is linked), subscribe the Page to the
+`messages` and `message_echoes` fields, and point the webhook at
+`https://<your domain>/webhooks/meta`. Then set, in Render or `.env`:
+
+| Variable | What it is |
+| --- | --- |
+| `META_PAGE_ACCESS_TOKEN` | The Page's access token. Sends replies. Without it, replying answers 503. |
+| `META_APP_SECRET` | The app secret. Every webhook's `X-Hub-Signature-256` is checked against it; without it every delivery is refused. |
+| `META_VERIFY_TOKEN` | Any string you choose; type the same one into the dashboard when subscribing. |
+| `META_GRAPH_API_BASE` | Optional. Defaults to `https://graph.facebook.com/v19.0`. |
+
+**Incoming.** The webhook checks the signature over the raw body — it is
+mounted before the JSON parser, like Stripe's — then stores each message.
+Meta redelivers anything it did not get a 200 for, so storage is idempotent
+on Meta's message id. A photo or voice note with no text is stored as
+`[image]`, `[audio]` and so on. Replies somebody types into Meta's own inbox
+come back as echoes and are stored as outbound, so the thread here is whole.
+
+**Which branch.** A message says which Page it reached, not which town the
+sender is in. With one active branch, new conversations go straight to it.
+With several, they wait unassigned: corporate sees them
+(`GET /meta/conversations?unassigned=true`) and routes them with `PATCH`,
+and linking a customer routes the conversation to that customer's branch.
+Sales reps see only their own branch's conversations; operators none.
+
+**Replying** follows the message queue's rule: nothing talks to Meta inside a
+request. `POST /meta/conversations/:id/messages` writes a `queued` row and
+answers 202, and `job:message-queue` — which now drains `meta_messages` as
+well as `message_log`, with the same claim, lease and retry budget — sends
+it. A rate limit or an outage is retried; a refusal that will not change (the
+person blocked the Page, the token is bad) fails at once with Meta's reason
+in `error`.
+
+Meta only allows a reply within **24 hours** of the person's last message.
+The endpoint checks that first and answers 409 rather than queueing
+something certain to fail.
+
+### Verifying it
+
+`tests/metaMessaging.test.mts` runs against a stand-in Graph API
+(`tests/helpers/graphApi.ts`) that checks the bearer token and answers with
+Meta's own error shape. It covers the handshake, unsigned, wrongly signed and
+tampered deliveries, redeliveries, Instagram versus Page, branch routing and
+scoping, the 24-hour window, a permanent refusal against a retried rate
+limit, and the echo of our own reply arriving before and after the worker
+records it.
+
+### Known gaps
+
+- **No screen yet.** The API is complete; the inbox page in the app is the
+  next step.
+- **No names.** Meta identifies people by a Page-scoped id. Showing their
+  name means a Graph API profile lookup per new conversation, which is not
+  done yet, so a conversation is anonymous until someone links a customer.
+- **Text only, one Page.** Outbound attachments, message tags for replies
+  after 24 hours (`HUMAN_AGENT` needs Meta's approval), and more than one
+  Page are not handled.
 
 ## What is mocked
 

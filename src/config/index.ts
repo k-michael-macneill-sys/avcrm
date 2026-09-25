@@ -11,6 +11,13 @@ const booleanish = z
   .enum(['true', 'false', '1', '0'])
   .transform((v) => v === 'true' || v === '1');
 
+/**
+ * An optional setting where a blank line (`KEY=`, as the example env files
+ * ship them) means "not set" rather than "set to nothing, and invalid".
+ */
+const blankIsUnset = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), schema.optional());
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3000),
@@ -124,7 +131,7 @@ const envSchema = z.object({
    * browser that opens the map — so what protects it is the referrer and API
    * restrictions set on it in Google Cloud, not secrecy.
    */
-  GOOGLE_MAPS_API_KEY: z.string().trim().min(1).optional(),
+  GOOGLE_MAPS_API_KEY: blankIsUnset(z.string().trim().min(1)),
 
   /**
    * The owner's password for adding a branch. A second lock on top of the
@@ -132,7 +139,24 @@ const envSchema = z.object({
    * branch is the owner's decision. Unset means nobody can add one — the
    * safe way for a missing setting to fail.
    */
-  BRANCH_PASSWORD: z.string().min(4).optional(),
+  BRANCH_PASSWORD: blankIsUnset(z.string().min(4)),
+
+  /**
+   * Facebook Page and Instagram direct messages. The Page access token sends
+   * replies; the app secret is what webhook signatures are checked against;
+   * the verify token is the string Meta echoes back when the webhook is
+   * first subscribed. Each part fails closed on its own: no token, no
+   * sending; no secret, every webhook is refused.
+   */
+  META_PAGE_ACCESS_TOKEN: blankIsUnset(z.string().trim().min(1)),
+  META_APP_SECRET: blankIsUnset(z.string().trim().min(1)),
+  META_VERIFY_TOKEN: blankIsUnset(z.string().trim().min(1)),
+  /**
+   * The Graph API version root. Overridable so the driver can be verified
+   * against a stand-in, and so a version bump is a setting rather than a
+   * deploy.
+   */
+  META_GRAPH_API_BASE: z.string().trim().url().default('https://graph.facebook.com/v19.0'),
 });
 
 /**
@@ -261,6 +285,12 @@ export const config = {
     googleApiKey: env.GOOGLE_MAPS_API_KEY ?? null,
   },
   branchPassword: env.BRANCH_PASSWORD ?? null,
+  meta: {
+    pageAccessToken: env.META_PAGE_ACCESS_TOKEN ?? null,
+    appSecret: env.META_APP_SECRET ?? null,
+    verifyToken: env.META_VERIFY_TOKEN ?? null,
+    graphApiBase: env.META_GRAPH_API_BASE.replace(/\/+$/, ''),
+  },
 } as const;
 
 export type Config = typeof config;

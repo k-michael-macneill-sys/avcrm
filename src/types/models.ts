@@ -164,6 +164,17 @@ export type SigningRequestStatus = (typeof SIGNING_REQUEST_STATUSES)[number];
 export const PIN_STATUSES = ['not_home', 'not_interested', 'lead'] as const;
 export type PinStatus = (typeof PIN_STATUSES)[number];
 
+/** Where a direct message came from. */
+export const META_PLATFORMS = ['facebook', 'instagram'] as const;
+export type MetaPlatform = (typeof META_PLATFORMS)[number];
+
+export const META_DIRECTIONS = ['inbound', 'outbound'] as const;
+export type MetaDirection = (typeof META_DIRECTIONS)[number];
+
+/** Inbound is only ever `received`; outbound moves through the queue. */
+export const META_MESSAGE_STATUSES = ['received', 'queued', 'sent', 'failed'] as const;
+export type MetaMessageStatus = (typeof META_MESSAGE_STATUSES)[number];
+
 export const UPLOAD_STATUSES = ['pending', 'stored'] as const;
 export type UploadStatus = (typeof UPLOAD_STATUSES)[number];
 
@@ -568,6 +579,35 @@ export interface LeadPin {
   last_knocked_at: Date;
   created_by_user_id: string | null;
   updated_by_user_id: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+/** One person talking to the Page, on one platform. */
+export interface MetaConversation {
+  id: string;
+  branch_id: string | null;
+  customer_id: string | null;
+  platform: MetaPlatform;
+  external_user_id: string;
+  last_inbound_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+/** A direct message, either way. Outbound rows double as the send queue. */
+export interface MetaMessage {
+  id: string;
+  conversation_id: string;
+  direction: MetaDirection;
+  message_text: string;
+  external_message_id: string | null;
+  status: MetaMessageStatus;
+  sent_by_user_id: string | null;
+  sent_at: Date | null;
+  error: string | null;
+  attempts: number;
+  last_attempt_at: Date | null;
   created_at: Date;
   updated_at: Date;
 }
