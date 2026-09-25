@@ -105,6 +105,26 @@ describe('cards, charges and webhooks through Square configured from the environ
     assert.equal(reply.body.data.env_gateway, 'square');
   });
 
+  it('checks the environment credentials, even with a switched-off draft saved in Settings', async () => {
+    // A half-filled Square entry someone saved and never switched on — no
+    // token, wrong location. It must not stand in for the working one.
+    const draft = await call(server, 'PUT', '/settings/payments', {
+      token: corporate,
+      body: {
+        provider: 'square',
+        is_enabled: false,
+        settings: { environment: 'sandbox', application_id: 'draft', location_id: 'NOT_A_LOCATION' },
+        secrets: {},
+      },
+    });
+    assert.equal(draft.status, 200);
+
+    const checked = await call(server, 'POST', '/settings/payments/test', { token: corporate });
+    assert.equal(checked.status, 200, JSON.stringify(checked.body));
+    assert.equal(checked.body.data.environment, 'sandbox');
+    assert.equal(checked.body.data.currency, 'CAD');
+  });
+
   describe('getting a card on file', () => {
     it('sends the customer to our page with Square’s form on it, no Settings row needed', async () => {
       const contract = await contractWithoutCard();

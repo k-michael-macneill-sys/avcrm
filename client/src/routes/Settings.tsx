@@ -83,6 +83,11 @@ export function Settings(): JSX.Element {
         enableLabel="Take card payments through this processor"
         statusOn="Taking payments"
         statusOff="Not taking payments"
+        activeFromServer={
+          payments.env_gateway === 'square'
+            ? 'Taking payments through Square — set in the server environment (Render)'
+            : undefined
+        }
         noneText={
           payments.env_gateway === 'square'
             ? 'Square is configured on the server and handles card payments. Connect it here instead to override that for this company.'
@@ -123,6 +128,7 @@ function IntegrationSection({
   enableLabel,
   statusOn,
   statusOff,
+  activeFromServer,
   noneText,
   providers,
   current,
@@ -134,6 +140,8 @@ function IntegrationSection({
   enableLabel: string;
   statusOn: string;
   statusOff: string;
+  /** What is actually live when nothing here is switched on but the server has its own. */
+  activeFromServer?: string;
   noneText: string;
   providers: Provider[];
   current: IntegrationSettings;
@@ -196,7 +204,9 @@ function IntegrationSection({
     <>
       <Section title={title} className="mb-4">
         <FieldList>
-          <Field label="Status">{current.is_enabled ? statusOn : statusOff}</Field>
+          <Field label="Status">
+            {current.is_enabled ? statusOn : (activeFromServer ?? statusOff)}
+          </Field>
           <Field label="Last changed">{current.updated_at ? stamp(current.updated_at) : 'never'}</Field>
         </FieldList>
         {children}
@@ -277,8 +287,8 @@ function PaymentTestSection(): JSX.Element {
   return (
     <Section title="Check the connection" className="mb-4">
       <p className="mb-3 max-w-[60ch] text-xs text-muted-foreground">
-        Asks Square about the saved location using the saved access token. No money moves. Save
-        first — this checks what is stored, not what is typed above.
+        Asks Square about the location using the access token payments actually go through —
+        the one switched on here, or else the one set on the server. No money moves.
       </p>
       <Button type="button" variant="secondary" disabled={pending} onClick={check}>
         Check connection

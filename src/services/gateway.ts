@@ -229,17 +229,19 @@ function gatewayFromEnvironment(): PaymentGateway {
 export const envGateway: PaymentGateway = gatewayFromEnvironment();
 
 /**
- * Square, however it is configured: from the settings screen if a row is
- * there, whether or not it is switched on — its webhooks and refunds keep
- * working after it is switched off, because money already taken through it
- * still has to be reconciled — otherwise from the environment.
+ * Square, however it is configured: the Settings row if it is switched on,
+ * else the environment, else a switched-off Settings row — whose webhooks
+ * and refunds still have to work, because money already taken through it
+ * has to be reconciled.
  */
 export async function squareGateway(db: Knex = defaultDb): Promise<SquareGateway | null> {
   const row = await readIntegration(PAYMENTS_KEY, db);
-  if (row && row.provider === 'square') {
-    return new SquareGateway(resolveValues(row));
-  }
-  return envGateway instanceof SquareGateway ? envGateway : null;
+  const saved = row && row.provider === 'square' ? row : null;
+  // The one taking payments comes first, so a half-filled draft saved under
+  // Settings never shadows working credentials from the environment.
+  if (saved?.is_enabled) return new SquareGateway(resolveValues(saved));
+  if (envGateway instanceof SquareGateway) return envGateway;
+  return saved ? new SquareGateway(resolveValues(saved)) : null;
 }
 
 /**
