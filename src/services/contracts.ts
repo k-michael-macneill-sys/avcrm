@@ -219,14 +219,16 @@ export async function createContract(
     }
     const contract = inserted;
 
-    await trx('contract_checklist_items').insert(
-      requirements.map((requirement) => ({
-        contract_id: contract.id,
-        item_code: requirement.code,
-        checked: checked.get(requirement.code) === true,
-        checked_at: checked.get(requirement.code) === true ? signedAt : null,
-      })),
-    );
+    if (requirements.length > 0) {
+      await trx('contract_checklist_items').insert(
+        requirements.map((requirement) => ({
+          contract_id: contract.id,
+          item_code: requirement.code,
+          checked: checked.get(requirement.code) === true,
+          checked_at: checked.get(requirement.code) === true ? signedAt : null,
+        })),
+      );
+    }
 
     if (quote.status !== 'accepted') {
       await trx('quotes').where({ id: quote.id }).update({ status: 'accepted' });

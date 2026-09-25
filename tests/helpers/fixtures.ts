@@ -337,20 +337,22 @@ export async function makeContract(
     .returning('id');
 
   const requirements = await db('checklist_requirements').select('code');
-  await db('contract_checklist_items').insert(
-    requirements.map((r) => {
-      const checked =
-        r.code === 'card_on_file' ? Boolean(overrides.payment_method_token) : true;
-      // The table's own rule: a timestamp means it was ticked, and an
-      // unticked box cannot carry one.
-      return {
-        contract_id: contract?.id ?? '',
-        item_code: r.code,
-        checked,
-        checked_at: checked ? new Date() : null,
-      };
-    }),
-  );
+  if (requirements.length > 0) {
+    await db('contract_checklist_items').insert(
+      requirements.map((r) => {
+        const checked =
+          r.code === 'card_on_file' ? Boolean(overrides.payment_method_token) : true;
+        // The table's own rule: a timestamp means it was ticked, and an
+        // unticked box cannot carry one.
+        return {
+          contract_id: contract?.id ?? '',
+          item_code: r.code,
+          checked,
+          checked_at: checked ? new Date() : null,
+        };
+      }),
+    );
+  }
 
   return { ...made, quote_id: quote, contract_id: contract?.id ?? '' };
 }

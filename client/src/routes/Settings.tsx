@@ -84,8 +84,8 @@ export function Settings(): JSX.Element {
         statusOn="Taking payments"
         statusOff="Not taking payments"
         noneText={
-          payments.env_gateway === 'stripe'
-            ? 'Stripe is configured on the server and handles card payments. Connect Square here to use it instead.'
+          payments.env_gateway === 'square'
+            ? 'Square is configured on the server and handles card payments. Connect it here instead to override that for this company.'
             : 'No processor connected. Payments can still be recorded by hand, and nothing is charged automatically.'
         }
         providers={paymentProviders}

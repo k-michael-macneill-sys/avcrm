@@ -95,24 +95,25 @@ const envSchema = z.object({
   SMTP_USER: z.string().optional(),
   SMTP_PASSWORD: z.string().optional(),
 
-  // Taking money. `manual` records what a processor or a rep with a cheque
-  // says happened, which is what an install without Stripe credentials can
-  // honestly do. `stripe` actually charges.
-  PAYMENT_GATEWAY: z.enum(['manual', 'stripe']).default('manual'),
+  // Taking money, through Square. An install can be configured either way —
+  // or both: these five give a default processor with no admin needed to
+  // click through Settings first, and a corporate user connecting Square at
+  // Settings -> Card payments overrides this once it is switched on. With
+  // neither set, the install is `manual`: it records what a rep with a
+  // cheque says happened and refuses to pretend it charged anything.
   PAYMENT_CURRENCY: z.string().trim().length(3).toLowerCase().default('cad'),
-  STRIPE_SECRET_KEY: z.string().trim().min(1).optional(),
-  STRIPE_WEBHOOK_SECRET: z.string().trim().min(1).optional(),
+  SQUARE_ENVIRONMENT: z.enum(['sandbox', 'production']).default('sandbox'),
+  SQUARE_APPLICATION_ID: z.string().trim().min(1).optional(),
+  SQUARE_LOCATION_ID: z.string().trim().min(1).optional(),
+  SQUARE_ACCESS_TOKEN: z.string().trim().min(1).optional(),
   /**
-   * Points the SDK somewhere other than api.stripe.com — at stripe-mock, or
-   * at the stand-in scripts/stripe-fake.js runs. Leave unset for real Stripe.
+   * Optional, but without it a refund made in the Square Dashboard is never
+   * recorded here — see the field of the same name under Settings.
    */
-  STRIPE_API_HOST: z.string().trim().min(1).optional(),
-  STRIPE_API_PORT: z.coerce.number().int().min(1).max(65535).optional(),
-  STRIPE_API_PROTOCOL: z.enum(['http', 'https']).default('https'),
+  SQUARE_WEBHOOK_SIGNATURE_KEY: z.string().trim().min(1).optional(),
   /**
-   * Square is connected from the settings screen, not here. This only points
-   * the driver at a stand-in instead of Square's own API; leave it unset
-   * anywhere real money matters.
+   * Points the driver at the test suite's stand-in instead of Square's own
+   * API. Leave unset anywhere real money matters.
    */
   SQUARE_API_BASE: z.string().trim().url().optional(),
 
@@ -149,16 +150,15 @@ const checkedSchema = envSchema.superRefine((env, ctx) => {
     });
   }
 }).superRefine((env, ctx) => {
-  if (env.PAYMENT_GATEWAY !== 'stripe') return;
+  if (!env.SQUARE_ACCESS_TOKEN) return;
 
-  // Without the webhook secret we would take money and never hear how it
-  // went, which is worse than not taking it.
-  for (const key of ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'] as const) {
+  // A processor with a token but no location cannot take a payment.
+  for (const key of ['SQUARE_APPLICATION_ID', 'SQUARE_LOCATION_ID'] as const) {
     if (!env[key]) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: [key],
-        message: 'is required when PAYMENT_GATEWAY=stripe',
+        message: 'is required when SQUARE_ACCESS_TOKEN is set',
       });
     }
   }
@@ -213,16 +213,15 @@ export const config = {
     uploadTtlSeconds: env.UPLOAD_URL_TTL_SECONDS,
   },
   payments: {
-    gateway: env.PAYMENT_GATEWAY,
     currency: env.PAYMENT_CURRENCY,
-    stripe: {
-      secretKey: env.STRIPE_SECRET_KEY ?? '',
-      webhookSecret: env.STRIPE_WEBHOOK_SECRET ?? '',
-      host: env.STRIPE_API_HOST ?? null,
-      port: env.STRIPE_API_PORT ?? null,
-      protocol: env.STRIPE_API_PROTOCOL,
+    square: {
+      environment: env.SQUARE_ENVIRONMENT,
+      applicationId: env.SQUARE_APPLICATION_ID ?? '',
+      locationId: env.SQUARE_LOCATION_ID ?? '',
+      accessToken: env.SQUARE_ACCESS_TOKEN ?? '',
+      webhookSignatureKey: env.SQUARE_WEBHOOK_SIGNATURE_KEY ?? '',
+      apiBase: env.SQUARE_API_BASE?.replace(/\/+$/, '') ?? null,
     },
-    squareApiBase: env.SQUARE_API_BASE?.replace(/\/+$/, '') ?? null,
   },
   mail: {
     driver: env.MAIL_DRIVER,

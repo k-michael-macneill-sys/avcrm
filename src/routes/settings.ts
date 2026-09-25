@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth, requireCorporate, resolveActor } from '../middleware/auth';
 import { recordAudit } from '../services/audit';
-import { squareGateway } from '../services/gateway';
+import { envGateway, squareGateway } from '../services/gateway';
 import {
   PAYMENTS_KEY,
   publicView,
@@ -162,7 +162,7 @@ settingsRouter.get(
         // What the settings screen needs to tell the admin, not configurable here.
         webhook_url: `${config.messaging.appBaseUrl}/webhooks/square`,
         currency: config.payments.currency.toUpperCase(),
-        env_gateway: config.payments.gateway,
+        env_gateway: envGateway.name,
       },
     });
   }),

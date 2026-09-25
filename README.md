@@ -23,8 +23,7 @@ Build order from the spec, and what exists today:
 | — | Browser client on top of the API | **done** |
 | — | File storage: signature capture, photos, documents | **done** |
 | — | Real SMTP mail transport | **done** |
-| — | Card capture and charging through Stripe | **done** |
-| — | Square, connected from Settings; customer pay links; signed one-year autopay | **done** |
+| — | Square, from the environment or connected from Settings; customer pay links; signed one-year autopay | **done** |
 | — | SMS provider, connected by an administrator | **done** |
 | — | Invoice and service report PDFs | **done** |
 | — | Automated test suite | **done** |
@@ -365,7 +364,6 @@ A suspension is only lifted by corporate, never by the automatic refresh.
 | GET | `/card-setups` | any | `contract_id`, `customer_id`, `status` |
 | POST | `/card-setups` | any | Asks the customer for a card; returns the link |
 | POST | `/card-setups/:id/refresh` | any | Asks the processor whether they finished yet |
-| POST | `/webhooks/stripe` | **public** | Signature-verified; refuses anything unsigned |
 | POST | `/webhooks/square` | **public** | Signature-verified against the saved key |
 | GET | `/invoices/:id/pay-link` | any | The customer's link to pay this invoice |
 | GET | `/portal/invoices/:token` | **public** | What the pay page shows; the token is the capability |
@@ -958,33 +956,44 @@ that has never talked to an SMTP server is a transport nobody has tested.
 
 ## Payments
 
-Card handling is a port with two drivers, chosen by `PAYMENT_GATEWAY`:
+Card handling is a single processor, Square, which can be configured two
+ways:
 
-- **`manual`** (the default) is the system as it was: `POST /invoices/:id/payments`
-  records what a processor, a cheque or an e-transfer says happened. Nothing
-  here talks to anyone. Asking it to charge a card returns `NOT_CONFIGURED`
-  rather than pretending.
-- **`stripe`** actually moves money.
+- **From the environment** — set `SQUARE_ACCESS_TOKEN` (and the fields below
+  it) and this install charges through Square with nothing to click through
+  first. This is what a single-branch install uses by default.
+- **From Settings** — a corporate user connects it at **Settings → Card
+  payments**, the same way an SMS provider is. Once switched on there it
+  takes precedence over the environment, which is how a multi-branch account
+  overrides what one branch's `.env` sets as the default.
+
+With neither set, `POST /invoices/:id/payments` records what a processor, a
+cheque or an e-transfer says happened, same as it always could — nothing
+here talks to anyone, and asking it to charge a card returns
+`NOT_CONFIGURED` rather than pretending.
 
 ```
-PAYMENT_GATEWAY=stripe
 PAYMENT_CURRENCY=cad
-STRIPE_SECRET_KEY=sk_live_…
-STRIPE_WEBHOOK_SECRET=whsec_…
+SQUARE_ENVIRONMENT=production
+SQUARE_APPLICATION_ID=sq0idp-…
+SQUARE_LOCATION_ID=L…
+SQUARE_ACCESS_TOKEN=EAAA…
+SQUARE_WEBHOOK_SIGNATURE_KEY=…
 ```
 
-Both keys are required when the gateway is `stripe` — config refuses to start
-without them rather than failing at the first charge. `STRIPE_API_HOST`,
-`STRIPE_API_PORT` and `STRIPE_API_PROTOCOL` exist only to point the SDK at the
-stand-in used by the test suite.
+`SQUARE_APPLICATION_ID` and `SQUARE_LOCATION_ID` are required once
+`SQUARE_ACCESS_TOKEN` is set — config refuses to start without them rather
+than failing at the first charge. `SQUARE_WEBHOOK_SIGNATURE_KEY` is optional,
+but without it a refund made in the Square Dashboard is never recorded here.
+`SQUARE_API_BASE` exists only to point the driver at the stand-in used by the
+test suite.
 
-### Square
+Treat `SQUARE_ACCESS_TOKEN` like any other password: it belongs only in your
+local, gitignored `.env`, never in a file that gets committed. If one is ever
+pasted somewhere that ends up in git history, rotate it in the Square
+Developer Console immediately — git history does not forget.
 
-Square is connected by a corporate user at **Settings → Card payments**, not in
-`.env`, the same way an SMS provider is. Once it is switched on there it is the
-processor: new card requests, the billing job's automatic charges, and the
-customer pay link all go through it. `PAYMENT_GATEWAY` still decides what
-happens when it is off.
+### Connecting it from Settings
 
 From the Square Developer Console, open your application and copy:
 
@@ -999,18 +1008,19 @@ From the Square Developer Console, open your application and copy:
 Save, then press **Check connection**: it asks Square about the location with
 the saved token and confirms the currency, without moving any money.
 
-Square has no hosted "save a card" page the way Stripe Checkout does. Its
-equivalent is the Web Payments SDK — Square's own card form, drawn in an
-iframe on `public/pay.html`. The card is typed into Square's frame, and only a
-single-use nonce reaches this server, which exchanges it for a stored card or
-a payment. The no-card-data rule below holds for Square as it does for Stripe.
+Square has no hosted "save a card" page. Instead there is the Web Payments
+SDK — Square's own card form, drawn in an iframe on `public/pay.html`. The
+card is typed into Square's frame, and only a single-use nonce reaches this
+server, which exchanges it for a stored card or a payment. The no-card-data
+rule below holds throughout.
 
 Card tokens and customer ids are recorded per processor
-(`contracts.payment_method_provider`, `customers.square_customer_id`). A card
-saved through Stripe cannot be charged through Square: the charge is refused
-with a message saying to ask the customer again, and the billing job skips it.
-A refund goes back through the processor that took the money, not just onto
-the invoice.
+(`contracts.payment_method_provider`, `customers.square_customer_id`). A
+contract whose card was saved under a different processor — including one
+from before Square was the only option — cannot be charged: the charge is
+refused with a message saying to ask the customer again, and the billing job
+skips it. A refund goes back through the processor that took the money, not
+just onto the invoice.
 
 ### The customer pay link
 
@@ -1086,11 +1096,11 @@ Completing one writes `payment_method_token`, `payment_method_last4` and
 transaction**, because the contract service treats a token on file and that
 box as a single fact and will not let them disagree.
 
-**The later upgrade is tap-to-pay.** Stripe Terminal turns the rep's phone into
-a contactless reader, so the customer taps their own card or watch and there is
-still no number to read out. It needs a native iOS/Android app — the reader SDK
-cannot run in a browser — so it is a second client against this same API, not a
-change to it. The hosted link works today on any phone.
+**The later upgrade is tap-to-pay.** Square Terminal turns the rep's phone
+into a contactless reader, so the customer taps their own card or watch and
+there is still no number to read out. It needs a native iOS/Android app — the
+reader SDK cannot run in a browser — so it is a second client against this
+same API, not a change to it. The hosted link works today on any phone.
 
 ### Charging
 
@@ -1112,37 +1122,51 @@ from the payment rows as it always has.
 
 ### Webhooks
 
-`POST /webhooks/stripe` is public, because the processor has no account here.
+`POST /webhooks/square` is public, because the processor has no account here.
 What makes it trustworthy is the signature, so the route is mounted **before**
 `express.json` and reads a raw `Buffer`: a parsed and re-serialised body is not
 the bytes that were signed, and the check would fail on honest traffic while
-still passing nothing useful. An unsigned or forged request is a 400.
+still passing nothing useful. An unsigned or forged request is a 400. It is
+checked against the signature key however Square is configured — from the
+environment or from Settings — even while Square is switched off, because
+money already taken through it still has to reconcile.
 
 It handles four events:
 
 | Event | What it does |
 | --- | --- |
-| `checkout.session.completed` | Finishes the card capture |
-| `payment_intent.succeeded` | Reconciles a charge we already booked |
-| `payment_intent.payment_failed` | Marks the payment failed with the reason |
-| `charge.refunded` | Flips the payment to `refunded` |
+| `payment.created` / `payment.updated` | Reconciles a charge we already booked, once it settles |
+| `refund.created` / `refund.updated` | Flips the payment to `refunded` once the refund completes |
 
-Stripe redelivers, so every handler is keyed on the provider's own id and doing
+Square redelivers, so every handler is keyed on the provider's own id and doing
 it twice changes nothing.
 
 ### Verifying it
 
-`tests/payments.test.mts` runs against a stand-in that speaks Stripe's own
-request and response shapes, including the 402 `card_error` a real decline
-produces. It drives the whole path: ask for a card, complete the capture,
-charge the saved card, take a decline, refund by webhook, and refuse an
-unsigned or forged one. The real SDK builds, signs and parses every request;
-only the far end is fake.
+Two suites run against stand-ins that speak Square's own request and response
+shapes, including the errors a real decline produces:
 
-It asserts against the database, not just the responses: that the customer
-exists at the processor, that the link was queued, that the stored token is a
-`pm_…` and never a card number, that the checklist box ticked itself, and that
-a replayed webhook leaves one payment row.
+- `tests/square.test.mts` covers the Settings-configured path end to end — an
+  administrator connecting it, a customer paying from their invoice link,
+  signing the autopay agreement, and what the office does after (refunds,
+  webhooks, the connection check).
+- `tests/payments.test.mts` covers the same card, charge and webhook path
+  configured purely from `SQUARE_*` environment variables, with no Settings
+  row at all — proving that path works on its own for a single-branch
+  install.
+
+Both drive the real path: ask for a card, complete the capture on the
+customer's own page, charge the saved card, take a decline, refund by
+webhook, and refuse an unsigned or forged one. They assert against the
+database, not just the responses: that the customer exists at the processor,
+that the link was queued, that the stored token is a Square card id and never
+a card number, and that a replayed webhook leaves one payment row.
+
+`scripts/test-setup.sh` unsets every `SQUARE_*` variable before the suite
+runs, even though the two files above set their own pointed at a stand-in —
+otherwise a developer's own `.env`, which may carry a real access token,
+would leak into every other test file's `envGateway` and let a plain test run
+reach the real Square API.
 
 ### Known gaps
 
@@ -1320,12 +1344,13 @@ for.
 
 Nothing is mocked any more. Email goes out over SMTP ([Mail](#mail)), text
 messages go through whichever gateway an administrator connects
-([Text messages](#text-messages)), and cards are charged through Stripe
+([Text messages](#text-messages)), and cards are charged through Square
 ([Payments](#payments)).
 
 Two of those are off by default, which is not the same as mocked: an install
-with no SMS provider connected and `PAYMENT_GATEWAY=manual` queues, renders and
-logs everything it would have sent, and records payments as a system of record.
+with no SMS provider connected and no Square credentials anywhere queues,
+renders and logs everything it would have sent, and records payments as a
+system of record.
 That is a deliberate state — it is what a new install should do before anyone
 has opened an account — and switching it on is configuration rather than code.
 
@@ -1379,7 +1404,7 @@ Five steps, in this order:
 ```bash
 cp deploy/env.example .env
 npm run secrets                # generates the three it cannot guess
-$EDITOR .env                   # paste those in, plus DOMAIN, SMTP, Stripe
+$EDITOR .env                   # paste those in, plus DOMAIN, SMTP, Square
 npm run preflight              # refuses to bless a half-filled .env
 docker compose up -d --build
 

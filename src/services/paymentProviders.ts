@@ -4,9 +4,9 @@ import type { ProviderField } from './smsProviders';
  * The processors an administrator can connect from the settings screen,
  * described as data so the screen renders itself from this list.
  *
- * Stripe is not here: it predates the settings screen and is still configured
- * through PAYMENT_GATEWAY in the environment. A processor connected here takes
- * precedence over that once it is switched on.
+ * Square can also be configured through the environment instead — see
+ * gateway.ts. A processor connected here takes precedence over that once it
+ * is switched on.
  */
 
 export interface PaymentProviderDefinition {

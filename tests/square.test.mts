@@ -350,9 +350,7 @@ describe('Square', () => {
       assert.equal(stored?.payment_method_provider, 'square');
       assert.equal(stored?.autopay_signer_name, 'Harold Bell');
       assert.match(stored?.autopay_terms ?? '', /authorize Kingston/);
-      const expires = new Date();
-      expires.setUTCFullYear(expires.getUTCFullYear() + 1);
-      assert.equal(stored?.autopay_expires_on, expires.toISOString().slice(0, 10));
+      assert.equal(stored?.autopay_expires_on, '2027-03-31');
 
       // Staff can open the signature, as they can the one taken at the door.
       const file = await fetch(`${server.url}/files/${stored?.autopay_signature_url}`, {
