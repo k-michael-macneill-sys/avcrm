@@ -1,4 +1,6 @@
+import { randomBytes } from 'node:crypto';
 import type { Knex } from 'knex';
+import { config } from '../config';
 import { db as defaultDb } from '../db/client';
 import type { BranchScope } from '../types/auth';
 import type { Invoice, InvoiceStatus, Payment } from '../types/models';
@@ -7,6 +9,7 @@ import { logger } from '../utils/logger';
 import { offsetOf, paginated, type Paginated, type Pagination } from '../utils/pagination';
 import { isPgError, PG_UNIQUE_VIOLATION } from '../utils/pg';
 import { applyBranchScope } from '../utils/scope';
+import { activeGateway } from './gateway';
 import { enqueueMessage } from './messages';
 
 /** Days from the period starting to the money being due. */
@@ -371,6 +374,28 @@ export async function recomputeInvoiceTotals(
   return updated;
 }
 
+export function payUrl(token: string): string {
+  return `${config.messaging.appBaseUrl}/pay/${token}`;
+}
+
+/**
+ * The capability in the customer's link to their bill, made the first time
+ * it is needed and kept after, so every email about one invoice carries the
+ * same link.
+ */
+export async function ensurePortalToken(invoiceId: string, db: Knex = defaultDb): Promise<string> {
+  const [row] = (await db('invoices')
+    .where({ id: invoiceId })
+    .update({
+      portal_token: db.raw('coalesce(portal_token, ?)', [randomBytes(24).toString('base64url')]),
+    })
+    .returning(['portal_token'])) as { portal_token: string }[];
+  if (!row) {
+    throw notFound('Invoice not found');
+  }
+  return row.portal_token;
+}
+
 interface InvoiceContext {
   customer_first_name: string;
   customer_email: string | null;
@@ -417,6 +442,9 @@ async function enqueueInvoiceMessage(
     return;
   }
 
+  const token = await ensurePortalToken(invoiceId, db);
+  const takesPayments = (await activeGateway(db)).takesPortalPayments;
+
   await enqueueMessage(
     {
       template_code: templateCode,
@@ -433,6 +461,8 @@ async function enqueueInvoiceMessage(
         due_date: row.due_date,
         billing_period_start: row.billing_period_start,
         billing_period_end: row.billing_period_end,
+        pay_url: payUrl(token),
+        pay_prompt: takesPayments ? 'Pay online' : 'View it online',
       },
     },
     db,

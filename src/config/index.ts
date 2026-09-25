@@ -109,6 +109,12 @@ const envSchema = z.object({
   STRIPE_API_HOST: z.string().trim().min(1).optional(),
   STRIPE_API_PORT: z.coerce.number().int().min(1).max(65535).optional(),
   STRIPE_API_PROTOCOL: z.enum(['http', 'https']).default('https'),
+  /**
+   * Square is connected from the settings screen, not here. This only points
+   * the driver at a stand-in instead of Square's own API; leave it unset
+   * anywhere real money matters.
+   */
+  SQUARE_API_BASE: z.string().trim().url().optional(),
 
   // Object storage. `local` writes to disk and is the default because it
   // needs no credentials and works offline; `s3` is the seam for a bucket.
@@ -216,6 +222,7 @@ export const config = {
       port: env.STRIPE_API_PORT ?? null,
       protocol: env.STRIPE_API_PROTOCOL,
     },
+    squareApiBase: env.SQUARE_API_BASE?.replace(/\/+$/, '') ?? null,
   },
   mail: {
     driver: env.MAIL_DRIVER,

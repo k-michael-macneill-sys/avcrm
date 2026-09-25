@@ -7,7 +7,7 @@ import { badRequest, conflict, notFound } from '../utils/errors';
 import { logger } from '../utils/logger';
 import { offsetOf, paginated, type Paginated, type Pagination } from '../utils/pagination';
 import { applyBranchScope } from '../utils/scope';
-import { gateway } from './gateway';
+import { activeGateway, envGateway, type SavedCard } from './gateway';
 import { enqueueMessage } from './messages';
 
 /**
@@ -36,6 +36,7 @@ interface ContractRow {
   phone: string | null;
   preferred_contact: string;
   stripe_customer_id: string | null;
+  square_customer_id: string | null;
   address_line1: string;
 }
 
@@ -64,6 +65,7 @@ async function contractFor(
       'customers.phone',
       'customers.preferred_contact',
       'customers.stripe_customer_id',
+      'customers.square_customer_id',
       'branches.name as branch_name',
       'properties.address_line1',
     ])) as ContractRow | undefined;
@@ -104,21 +106,24 @@ export async function requestCard(
     throw badRequest('That customer has no email or phone to send the link to');
   }
 
-  const stripeCustomerId = await gateway.ensureCustomer({
-    stripe_customer_id: contract.stripe_customer_id,
+  const gateway = await activeGateway(db);
+  const known = gateway.customerColumn ? contract[gateway.customerColumn] : null;
+  const processorCustomerId = await gateway.ensureCustomer({
+    processor_customer_id: known,
     email: contract.email,
-    name: `${contract.first_name} ${contract.last_name}`,
+    first_name: contract.first_name,
+    last_name: contract.last_name,
     customer_id: contract.customer_id,
   });
 
-  if (stripeCustomerId !== contract.stripe_customer_id) {
+  if (gateway.customerColumn && processorCustomerId !== known) {
     await db('customers')
       .where({ id: contract.customer_id })
-      .update({ stripe_customer_id: stripeCustomerId });
+      .update({ [gateway.customerColumn]: processorCustomerId });
   }
 
   const session = await gateway.createSetupSession({
-    stripe_customer_id: stripeCustomerId,
+    processor_customer_id: processorCustomerId,
     return_url: `${config.messaging.appBaseUrl}/card-complete`,
     metadata: {
       avcrm_contract_id: contract.contract_id,
@@ -176,10 +181,13 @@ export async function requestCard(
   });
 }
 
+/** Square setups finish from the customer's page, not from a session lookup. */
+export function isSquareSession(sessionId: string): boolean {
+  return sessionId.startsWith('sqs_');
+}
+
 /**
- * Records a finished capture: the card goes on the contract, and the
- * checklist item that claims there is one gets ticked in the same
- * transaction, because the contract service treats those two as one fact.
+ * Asks Stripe whether a hosted session has finished, and records it if so.
  *
  * Idempotent — the webhook and a manual refresh can both call it.
  */
@@ -187,20 +195,41 @@ export async function completeSetup(
   sessionId: string,
   db: Knex = defaultDb,
 ): Promise<CardSetup | null> {
-  const existing = await db('card_setups')
+  const existing = (await db('card_setups')
     .where({ provider_session_id: sessionId })
-    .first();
+    .first()) as CardSetup | undefined;
   if (!existing) {
     logger.warn({ sessionId }, 'Card setup finished for a session we did not start');
     return null;
   }
-  if (existing.status === 'completed') return existing;
+  if (existing.status === 'completed' || isSquareSession(sessionId)) return existing;
 
-  const result = await gateway.readSetupSession(sessionId);
+  const result = await envGateway.readSetupSession(sessionId);
   if (!result.complete || !result.payment_method) {
     return existing;
   }
 
+  return finishSetup(
+    existing,
+    envGateway.name,
+    { payment_method: result.payment_method, card: result.card },
+    db,
+  );
+}
+
+/**
+ * Records a finished capture: the card goes on the contract, and the
+ * checklist item that claims there is one gets ticked in the same
+ * transaction, because the contract service treats those two as one fact.
+ */
+export async function finishSetup(
+  existing: CardSetup,
+  provider: string,
+  result: SavedCard,
+  db: Knex = defaultDb,
+  /** Anything else recorded on the contract with the card, like a signed authorization. */
+  contractFields: Record<string, unknown> = {},
+): Promise<CardSetup> {
   return db.transaction(async (trx) => {
     const [setup] = await trx('card_setups')
       .where({ id: existing.id })
@@ -215,6 +244,8 @@ export async function completeSetup(
     if (existing.contract_id) {
       await trx('contracts').where({ id: existing.contract_id }).update({
         payment_method_token: result.payment_method,
+        payment_method_provider: provider,
+        ...contractFields,
         payment_method_last4: result.card.last4,
         payment_method_brand: result.card.brand,
       });

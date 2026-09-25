@@ -3,6 +3,7 @@ import { db as defaultDb } from '../db/client';
 import { badRequest } from '../utils/errors';
 import { decryptSecret, encryptSecret } from '../utils/secrets';
 import type { IntegrationSetting } from '../types/models';
+import { paymentProvider } from './paymentProviders';
 import { smsProvider, type ProviderField } from './smsProviders';
 
 /**
@@ -15,6 +16,17 @@ import { smsProvider, type ProviderField } from './smsProviders';
  */
 
 export const SMS_KEY = 'sms';
+export const PAYMENTS_KEY = 'payments';
+
+export type IntegrationKey = typeof SMS_KEY | typeof PAYMENTS_KEY;
+
+/** The catalogue an integration's providers come from. */
+function definitionOf(
+  key: string,
+  provider: string,
+): { label: string; fields: ProviderField[] } | null {
+  return key === PAYMENTS_KEY ? paymentProvider(provider) : smsProvider(provider);
+}
 
 /** What the API is allowed to show: configuration, never credentials. */
 export interface PublicIntegration {
@@ -30,19 +42,21 @@ export interface PublicIntegration {
   updated_at: Date | null;
 }
 
-const NOT_CONFIGURED: PublicIntegration = {
-  id: null,
-  key: SMS_KEY,
-  provider: 'none',
-  is_enabled: false,
-  settings: {},
-  secrets_set: [],
-  updated_by_user_id: null,
-  updated_at: null,
-};
+function notConfigured(key: string): PublicIntegration {
+  return {
+    id: null,
+    key,
+    provider: 'none',
+    is_enabled: false,
+    settings: {},
+    secrets_set: [],
+    updated_by_user_id: null,
+    updated_at: null,
+  };
+}
 
-function secretFields(provider: string): ProviderField[] {
-  return smsProvider(provider)?.fields.filter((f) => f.secret) ?? [];
+function secretFields(key: string, provider: string): ProviderField[] {
+  return definitionOf(key, provider)?.fields.filter((f) => f.secret) ?? [];
 }
 
 export async function readIntegration(
@@ -59,8 +73,8 @@ export async function readIntegration(
 export type SavedIntegration = PublicIntegration & { id: string };
 
 /** For the read path, where "never configured" is a normal answer. */
-export function publicView(row: IntegrationSetting | null): PublicIntegration {
-  return row ? toPublic(row) : NOT_CONFIGURED;
+export function publicView(key: string, row: IntegrationSetting | null): PublicIntegration {
+  return row ? toPublic(row) : notConfigured(key);
 }
 
 export function toPublic(row: IntegrationSetting): SavedIntegration {
@@ -73,7 +87,7 @@ export function toPublic(row: IntegrationSetting): SavedIntegration {
     is_enabled: row.is_enabled,
     settings: row.settings ?? {},
     // The names only. Their values never leave this process.
-    secrets_set: secretFields(row.provider)
+    secrets_set: secretFields(row.key, row.provider)
       .map((f) => f.name)
       .filter((name) => Boolean(stored[name])),
     updated_by_user_id: row.updated_by_user_id,
@@ -109,7 +123,7 @@ export async function saveIntegration(
   actorId: string,
   db: Knex = defaultDb,
 ): Promise<SavedIntegration> {
-  const definition = input.provider === 'none' ? null : smsProvider(input.provider);
+  const definition = input.provider === 'none' ? null : definitionOf(key, input.provider);
   if (input.provider !== 'none' && !definition) {
     throw badRequest(`Unknown provider '${input.provider}'`);
   }
@@ -127,6 +141,15 @@ export async function saveIntegration(
   }
 
   if (definition) {
+    for (const field of definition.fields) {
+      const value = input.settings[field.name];
+      if (field.options && value && !field.options.some((o) => o.value === value)) {
+        throw badRequest(
+          `${field.label} must be one of ${field.options.map((o) => o.value).join(', ')}`,
+        );
+      }
+    }
+
     const values = { ...input.settings, ...secrets };
     const missing = definition.fields
       .filter((f) => f.required && !values[f.name])

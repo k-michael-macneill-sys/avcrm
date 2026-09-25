@@ -24,6 +24,7 @@ Build order from the spec, and what exists today:
 | — | File storage: signature capture, photos, documents | **done** |
 | — | Real SMTP mail transport | **done** |
 | — | Card capture and charging through Stripe | **done** |
+| — | Square, connected from Settings; customer pay links; signed one-year autopay | **done** |
 | — | SMS provider, connected by an administrator | **done** |
 | — | Invoice and service report PDFs | **done** |
 | — | Automated test suite | **done** |
@@ -365,6 +366,16 @@ A suspension is only lifted by corporate, never by the automatic refresh.
 | POST | `/card-setups` | any | Asks the customer for a card; returns the link |
 | POST | `/card-setups/:id/refresh` | any | Asks the processor whether they finished yet |
 | POST | `/webhooks/stripe` | **public** | Signature-verified; refuses anything unsigned |
+| POST | `/webhooks/square` | **public** | Signature-verified against the saved key |
+| GET | `/invoices/:id/pay-link` | any | The customer's link to pay this invoice |
+| GET | `/portal/invoices/:token` | **public** | What the pay page shows; the token is the capability |
+| POST | `/portal/invoices/:token/pay` | **public** | Pays the balance from a Square card nonce |
+| GET | `/portal/cards/:token` | **public** | The card link, with the autopay agreement to sign |
+| POST | `/portal/cards/:token` | **public** | Signature plus card nonce; saves both or neither |
+| GET | `/settings/payments` | corporate | Current processor; credentials never returned |
+| PUT | `/settings/payments` | corporate | Connects Square, or switches it off |
+| GET | `/settings/payments/providers` | corporate | The catalogue the screen renders itself from |
+| POST | `/settings/payments/test` | corporate | Checks the token and location with Square; moves no money |
 | POST | `/uploads` | any | Asks for somewhere to put a file |
 | PUT | `/uploads/:token` | the token | Sends the bytes; no session, by design |
 | GET | `/files/*` | any | Reads one back, authorized by what it is |
@@ -966,6 +977,81 @@ Both keys are required when the gateway is `stripe` — config refuses to start
 without them rather than failing at the first charge. `STRIPE_API_HOST`,
 `STRIPE_API_PORT` and `STRIPE_API_PROTOCOL` exist only to point the SDK at the
 stand-in used by the test suite.
+
+### Square
+
+Square is connected by a corporate user at **Settings → Card payments**, not in
+`.env`, the same way an SMS provider is. Once it is switched on there it is the
+processor: new card requests, the billing job's automatic charges, and the
+customer pay link all go through it. `PAYMENT_GATEWAY` still decides what
+happens when it is off.
+
+From the Square Developer Console, open your application and copy:
+
+| Field | Where it is |
+| --- | --- |
+| Environment | Sandbox to try it with test cards, Production for real money |
+| Application ID | Credentials — public, the pay page uses it to draw Square's form |
+| Location ID | Locations — must bill in `PAYMENT_CURRENCY`, which the check verifies |
+| Access token | Credentials — encrypted at rest, never shown again |
+| Webhook signature key | Webhooks → add a subscription to `https://your-domain/webhooks/square` for `payment.updated` and `refund.updated` |
+
+Save, then press **Check connection**: it asks Square about the location with
+the saved token and confirms the currency, without moving any money.
+
+Square has no hosted "save a card" page the way Stripe Checkout does. Its
+equivalent is the Web Payments SDK — Square's own card form, drawn in an
+iframe on `public/pay.html`. The card is typed into Square's frame, and only a
+single-use nonce reaches this server, which exchanges it for a stored card or
+a payment. The no-card-data rule below holds for Square as it does for Stripe.
+
+Card tokens and customer ids are recorded per processor
+(`contracts.payment_method_provider`, `customers.square_customer_id`). A card
+saved through Stripe cannot be charged through Square: the charge is refused
+with a message saying to ask the customer again, and the billing job skips it.
+A refund goes back through the processor that took the money, not just onto
+the invoice.
+
+### The customer pay link
+
+Every invoice email carries a link, `/pay/<token>`, where the customer sees
+what they owe and pays it on Square's form — no account, one page. The random
+token is the capability, as with the review link. Staff can get the same link
+from the invoice screen to text or read out.
+
+The amount is always the balance worked out on the server, never a figure
+from the page. The invoice row stays locked while Square is asked, so a double
+tap or a second tab cannot pay twice. A decline is shown to the customer and
+nothing is booked; the office is not emailed about mistyped cards. Failed
+attempts are rate-limited per address, because a public card form is exactly
+what card testers look for.
+
+With no processor taking online payments, the link still shows the invoice and
+the email says "View it online" instead of "Pay online".
+
+Upgrading an install whose `invoice_sent` and `invoice_overdue` templates have
+never been reworded adds the link to them automatically. A reworded one is
+left alone — add `{{pay_prompt}}: {{pay_url}}` to it by hand.
+
+### Signed autopay, for one year
+
+The card link (`/pay/card/<token>`) asks the customer to sign before a card is
+saved. Above the signature box is a short agreement: it confirms their service
+contract for that address and authorizes the branch to charge the saved card
+for each invoice under it, from today until the same date next year. It is
+generated on the server, and the exact words are stored with the signature,
+the typed name, the time and the address it came from — "what exactly did I
+agree to" is the first question in a dispute. The signature image is kept in
+file storage beside the one taken at the door, and both show on the contract
+screen.
+
+No signature, no card: the two are saved together or not at all, and a card
+Square declines leaves no signature behind.
+
+After the year is up, `POST /invoices/:id/charge` refuses with the date it
+ended and the billing job stops charging that contract. The contract screen
+says so and offers to send the card link again, which renews it for another
+year. Contracts carded before this existed have no date and are unaffected.
 
 ### No CVV at the door
 

@@ -1,6 +1,6 @@
 import type { Knex } from 'knex';
 import { closeConnection, db as defaultDb } from '../db/client';
-import { gateway } from '../services/gateway';
+import { activeGateway } from '../services/gateway';
 import {
   generateInvoicesForContract,
   markOverdue,
@@ -76,12 +76,24 @@ export async function runBilling(
 
   // Take the money before deciding what is late: an invoice the card pays
   // today should never be called overdue in the same run.
+  const gateway = await activeGateway(db);
   if (gateway.canCharge) {
     const chargeable = (await db('invoices')
       .join('contracts', 'contracts.id', 'invoices.contract_id')
       .whereIn('invoices.status', ['sent', 'overdue'])
       .andWhereRaw('invoices.amount_paid < invoices.amount_due')
       .whereNotNull('contracts.payment_method_token')
+      // A card saved at another processor cannot be charged here; the
+      // contract screen says so, and the customer is asked again.
+      .andWhere((q) =>
+        q
+          .whereNull('contracts.payment_method_provider')
+          .orWhere('contracts.payment_method_provider', gateway.name),
+      )
+      // Past the signed year of autopay, the customer pays from their link.
+      .andWhere((q) =>
+        q.whereNull('contracts.autopay_expires_on').orWhere('contracts.autopay_expires_on', '>=', asOf),
+      )
       .pluck('invoices.id')) as string[];
 
     for (const invoiceId of chargeable) {

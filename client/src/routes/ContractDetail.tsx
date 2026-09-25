@@ -230,6 +230,8 @@ function CardSection({
   pending: boolean;
 }): JSX.Element {
   const open = setups.find((s) => s.status === 'sent');
+  const autopayLapsed =
+    contract.autopay_expires_on !== null && contract.autopay_expires_on < new Date().toISOString().slice(0, 10);
 
   return (
     <Section title="Card on file" className="mb-4">
@@ -238,16 +240,43 @@ function CardSection({
           <Field label="Saved card">
             {contract.payment_method_brand ?? 'card'} ••••{contract.payment_method_last4}
           </Field>
-          <Field label="Billing">Charged automatically when an invoice is sent.</Field>
+          <Field label="Billing">
+            {autopayLapsed
+              ? `Autopay ended ${date(contract.autopay_expires_on)} — ask for the card again to renew it.`
+              : 'Charged automatically when an invoice is sent.'}
+          </Field>
+          {contract.autopay_signed_at ? (
+            <>
+              <Field label="Autopay signed">
+                {contract.autopay_signer_name}, {stamp(contract.autopay_signed_at)}
+              </Field>
+              <Field label="Autopay until">{date(contract.autopay_expires_on)}</Field>
+            </>
+          ) : null}
         </FieldList>
       ) : (
         <p className="text-sm text-muted-foreground">
-          No card yet. Sending a request emails or texts the customer a link to the processor's own
-          page — they type the card themselves, so nobody here has to ask for a number or a CVV.
+          No card yet. Sending a request emails or texts the customer a link where they sign the
+          autopay agreement and type their card into the processor's own form — nobody here has to
+          ask for a number or a CVV.
         </p>
       )}
 
-      {isActive && !contract.payment_method_last4 ? (
+      {contract.autopay_signed_at && contract.autopay_signature_url ? (
+        <div className="mt-4">
+          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Autopay agreement
+          </p>
+          <p className="mb-2 max-w-[70ch] text-xs text-muted-foreground">{contract.autopay_terms}</p>
+          <FileImage
+            fileKey={contract.autopay_signature_url}
+            alt="The customer's autopay signature"
+            className="block w-full max-w-[340px] rounded-md border border-border bg-white p-1.5"
+          />
+        </div>
+      ) : null}
+
+      {isActive && (!contract.payment_method_last4 || autopayLapsed) ? (
         <div className="mt-3">
           <Button
             type="button"

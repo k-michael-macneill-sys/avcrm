@@ -1,7 +1,11 @@
+import type { Knex } from 'knex';
 import Stripe from 'stripe';
 import { config } from '../config';
+import { db as defaultDb } from '../db/client';
 import { badRequest, conflict } from '../utils/errors';
 import { logger } from '../utils/logger';
+import { PAYMENTS_KEY, readIntegration, resolveValues } from './integrations';
+import { SquareGateway } from './squareGateway';
 
 /**
  * Taking money.
@@ -11,8 +15,12 @@ import { logger } from '../utils/logger';
  * honest default for an install with no credentials: it records what someone
  * says happened and refuses to pretend it charged anything.
  *
- * Card data never reaches this server under either driver. The customer
- * enters their card on Stripe's own page; we keep a payment method id.
+ * Card data never reaches this server under any driver. The customer enters
+ * their card on the processor's own page or form; we keep a payment method id.
+ *
+ * Stripe comes from the environment. Square is connected from the settings
+ * screen, and once it is switched on there it is the gateway — see
+ * activeGateway() at the bottom.
  */
 
 export interface CardDetails {
@@ -33,8 +41,13 @@ export interface CompletedSetup {
   card: CardDetails;
 }
 
+export interface SavedCard {
+  payment_method: string;
+  card: CardDetails;
+}
+
 export interface ChargeRequest {
-  stripe_customer_id: string;
+  processor_customer_id: string;
   payment_method: string;
   /** Minor units, because that is what a processor speaks. */
   amount_minor: number;
@@ -51,6 +64,32 @@ export interface ChargeResult {
   card: CardDetails;
 }
 
+/**
+ * A one-off payment from a token the processor's own card form produced in
+ * the customer's browser. The card number went from their keyboard to the
+ * processor; what reaches us is a single-use nonce.
+ */
+export interface SourceChargeRequest {
+  source_id: string;
+  verification_token: string | null;
+  processor_customer_id: string | null;
+  amount_minor: number;
+  description: string;
+  idempotency_key: string;
+  /** Our invoice id, so the payment can be found from the processor's side. */
+  reference_id: string;
+}
+
+/** What the customer's browser needs to draw the processor's card form. */
+export interface PortalConfig {
+  provider: string;
+  application_id: string;
+  location_id: string;
+  sdk_url: string;
+}
+
+export type CustomerColumn = 'stripe_customer_id' | 'square_customer_id';
+
 export interface GatewayEvent {
   id: string;
   type: string;
@@ -61,24 +100,40 @@ export interface PaymentGateway {
   readonly name: string;
   /** True when this driver can actually move money. */
   readonly canCharge: boolean;
+  /** True when a customer can pay an invoice from the link they are sent. */
+  readonly takesPortalPayments: boolean;
+  /** Where this processor's customer id is kept on our customers row. */
+  readonly customerColumn: CustomerColumn | null;
 
-  ensureCustomer(input: {
-    stripe_customer_id: string | null;
-    email: string | null;
-    name: string;
-    customer_id: string;
-  }): Promise<string>;
+  ensureCustomer(input: CustomerIdentity): Promise<string>;
 
   createSetupSession(input: {
-    stripe_customer_id: string;
+    processor_customer_id: string;
     return_url: string;
     metadata: Record<string, string>;
   }): Promise<SetupSession>;
 
   readSetupSession(sessionId: string): Promise<CompletedSetup>;
+  /** Stores a card from a nonce the processor's form produced. */
+  saveCard(input: {
+    processor_customer_id: string;
+    source_id: string;
+    verification_token: string | null;
+    idempotency_key: string;
+  }): Promise<SavedCard>;
   charge(request: ChargeRequest): Promise<ChargeResult>;
+  chargeSource(request: SourceChargeRequest): Promise<ChargeResult>;
+  portalConfig(): PortalConfig | null;
   refund(transactionId: string, amountMinor: number): Promise<string>;
   verifyWebhook(payload: Buffer, signature: string | undefined): GatewayEvent;
+}
+
+export interface CustomerIdentity {
+  processor_customer_id: string | null;
+  email: string | null;
+  first_name: string;
+  last_name: string;
+  customer_id: string;
 }
 
 /** Money is numeric(10,2) here and an integer of cents at the processor. */
@@ -91,7 +146,7 @@ export function fromMinorUnits(minor: number): string {
 }
 
 const NOT_CONFIGURED =
-  'No payment gateway is configured. Set PAYMENT_GATEWAY=stripe with its keys, or record the payment by hand.';
+  'No payment processor is connected. Connect Square under Settings, or record the payment by hand.';
 
 /**
  * What an install without credentials does: nothing, loudly. Payments can
@@ -101,6 +156,8 @@ const NOT_CONFIGURED =
 class ManualGateway implements PaymentGateway {
   readonly name = 'manual';
   readonly canCharge = false;
+  readonly takesPortalPayments = false;
+  readonly customerColumn = null;
 
   async ensureCustomer(): Promise<string> {
     throw badRequest(NOT_CONFIGURED);
@@ -111,8 +168,17 @@ class ManualGateway implements PaymentGateway {
   async readSetupSession(): Promise<CompletedSetup> {
     throw badRequest(NOT_CONFIGURED);
   }
+  async saveCard(): Promise<SavedCard> {
+    throw badRequest(NOT_CONFIGURED);
+  }
   async charge(): Promise<ChargeResult> {
     throw badRequest(NOT_CONFIGURED);
+  }
+  async chargeSource(): Promise<ChargeResult> {
+    throw badRequest(NOT_CONFIGURED);
+  }
+  portalConfig(): PortalConfig | null {
+    return null;
   }
   async refund(): Promise<string> {
     throw badRequest(NOT_CONFIGURED);
@@ -125,6 +191,10 @@ class ManualGateway implements PaymentGateway {
 class StripeGateway implements PaymentGateway {
   readonly name = 'stripe';
   readonly canCharge = true;
+  // Stripe customers pay through its own hosted pages; the in-page card form
+  // the payment link uses is Square's.
+  readonly takesPortalPayments = false;
+  readonly customerColumn = 'stripe_customer_id' as const;
   private readonly stripe: Stripe;
 
   constructor() {
@@ -141,17 +211,12 @@ class StripeGateway implements PaymentGateway {
     });
   }
 
-  async ensureCustomer(input: {
-    stripe_customer_id: string | null;
-    email: string | null;
-    name: string;
-    customer_id: string;
-  }): Promise<string> {
-    if (input.stripe_customer_id) return input.stripe_customer_id;
+  async ensureCustomer(input: CustomerIdentity): Promise<string> {
+    if (input.processor_customer_id) return input.processor_customer_id;
 
     const created = await this.stripe.customers.create(
       {
-        name: input.name,
+        name: `${input.first_name} ${input.last_name}`,
         ...(input.email ? { email: input.email } : {}),
         metadata: { avcrm_customer_id: input.customer_id },
       },
@@ -169,13 +234,13 @@ class StripeGateway implements PaymentGateway {
    * client, or the rep standing at the door.
    */
   async createSetupSession(input: {
-    stripe_customer_id: string;
+    processor_customer_id: string;
     return_url: string;
     metadata: Record<string, string>;
   }): Promise<SetupSession> {
     const session = await this.stripe.checkout.sessions.create({
       mode: 'setup',
-      customer: input.stripe_customer_id,
+      customer: input.processor_customer_id,
       success_url: input.return_url,
       cancel_url: input.return_url,
       metadata: input.metadata,
@@ -240,7 +305,7 @@ class StripeGateway implements PaymentGateway {
         {
           amount: request.amount_minor,
           currency: config.payments.currency,
-          customer: request.stripe_customer_id,
+          customer: request.processor_customer_id,
           payment_method: request.payment_method,
           description: request.description,
           metadata: request.metadata,
@@ -291,6 +356,18 @@ class StripeGateway implements PaymentGateway {
     };
   }
 
+  async saveCard(): Promise<SavedCard> {
+    throw badRequest('Stripe saves cards on its own hosted page, not from a card form here');
+  }
+
+  async chargeSource(): Promise<ChargeResult> {
+    throw badRequest('Paying from the invoice link needs Square connected under Settings');
+  }
+
+  portalConfig(): PortalConfig | null {
+    return null;
+  }
+
   async refund(transactionId: string, amountMinor: number): Promise<string> {
     const refund = await this.stripe.refunds.create(
       { payment_intent: transactionId, amount: amountMinor },
@@ -328,5 +405,43 @@ class StripeGateway implements PaymentGateway {
   }
 }
 
-export const gateway: PaymentGateway =
+/**
+ * The processor configured in the environment: Stripe, or nothing. Stripe's
+ * webhook route always answers to this one, whatever the settings say, so a
+ * payment taken through Stripe still reconciles after switching to Square.
+ */
+export const envGateway: PaymentGateway =
   config.payments.gateway === 'stripe' ? new StripeGateway() : new ManualGateway();
+
+/**
+ * Square from the settings screen, whether or not it is switched on. Its
+ * webhooks and refunds keep working after it is switched off, because money
+ * already taken through it still has to be reconciled.
+ */
+export async function squareGateway(db: Knex = defaultDb): Promise<SquareGateway | null> {
+  const row = await readIntegration(PAYMENTS_KEY, db);
+  if (!row || row.provider !== 'square') return null;
+  return new SquareGateway(resolveValues(row));
+}
+
+/**
+ * The processor that takes new money right now. Read from the table on every
+ * call rather than cached, for the same reason the SMS settings are: an admin
+ * who switches Square on expects the next charge to go through it.
+ */
+export async function activeGateway(db: Knex = defaultDb): Promise<PaymentGateway> {
+  const row = await readIntegration(PAYMENTS_KEY, db);
+  if (row?.is_enabled && row.provider === 'square') {
+    return new SquareGateway(resolveValues(row));
+  }
+  return envGateway;
+}
+
+/** The processor a past charge went through, for refunding it. */
+export async function gatewayNamed(
+  name: string,
+  db: Knex = defaultDb,
+): Promise<PaymentGateway | null> {
+  if (name === 'square') return squareGateway(db);
+  return envGateway.name === name ? envGateway : null;
+}
