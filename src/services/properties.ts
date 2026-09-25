@@ -231,22 +231,6 @@ export async function updateProperty(
   }
 }
 
-export async function deleteProperty(
-  id: string,
-  scope: BranchScope,
-  db: Knex = defaultDb,
-): Promise<void> {
-  await getProperty(id, scope, db);
-  try {
-    await db('properties').where({ id }).delete();
-  } catch (err) {
-    // contracts.property_id is RESTRICT: a signed address stays on the books.
-    if (isPgError(err, PG_FK_VIOLATION)) {
-      throw conflict('That address has a contract on it, so it cannot be deleted');
-    }
-    throw err;
-  }
-}
 
 function normalize<T extends Partial<PropertyInput>>(input: T): Record<string, unknown> {
   const out: Record<string, unknown> = {};

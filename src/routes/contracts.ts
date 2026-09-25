@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { resolveDeleter } from '../middleware/auth';
+import { deleteContract } from '../services/deletion';
 import { z } from 'zod';
 import {
   requireAuth,
@@ -198,5 +200,15 @@ checklistRequirementsRouter.get(
   '/',
   asyncHandler(async (_req, res) => {
     res.json({ data: await listChecklistRequirements() });
+  }),
+);
+
+/** Deletes it and everything beneath it; corporate only. See services/deletion.ts. */
+contractsRouter.delete(
+  '/:id',
+  asyncHandler(async (req, res) => {
+    const { id } = parse(idParamSchema, req.params);
+    await deleteContract(id, resolveBranchScope(req, req.query.branch_id as string | undefined), resolveDeleter(req));
+    res.status(204).send();
   }),
 );

@@ -1,8 +1,9 @@
 import * as React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Crosshair, Trash2, X } from 'lucide-react';
+import { Crosshair, X } from 'lucide-react';
 import type { Branch, LeadPin, PinStatus } from '../../../src/types/models';
 import { useAuth } from '@/auth/AuthContext';
+import { ConfirmDelete } from '@/components/ConfirmDelete';
 import { ErrorNotice, Loading } from '@/components/Misc';
 import { PageHeader } from '@/components/PageHeader';
 import { Button } from '@/components/ui/button';
@@ -622,21 +623,12 @@ function ExistingPin({
               Save notes
             </Button>
             {canDelete ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="text-critical"
-                disabled={pending}
-                onClick={() =>
-                  run(async () => {
-                    await api.del(`/leads/pins/${pin.id}`);
-                    onDone();
-                  })
-                }
-              >
-                <Trash2 className="size-3.5" /> Remove pin
-              </Button>
+              <ConfirmDelete
+                what={pin.address_line1 ? `the pin at ${pin.address_line1}` : 'this pin'}
+                label="Remove pin"
+                onConfirm={() => api.del(`/leads/pins/${pin.id}`)}
+                onDeleted={onDone}
+              />
             ) : null}
           </div>
         </>

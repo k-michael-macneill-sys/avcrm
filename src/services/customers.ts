@@ -134,28 +134,6 @@ export async function updateCustomer(
   }
 }
 
-export async function deleteCustomer(
-  id: string,
-  scope: BranchScope,
-  db: Knex = defaultDb,
-): Promise<void> {
-  let deleted: number;
-  try {
-    deleted = await applyBranchScope(db('customers'), 'branch_id', scope)
-      .andWhere({ id })
-      .delete();
-  } catch (err) {
-    // Properties cascade, but contracts on them are RESTRICT: a customer who
-    // has signed cannot be deleted out from under the paperwork.
-    if (isPgError(err, PG_FK_VIOLATION)) {
-      throw conflict('That customer has a signed contract, so they cannot be deleted');
-    }
-    throw err;
-  }
-  if (deleted === 0) {
-    throw notFound('Customer not found');
-  }
-}
 
 /** Trims strings and turns empty strings into NULLs, leaving absent keys absent. */
 function normalize<T extends Partial<CustomerInput>>(input: T): T {

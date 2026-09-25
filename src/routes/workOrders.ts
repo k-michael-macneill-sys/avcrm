@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { resolveDeleter } from '../middleware/auth';
+import { deleteWorkOrder } from '../services/deletion';
 import { z } from 'zod';
 import {
   requireAuth,
@@ -201,5 +203,15 @@ workOrdersRouter.get(
 
     const document = await serviceReportPdf(id, scope, req.user);
     sendPdf(res, document);
+  }),
+);
+
+/** Deletes it and everything beneath it; corporate only. See services/deletion.ts. */
+workOrdersRouter.delete(
+  '/:id',
+  asyncHandler(async (req, res) => {
+    const { id } = parse(idParamSchema, req.params);
+    await deleteWorkOrder(id, resolveBranchScope(req, req.query.branch_id as string | undefined), resolveDeleter(req));
+    res.status(204).send();
   }),
 );

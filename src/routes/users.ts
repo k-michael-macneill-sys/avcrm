@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { resolveDeleter } from '../middleware/auth';
+import { deleteUser } from '../services/deletion';
 import { z } from 'zod';
 import { db } from '../db/client';
 import { requireAuth, requireCorporate, resolveBranchScope } from '../middleware/auth';
@@ -107,5 +109,15 @@ usersRouter.patch(
       .returning([...PUBLIC_USER_COLUMNS]);
 
     res.json({ data: user });
+  }),
+);
+
+/** Deletes it and everything beneath it; corporate only. See services/deletion.ts. */
+usersRouter.delete(
+  '/:id',
+  asyncHandler(async (req, res) => {
+    const { id } = parse(idParamSchema, req.params);
+    await deleteUser(id, resolveDeleter(req));
+    res.status(204).send();
   }),
 );

@@ -1,6 +1,8 @@
 import * as React from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { Property, ServicePhoto, WorkOrder } from '../../../src/types/models';
+import { useAuth } from '@/auth/AuthContext';
+import { ConfirmDelete } from '@/components/ConfirmDelete';
 import { PageHeader } from '@/components/PageHeader';
 import { Section } from '@/components/Section';
 import { DataTable } from '@/components/DataTable';
@@ -39,6 +41,8 @@ const ACTION_LABEL: Record<string, string> = {
 
 export function WorkOrderDetail(): JSX.Element {
   const { id = '' } = useParams();
+  const { isCorporate } = useAuth();
+  const navigate = useNavigate();
   const [skipReason, setSkipReason] = React.useState('');
 
   const { data, loading, error, reload } = useQuery(async () => {
@@ -64,6 +68,16 @@ export function WorkOrderDetail(): JSX.Element {
       <PageHeader
         title={`${visit.service_type.replace(/_/g, ' ')} at ${property.address_line1}`}
         subtitle={`${property.city}, ${property.province} — ${relative(visit.scheduled_for)}`}
+        actions={
+          isCorporate ? (
+            <ConfirmDelete
+              what="this visit"
+              consequences="Its photos and any review request sent after it are deleted too."
+              onConfirm={() => api.del(`/work-orders/${visit.id}`)}
+              onDeleted={() => navigate('/work-orders')}
+            />
+          ) : undefined
+        }
       />
 
       <Section title="Visit" className="mb-4">

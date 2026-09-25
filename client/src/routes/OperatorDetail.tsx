@@ -1,6 +1,7 @@
 import * as React from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import type { OperatorDocument, PublicUser } from '../../../src/types/models';
+import { ConfirmDelete } from '@/components/ConfirmDelete';
 import { PageHeader } from '@/components/PageHeader';
 import { Section } from '@/components/Section';
 import { DataTable } from '@/components/DataTable';
@@ -36,7 +37,8 @@ interface Compliance {
 
 export function OperatorDetail(): JSX.Element {
   const { id = '' } = useParams();
-  const { isCorporate } = useAuth();
+  const { isCorporate, user } = useAuth();
+  const navigate = useNavigate();
   const [fileError, setFileError] = React.useState('');
 
   const { data, loading, error, reload } = useQuery(
@@ -60,7 +62,20 @@ export function OperatorDetail(): JSX.Element {
 
   return (
     <>
-      <PageHeader title={operator ? `${operator.first_name} ${operator.last_name}` : 'Operator'} subtitle={operator?.email} />
+      <PageHeader
+        title={operator ? `${operator.first_name} ${operator.last_name}` : 'Operator'}
+        subtitle={operator?.email}
+        actions={
+          isCorporate && operator && operator.id !== user?.id ? (
+            <ConfirmDelete
+              what={`${operator.first_name} ${operator.last_name}'s account`}
+              consequences="They can no longer sign in, and their documents are deleted. Visits assigned to them go back to unassigned."
+              onConfirm={() => api.del(`/users/${operator.id}`)}
+              onDeleted={() => navigate('/operators')}
+            />
+          ) : undefined
+        }
+      />
 
       <Section title="Compliance" className="mb-4">
         <FieldList>

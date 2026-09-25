@@ -197,3 +197,8 @@ export function resolveWriteBranch(
   }
   throw badRequest('branch_id is required: corporate users must name the branch');
 }
+
+/** Who is deleting, and whether they may take paperwork down with it. */
+export function resolveDeleter(req: Request): { actor: AuditActor; isCorporate: boolean } {
+  return { actor: resolveActor(req), isCorporate: req.user?.role === 'corporate' };
+}

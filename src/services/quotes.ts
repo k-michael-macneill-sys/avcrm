@@ -236,19 +236,6 @@ export async function changeQuoteStatus(
   });
 }
 
-/** Only an unsent draft can be thrown away; anything presented is history. */
-export async function deleteQuote(
-  id: string,
-  scope: BranchScope,
-  db: Knex = defaultDb,
-): Promise<void> {
-  const quote = await getQuote(id, scope, db);
-  if (quote.status !== 'draft') {
-    throw conflict(`Only a draft quote can be deleted (this one is ${quote.status})`);
-  }
-  await db('quotes').where({ id }).delete();
-}
-
 /**
  * Reads a quote inside a transaction and holds it until commit, so two reps
  * cannot move the same quote at once. `of quotes` keeps the lock off the

@@ -1,5 +1,6 @@
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { Contract, Customer, Property, Quote } from '../../../src/types/models';
+import { ConfirmDelete } from '@/components/ConfirmDelete';
 import { PageHeader } from '@/components/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Section } from '@/components/Section';
@@ -14,6 +15,7 @@ import { date, money, stamp } from '@/lib/format';
 
 export function CustomerDetail(): JSX.Element {
   const { id = '' } = useParams();
+  const navigate = useNavigate();
   const { data, loading, error, reload } = useQuery(
     () =>
       Promise.all([
@@ -39,11 +41,23 @@ export function CustomerDetail(): JSX.Element {
         title={`${customer.first_name} ${customer.last_name}`}
         subtitle={customer.email ?? customer.phone ?? 'No contact on file'}
         actions={
-          customer.status === 'lead' ? (
-            <Button asChild>
-              <Link to={`/customers/new?lead=${customer.id}`}>Sign up</Link>
-            </Button>
-          ) : undefined
+          <>
+            {customer.status === 'lead' ? (
+              <Button asChild>
+                <Link to={`/customers/new?lead=${customer.id}`}>Sign up</Link>
+              </Button>
+            ) : null}
+            <ConfirmDelete
+              what={`${customer.first_name} ${customer.last_name}`}
+              consequences={
+                contracts.data.length
+                  ? 'Their addresses, quotes, contracts, invoices, payments and visits are deleted with them.'
+                  : 'Their addresses and quotes are deleted with them.'
+              }
+              onConfirm={() => api.del(`/customers/${customer.id}`)}
+              onDeleted={() => navigate('/customers')}
+            />
+          </>
         }
       />
 
@@ -84,6 +98,17 @@ export function CustomerDetail(): JSX.Element {
             {
               header: 'Priority',
               cell: (row) => (row.priority_flag ? <StatusPill status="priority" /> : '—'),
+            },
+            {
+              header: '',
+              cell: (row) => (
+                <ConfirmDelete
+                  what={row.address_line1}
+                  consequences="Its quotes, and any contract, invoices, payments and visits at this address, are deleted with it."
+                  onConfirm={() => api.del(`/properties/${row.id}`)}
+                  onDeleted={reload}
+                />
+              ),
             },
           ]}
         />

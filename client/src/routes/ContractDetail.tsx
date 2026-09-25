@@ -1,4 +1,4 @@
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import type {
   CardSetup,
   ChecklistRequirement,
@@ -9,6 +9,7 @@ import type {
   Property,
   WorkOrder,
 } from '../../../src/types/models';
+import { ConfirmDelete } from '@/components/ConfirmDelete';
 import { PageHeader } from '@/components/PageHeader';
 import { Section } from '@/components/Section';
 import { DataTable } from '@/components/DataTable';
@@ -31,6 +32,7 @@ const EMPTY_PAGE = { data: [] as Invoice[], meta: { page: 1, page_size: 0, total
 export function ContractDetail(): JSX.Element {
   const { id = '' } = useParams();
   const { isCorporate } = useAuth();
+  const navigate = useNavigate();
 
   const { data, loading, error, reload } = useQuery(async () => {
     const contract = await api.get<ContractDetailModel>(`/contracts/${id}`);
@@ -61,6 +63,16 @@ export function ContractDetail(): JSX.Element {
       <PageHeader
         title={property.address_line1}
         subtitle={`${customer.first_name} ${customer.last_name} — signed ${stamp(contract.signed_at)}`}
+        actions={
+          isCorporate ? (
+            <ConfirmDelete
+              what="this contract"
+              consequences="Its invoices, payments, card on file and visits are deleted with it. The customer and their quote stay, so the quote can be signed again."
+              onConfirm={() => api.del(`/contracts/${contract.id}`)}
+              onDeleted={() => navigate(`/customers/${customer.id}`)}
+            />
+          ) : undefined
+        }
       />
 
       <Section title="Contract" className="mb-4">

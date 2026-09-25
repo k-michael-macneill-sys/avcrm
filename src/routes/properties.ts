@@ -1,13 +1,14 @@
 import { Router } from 'express';
+import { deleteProperty } from '../services/deletion';
 import { z } from 'zod';
 import {
   requireAuth,
   resolveBranchScope,
   sellersWrite,
+  resolveDeleter,
 } from '../middleware/auth';
 import {
   createProperty,
-  deleteProperty,
   findDuplicateAddress,
   getProperty,
   listProperties,
@@ -152,7 +153,7 @@ propertiesRouter.delete(
   asyncHandler(async (req, res) => {
     const { id } = parse(idParamSchema, req.params);
     const scope = resolveBranchScope(req, req.query.branch_id as string | undefined);
-    await deleteProperty(id, scope);
+    await deleteProperty(id, scope, resolveDeleter(req));
     res.status(204).send();
   }),
 );
