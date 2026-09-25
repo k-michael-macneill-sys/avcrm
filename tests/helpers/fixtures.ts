@@ -147,16 +147,6 @@ export async function buildWorld(): Promise<World> {
  * edited every time a message is added stops being run.
  */
 async function seedConfig(kingston: string, halifax: string): Promise<void> {
-  await db('checklist_requirements').insert([
-    { code: 'card_on_file', label: 'Card on file', is_required: false, sort_order: 1 },
-    { code: 'terms_reviewed', label: 'Terms reviewed', is_required: true, sort_order: 2 },
-    {
-      code: 'service_window_explained',
-      label: 'Service window explained',
-      is_required: true,
-      sort_order: 3,
-    },
-  ]);
 
   await db('document_requirements').insert([
     {

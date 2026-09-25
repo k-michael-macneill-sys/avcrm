@@ -105,39 +105,7 @@ export const DOCUMENT_REQUIREMENTS: DocumentRequirementRow[] = [
     },
 ];
 
-export const CHECKLIST_REQUIREMENTS: ChecklistRequirementRow[] = [
-    { code: 'card_on_file', label: 'Card on file', is_required: false, sort_order: 1 },
-    {
-      code: 'terms_reviewed',
-      label: 'Terms and conditions reviewed',
-      is_required: true,
-      sort_order: 2,
-    },
-    {
-      code: 'service_window_explained',
-      label: 'Service window explained',
-      is_required: true,
-      sort_order: 3,
-    },
-    {
-      code: 'access_notes_captured',
-      label: 'Access notes captured',
-      is_required: false,
-      sort_order: 4,
-    },
-    {
-      code: 'photos_taken',
-      label: 'Property photos taken',
-      is_required: false,
-      sort_order: 5,
-    },
-    {
-      code: 'contact_confirmed',
-      label: 'Contact details confirmed',
-      is_required: true,
-      sort_order: 6,
-    },
-];
+export const CHECKLIST_REQUIREMENTS: ChecklistRequirementRow[] = [];
 
 /**
  * The global set. A row carrying a branch_id overrides the global row for the

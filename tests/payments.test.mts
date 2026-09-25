@@ -116,11 +116,6 @@ describe('cards, charges and the webhooks that reconcile them', () => {
       // A processor token, never a card number.
       assert.match(stored?.payment_method_token ?? '', /^pm_/);
       assert.equal(stored?.payment_method_last4, '4242');
-
-      const box = await db('contract_checklist_items')
-        .where({ contract_id: contract.contract_id, item_code: 'card_on_file' })
-        .first();
-      assert.equal(box?.checked, true, 'the checklist and the token move together');
     });
 
     it('is idempotent, because the webhook and a rep can both ask', async () => {

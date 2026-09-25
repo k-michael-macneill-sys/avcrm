@@ -354,11 +354,6 @@ describe('Square', () => {
       expires.setUTCFullYear(expires.getUTCFullYear() + 1);
       assert.equal(stored?.autopay_expires_on, expires.toISOString().slice(0, 10));
 
-      const box = await db('contract_checklist_items')
-        .where({ contract_id: contract.contract_id, item_code: 'card_on_file' })
-        .first();
-      assert.equal(box?.checked, true);
-
       // Staff can open the signature, as they can the one taken at the door.
       const file = await fetch(`${server.url}/files/${stored?.autopay_signature_url}`, {
         headers: { Authorization: `Bearer ${corporate}` },

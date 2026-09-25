@@ -17,10 +17,7 @@ describe('signing a contract at the door', () => {
     terms_version: 'v1',
     signed_lat: 44.2305,
     signed_lng: -76.4944,
-    checklist: [
-      { item_code: 'terms_reviewed', checked: true },
-      { item_code: 'service_window_explained', checked: true },
-    ],
+    checklist: [],
   });
 
   async function sellable() {
@@ -31,22 +28,6 @@ describe('signing a contract at the door', () => {
     return { ...made, quote, token };
   }
 
-  it('refuses to sign until every required box is ticked, naming them', async () => {
-    const { quote, token } = await sellable();
-
-    const reply = await call(h.server(), 'POST', '/contracts', {
-      token,
-      body: {
-        ...goodSignature(quote),
-        checklist: [{ item_code: 'terms_reviewed', checked: true }],
-      },
-    });
-
-    assert.equal(reply.status, 400);
-    // Naming the box matters: "invalid request" leaves a rep on a doorstep
-    // with no idea what to press.
-    assert.match(JSON.stringify(reply.body), /service_window_explained/);
-  });
 
   it('signs when they are, and records where it happened', async () => {
     const { quote, token } = await sellable();
@@ -82,11 +63,6 @@ describe('signing a contract at the door', () => {
         payment_method_token: 'pm_a_processor_token',
         payment_method_last4: '4242',
         payment_method_brand: 'visa',
-        checklist: [
-          { item_code: 'terms_reviewed', checked: true },
-          { item_code: 'service_window_explained', checked: true },
-          { item_code: 'card_on_file', checked: true },
-        ],
       },
     });
 
@@ -115,23 +91,6 @@ describe('signing a contract at the door', () => {
     }
   });
 
-  it('keeps the card box and the stored token telling the same story', async () => {
-    const { quote, token } = await sellable();
-    const created = await call(h.server(), 'POST', '/contracts', {
-      token,
-      body: goodSignature(quote),
-    });
-
-    // No token was given, so the box cannot be ticked by hand.
-    const reply = await call(
-      h.server(),
-      'PATCH',
-      `/contracts/${created.body.data.id}/checklist/card_on_file`,
-      { token, body: { checked: true } },
-    );
-    assert.equal(reply.status, 400);
-    assert.match(reply.body.error.message.toLowerCase(), /card/);
-  });
 
   it('allows only one active contract per property', async () => {
     const { property_id, quote, token } = await sellable();
@@ -159,11 +118,6 @@ describe('signing a contract at the door', () => {
         payment_method_token: 'pm_secret_token',
         payment_method_last4: '4242',
         payment_method_brand: 'visa',
-        checklist: [
-          { item_code: 'terms_reviewed', checked: true },
-          { item_code: 'service_window_explained', checked: true },
-          { item_code: 'card_on_file', checked: true },
-        ],
       },
     });
 
