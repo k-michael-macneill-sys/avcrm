@@ -50,6 +50,13 @@ const PUBLIC_CONTRACT_COLUMNS = [
   'contracts.terms_version',
   'contracts.payment_method_last4',
   'contracts.payment_method_brand',
+  'contracts.payment_method_provider',
+  'contracts.autopay_signature_url',
+  'contracts.autopay_signer_name',
+  'contracts.autopay_terms',
+  'contracts.autopay_signed_at',
+  'contracts.autopay_signed_ip',
+  'contracts.autopay_expires_on',
   'contracts.pdf_url',
   'contracts.status',
   'contracts.created_at',
@@ -212,14 +219,16 @@ export async function createContract(
     }
     const contract = inserted;
 
-    await trx('contract_checklist_items').insert(
-      requirements.map((requirement) => ({
-        contract_id: contract.id,
-        item_code: requirement.code,
-        checked: checked.get(requirement.code) === true,
-        checked_at: checked.get(requirement.code) === true ? signedAt : null,
-      })),
-    );
+    if (requirements.length > 0) {
+      await trx('contract_checklist_items').insert(
+        requirements.map((requirement) => ({
+          contract_id: contract.id,
+          item_code: requirement.code,
+          checked: checked.get(requirement.code) === true,
+          checked_at: checked.get(requirement.code) === true ? signedAt : null,
+        })),
+      );
+    }
 
     // Somebody with a signed contract is not a lead any more. Only ever
     // forwards: a churned customer who signs again is a separate question,

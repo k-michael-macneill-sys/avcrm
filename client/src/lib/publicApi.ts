@@ -32,7 +32,7 @@ export const publicPost = <T>(path: string, body: unknown): Promise<T> =>
   request<T>('POST', path, body);
 
 export interface PublicConfig {
-  /** Whether a card can be taken at all — false until Stripe is connected. */
+  /** Whether a card can be taken at all — false until Square is connected. */
   card_capture: boolean;
   maps_api_key: string | null;
 }

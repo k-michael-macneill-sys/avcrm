@@ -22,12 +22,19 @@ export NODE_ENV=test
 export LOG_LEVEL="${TEST_LOG_LEVEL:-silent}"
 export JWT_SECRET='test-secret-that-is-long-enough-for-the-schema'
 export MAIL_DRIVER=log
-export PAYMENT_GATEWAY=manual
 export GOOGLE_REVIEW_URL='https://example.test/review'
 export BRANCH_PASSWORD='test-owner-password'
 export APP_BASE_URL='http://127.0.0.1:3000'
 export STORAGE_LOCAL_DIR="${STORAGE_LOCAL_DIR:-./storage-test}"
-unset SMS_API_BASE SMS_REDIRECT_TO MAIL_REDIRECT_TO STRIPE_SECRET_KEY || true
+# Square now reads its credentials from the environment as well as Settings,
+# so a developer's own .env can carry a real access token — cleared here so
+# every suite is `manual` unless it deliberately sets its own SQUARE_* vars
+# pointed at a stand-in (payments.test.mts, square.test.mts) before it
+# imports the configuration. Without this a plain test run could reach the
+# real Square API with a real credential.
+unset SMS_API_BASE SMS_REDIRECT_TO MAIL_REDIRECT_TO \
+  SQUARE_ACCESS_TOKEN SQUARE_APPLICATION_ID SQUARE_LOCATION_ID \
+  SQUARE_WEBHOOK_SIGNATURE_KEY SQUARE_API_BASE SQUARE_ENVIRONMENT || true
 
 psql "$ADMIN_URL" -tAc "select 1 from pg_database where datname = '$TEST_DB'" \
   | grep -q 1 || psql "$ADMIN_URL" -qc "create database \"$TEST_DB\""

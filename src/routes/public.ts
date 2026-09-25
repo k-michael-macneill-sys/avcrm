@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { config } from '../config';
 import { requestCard } from '../services/cards';
-import { gateway } from '../services/gateway';
+import { activeGateway } from '../services/gateway';
 import { completeInvitation, openInvitation } from '../services/signing';
 import { asyncHandler } from '../utils/async';
 import { logger } from '../utils/logger';
@@ -17,14 +17,18 @@ import { parse } from '../utils/validate';
 export const publicRouter = Router();
 
 /** Nothing here may be secret: it is served to anyone who asks. */
-publicRouter.get('/config', (_req, res) => {
-  res.json({
-    data: {
-      card_capture: gateway.name === 'stripe',
-      maps_api_key: config.maps.googleApiKey,
-    },
-  });
-});
+publicRouter.get(
+  '/config',
+  asyncHandler(async (_req, res) => {
+    const gateway = await activeGateway();
+    res.json({
+      data: {
+        card_capture: gateway.canCharge,
+        maps_api_key: config.maps.googleApiKey,
+      },
+    });
+  }),
+);
 
 const tokenParamSchema = z.object({ token: z.string().min(10).max(2000) });
 
@@ -57,7 +61,8 @@ publicRouter.post(
     // contract stands either way: a card link that could not be made is the
     // office's to chase, not a reason to throw away a signature.
     let cardUrl: string | null = null;
-    if (gateway.name === 'stripe') {
+    const gateway = await activeGateway();
+    if (gateway.canCharge) {
       try {
         const scope = { kind: 'branch' as const, branchId };
         cardUrl = (await requestCard(contract.id, scope, null)).url;

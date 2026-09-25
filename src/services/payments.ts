@@ -8,7 +8,7 @@ import { offsetOf, paginated, type Paginated, type Pagination } from '../utils/p
 import { isPgError, PG_UNIQUE_VIOLATION } from '../utils/pg';
 import { applyBranchScope } from '../utils/scope';
 import { recordAudit, type AuditActor } from './audit';
-import { fromMinorUnits, gateway, toMinorUnits } from './gateway';
+import { activeGateway, fromMinorUnits, gatewayNamed, toMinorUnits } from './gateway';
 import {
   getInvoice,
   lock as lockInvoice,
@@ -26,6 +26,8 @@ export interface PaymentInput {
   provider_transaction_id: string | null;
   status: Extract<PaymentStatus, 'pending' | 'succeeded' | 'failed'>;
   failure_reason: string | null;
+  /** The processor that moved the money; null for a cheque or a hand entry. */
+  provider?: string | null;
 }
 
 /** Payments are scoped through their invoice's branch. */
@@ -107,6 +109,7 @@ export async function recordPayment(
           amount: input.amount.toFixed(2),
           method: input.method,
           provider_transaction_id: input.provider_transaction_id,
+          provider: input.provider ?? null,
           status: input.status,
           failure_reason: input.status === 'failed' ? input.failure_reason : null,
           processed_at: input.status === 'pending' ? null : new Date(),
@@ -170,6 +173,20 @@ export async function refundPayment(
     }
     if (payment.status !== 'succeeded') {
       throw conflict(`Only a succeeded payment can be refunded (this one is ${payment.status})`);
+    }
+
+    // Money a processor took goes back through that processor. Flipping the
+    // row alone would tell the office it was refunded while the customer
+    // never saw a cent.
+    if (payment.provider && payment.provider_transaction_id) {
+      const processor = await gatewayNamed(payment.provider, trx);
+      if (!processor?.canCharge) {
+        throw conflict(
+          `This payment went through ${payment.provider}, which is no longer connected. ` +
+            `Refund it from the ${payment.provider} dashboard instead.`,
+        );
+      }
+      await processor.refund(payment.provider_transaction_id, toMinorUnits(payment.amount));
     }
 
     const [updated] = await trx('payments')
@@ -297,7 +314,9 @@ interface ChargeableRow {
   branch_id: string;
   address_line1: string;
   payment_method_token: string | null;
-  stripe_customer_id: string | null;
+  payment_method_provider: string | null;
+  autopay_expires_on: string | null;
+  square_customer_id: string | null;
   customer_name: string;
 }
 
@@ -315,9 +334,10 @@ export async function chargeInvoice(
   actor: AuditActor,
   db: Knex = defaultDb,
 ): Promise<InvoiceWithPayments> {
+  const gateway = await activeGateway(db);
   if (!gateway.canCharge) {
     throw badRequest(
-      'No payment gateway is configured, so nothing can be charged automatically',
+      'No payment processor is connected, so nothing can be charged automatically',
     );
   }
 
@@ -338,7 +358,9 @@ export async function chargeInvoice(
       'invoices.branch_id',
       'properties.address_line1',
       'contracts.payment_method_token',
-      'customers.stripe_customer_id',
+      'contracts.payment_method_provider',
+      'contracts.autopay_expires_on',
+      'customers.square_customer_id',
       db.raw("customers.first_name || ' ' || customers.last_name as customer_name"),
     ])) as ChargeableRow | undefined;
 
@@ -352,8 +374,23 @@ export async function chargeInvoice(
         : `This invoice is ${row.invoice_status}, so it cannot be charged`,
     );
   }
-  if (!row.payment_method_token || !row.stripe_customer_id) {
+  const processorCustomerId = gateway.customerColumn ? row[gateway.customerColumn] : null;
+  if (!row.payment_method_token || !processorCustomerId) {
     throw badRequest('There is no card on file for this contract');
+  }
+  // The customer signed for a year of automatic charges, not for ever.
+  // Contracts carded before signed authorizations existed have no date.
+  if (row.autopay_expires_on && row.autopay_expires_on < new Date().toISOString().slice(0, 10)) {
+    throw badRequest(
+      `The customer's autopay authorization ended on ${row.autopay_expires_on}. ` +
+        'Ask them to add their card again, which renews it for another year.',
+    );
+  }
+  if (row.payment_method_provider && row.payment_method_provider !== gateway.name) {
+    throw badRequest(
+      `The card on file was saved with ${row.payment_method_provider}, and payments now go ` +
+        `through ${gateway.name}. Ask the customer to add their card again.`,
+    );
   }
 
   const outstanding = Number(row.amount_due) - Number(row.amount_paid);
@@ -363,7 +400,7 @@ export async function chargeInvoice(
 
   const amountMinor = toMinorUnits(outstanding);
   const result = await gateway.charge({
-    stripe_customer_id: row.stripe_customer_id,
+    processor_customer_id: processorCustomerId,
     payment_method: row.payment_method_token,
     amount_minor: amountMinor,
     description: `Snow clearing — ${row.address_line1}`,
@@ -381,6 +418,7 @@ export async function chargeInvoice(
       amount: Number(fromMinorUnits(amountMinor)),
       method: 'card_on_file',
       provider_transaction_id: result.transaction_id,
+      provider: gateway.name,
       status: result.status,
       failure_reason: result.failure_reason,
     },

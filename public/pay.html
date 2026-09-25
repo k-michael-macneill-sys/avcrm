@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Pay your invoice — Avalanche CRM</title>
+    <style>
+      /*
+       * Self-contained, like card-complete.html: the customer has no account,
+       * and this page must not depend on the app's stylesheet. The card itself
+       * is typed into Square's own form, which Square draws in an iframe — no
+       * card number or CVV is ever in this page's reach.
+       */
+      :root {
+        --bg: #0b0f19;
+        --panel: rgba(15, 23, 42, 0.6);
+        --border: rgba(148, 163, 184, 0.16);
+        --text: #f1f5f9;
+        --muted: #94a3b8;
+        --secondary: #cbd5e1;
+        --accent: #3b82f6;
+        --good: #22c55e;
+        --critical: #f87171;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px 16px;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
+          sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      .card {
+        width: 100%;
+        max-width: 440px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 28px;
+      }
+      .brand {
+        font-weight: 600;
+        margin: 0 0 4px;
+      }
+      .brand::before {
+        content: '❄ ';
+        color: var(--accent);
+      }
+      h1 {
+        font-size: 22px;
+        margin: 4px 0 16px;
+      }
+      h2 {
+        font-size: 15px;
+        margin: 20px 0 8px;
+      }
+      p {
+        margin: 0 0 12px;
+        line-height: 1.5;
+      }
+      .muted {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      dl {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 6px 16px;
+        margin: 0 0 16px;
+      }
+      dt {
+        color: var(--muted);
+      }
+      dd {
+        margin: 0;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .total {
+        font-weight: 600;
+        font-size: 18px;
+      }
+      .agreement {
+        font-size: 13px;
+        color: var(--secondary);
+        background: rgba(148, 163, 184, 0.08);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px;
+        margin: 0 0 8px;
+      }
+      .pad-wrap {
+        position: relative;
+      }
+      canvas.pad {
+        display: block;
+        width: 100%;
+        height: 150px;
+        /* Ink on white in every theme: the image is printed and emailed. */
+        background: #fff;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        touch-action: none;
+        cursor: crosshair;
+      }
+      .pad-hint {
+        position: absolute;
+        left: 12px;
+        bottom: 10px;
+        color: #94a3b8;
+        font-size: 12px;
+        pointer-events: none;
+      }
+      label {
+        display: block;
+        font-size: 13px;
+        color: var(--secondary);
+        margin: 12px 0 6px;
+      }
+      input[type='text'] {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: rgba(15, 23, 42, 0.8);
+        color: var(--text);
+        font-size: 15px;
+      }
+      .row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 6px;
+      }
+      #card-container {
+        margin: 12px 0;
+        min-height: 90px;
+      }
+      button {
+        font: inherit;
+        border: 0;
+        border-radius: 10px;
+        padding: 12px 16px;
+        cursor: pointer;
+      }
+      button.primary {
+        width: 100%;
+        background: var(--accent);
+        color: #fff;
+        font-weight: 600;
+        font-size: 16px;
+      }
+      button.primary:disabled {
+        opacity: 0.6;
+        cursor: progress;
+      }
+      button.link {
+        background: none;
+        color: var(--accent);
+        padding: 4px 0;
+        font-size: 13px;
+      }
+      .message {
+        margin: 12px 0 0;
+        font-size: 14px;
+      }
+      .message.good {
+        color: var(--good);
+      }
+      .message.critical {
+        color: var(--critical);
+      }
+      [hidden] {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card" aria-live="polite">
+      <p class="brand" id="brand">Avalanche CRM</p>
+      <h1 id="title">Loading…</h1>
+      <div id="content"></div>
+    </main>
+
+    <script>
+      (function () {
+        'use strict';
+
+        var content = document.getElementById('content');
+        var title = document.getElementById('title');
+        var brand = document.getElementById('brand');
+        var path = location.pathname;
+        var cardMatch = /^\/pay\/card\/([A-Za-z0-9_-]+)$/.exec(path);
+        var invoiceMatch = /^\/pay\/([A-Za-z0-9_-]+)$/.exec(path);
+
+        // Every piece of text goes in through textContent, never innerHTML:
+        // a customer's name or address is data, not markup.
+        function el(tag, attrs, children) {
+          var node = document.createElement(tag);
+          Object.keys(attrs || {}).forEach(function (key) {
+            if (key === 'text') node.textContent = attrs[key];
+            else if (key === 'className') node.className = attrs[key];
+            else node.setAttribute(key, attrs[key]);
+          });
+          (children || []).forEach(function (child) {
+            if (child) node.appendChild(child);
+          });
+          return node;
+        }
+
+        function show(heading, nodes) {
+          title.textContent = heading;
+          content.replaceChildren.apply(content, nodes);
+        }
+
+        function money(value, currency) {
+          var n = Number(value);
+          try {
+            return new Intl.NumberFormat('en-CA', { style: 'currency', currency: currency || 'CAD' }).format(n);
+          } catch (e) {
+            return '$' + n.toFixed(2);
+          }
+        }
+
+        function api(method, url, body) {
+          return fetch(url, {
+            method: method,
+            headers: body ? { 'Content-Type': 'application/json' } : {},
+            body: body ? JSON.stringify(body) : undefined,
+          }).then(function (res) {
+            return res.json().then(
+              function (json) {
+                if (!res.ok) {
+                  var err = new Error((json && json.error && json.error.message) || 'Something went wrong');
+                  err.status = res.status;
+                  throw err;
+                }
+                return json.data;
+              },
+              function () {
+                throw new Error('Something went wrong. Please try again.');
+              },
+            );
+          });
+        }
+
+        function message(node, text, tone) {
+          node.textContent = text;
+          node.className = 'message' + (tone ? ' ' + tone : '');
+        }
+
+        // --- Square's card form ------------------------------------------
+        function loadSquare(payment) {
+          return new Promise(function (resolve, reject) {
+            if (window.Square) return resolve(window.Square);
+            var script = document.createElement('script');
+            script.src = payment.sdk_url;
+            script.onload = function () {
+              window.Square ? resolve(window.Square) : reject(new Error('The card form did not load'));
+            };
+            script.onerror = function () {
+              reject(new Error('The card form could not be loaded. Check your connection and reload.'));
+            };
+            document.head.appendChild(script);
+          }).then(function (Square) {
+            var payments = Square.payments(payment.application_id, payment.location_id);
+            return payments.card().then(function (card) {
+              return card.attach('#card-container').then(function () {
+                return { payments: payments, card: card };
+              });
+            });
+          });
+        }
+
+        // The nonce, plus the bank's verification where Square asks for it.
+        function tokenize(form, details) {
+          return form.card.tokenize().then(function (result) {
+            if (result.status !== 'OK') {
+              var first = result.errors && result.errors[0];
+              throw new Error((first && first.message) || 'Check the card details and try again.');
+            }
+            if (typeof form.payments.verifyBuyer !== 'function') {
+              return { source_id: result.token, verification_token: null };
+            }
+            return form.payments.verifyBuyer(result.token, details).then(
+              function (verified) {
+                return { source_id: result.token, verification_token: (verified && verified.token) || null };
+              },
+              function () {
+                return { source_id: result.token, verification_token: null };
+              },
+            );
+          });
+        }
+
+        // --- the signature box --------------------------------------------
+        function signaturePad(onInk) {
+          var canvas = el('canvas', { className: 'pad', 'aria-label': 'Sign here' });
+          var hint = el('span', { className: 'pad-hint', text: 'Sign here with your finger or mouse' });
+          var ctx = canvas.getContext('2d');
+          var drawing = false;
+          var inked = false;
+          var last = null;
+
+          function size() {
+            var ratio = window.devicePixelRatio || 1;
+            var rect = canvas.getBoundingClientRect();
+            canvas.width = Math.round(rect.width * ratio);
+            canvas.height = Math.round(rect.height * ratio);
+            ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(0, 0, rect.width, rect.height);
+            ctx.lineWidth = 2.2;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.strokeStyle = '#0f172a';
+            inked = false;
+            hint.hidden = false;
+          }
+
+          function point(e) {
+            var rect = canvas.getBoundingClientRect();
+            return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+          }
+
+          canvas.addEventListener('pointerdown', function (e) {
+            drawing = true;
+            last = point(e);
+            canvas.setPointerCapture(e.pointerId);
+            ctx.beginPath();
+            ctx.arc(last.x, last.y, 1, 0, Math.PI * 2);
+            ctx.fillStyle = '#0f172a';
+            ctx.fill();
+            inked = true;
+            hint.hidden = true;
+            if (onInk) onInk();
+          });
+          canvas.addEventListener('pointermove', function (e) {
+            if (!drawing) return;
+            var next = point(e);
+            ctx.beginPath();
+            ctx.moveTo(last.x, last.y);
+            ctx.lineTo(next.x, next.y);
+            ctx.stroke();
+            last = next;
+          });
+          ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (type) {
+            canvas.addEventListener(type, function () {
+              drawing = false;
+            });
+          });
+
+          var clear = el('button', { type: 'button', className: 'link', text: 'Clear signature' });
+          clear.addEventListener('click', size);
+
+          return {
+            node: el('div', {}, [el('div', { className: 'pad-wrap' }, [canvas, hint]), el('div', { className: 'row' }, [el('span', { className: 'muted', text: 'Signature' }), clear])]),
+            init: size,
+            isEmpty: function () {
+              return !inked;
+            },
+            png: function () {
+              return canvas.toDataURL('image/png');
+            },
+          };
+        }
+
+        // --- paying an invoice --------------------------------------------
+        function renderInvoice(token, invoice, receipt) {
+          document.title = 'Your invoice — ' + invoice.branch_name;
+          brand.textContent = invoice.branch_name;
+
+          var facts = el('dl', {}, [
+            el('dt', { text: 'Property' }),
+            el('dd', { text: invoice.address_line1 }),
+            el('dt', { text: 'Period' }),
+            el('dd', { text: invoice.billing_period_start + ' to ' + invoice.billing_period_end }),
+            el('dt', { text: 'Due' }),
+            el('dd', { text: invoice.due_date }),
+            el('dt', { text: 'Invoice total' }),
+            el('dd', { text: money(invoice.amount_due, invoice.currency) }),
+            el('dt', { text: 'Paid' }),
+            el('dd', { text: money(invoice.amount_paid, invoice.currency) }),
+            el('dt', { className: 'total', text: 'Balance' }),
+            el('dd', { className: 'total', text: money(invoice.amount_outstanding, invoice.currency) }),
+          ]);
+
+          var greeting = el('p', { text: 'Hi ' + invoice.customer_first_name + ',' });
+
+          if (receipt) {
+            return show('Thank you', [
+              greeting,
+              el('p', {
+                className: 'message good',
+                text:
+                  (receipt.status === 'succeeded' ? 'Payment received: ' : 'Payment submitted: ') +
+                  money(receipt.amount, invoice.currency) +
+                  '.',
+              }),
+              facts,
+              el('p', { className: 'muted', text: 'Reference ' + receipt.reference + '. You can close this page.' }),
+            ]);
+          }
+
+          if (invoice.status === 'paid' || Number(invoice.amount_outstanding) <= 0) {
+            return show('This invoice is paid', [greeting, facts, el('p', { className: 'muted', text: 'Nothing is owing. Thank you.' })]);
+          }
+          if (invoice.status === 'void') {
+            return show('This invoice was cancelled', [greeting, facts, el('p', { className: 'muted', text: 'There is nothing to pay.' })]);
+          }
+          if (!invoice.can_pay || !invoice.payment) {
+            return show('Your invoice', [
+              greeting,
+              facts,
+              el('p', { className: 'muted', text: 'Online payment is not available yet. Please contact ' + invoice.branch_name + ' to pay.' }),
+            ]);
+          }
+
+          var status = el('p', { className: 'message' });
+          var button = el('button', { type: 'button', className: 'primary', text: 'Pay ' + money(invoice.amount_outstanding, invoice.currency), disabled: 'disabled' });
+          show('Pay your invoice', [
+            greeting,
+            facts,
+            el('h2', { text: 'Card' }),
+            el('div', { id: 'card-container' }),
+            button,
+            status,
+            el('p', { className: 'muted', text: 'Your card is entered on Square’s secure form. ' + invoice.branch_name + ' never sees the card number.' }),
+          ]);
+
+          loadSquare(invoice.payment).then(
+            function (form) {
+              button.removeAttribute('disabled');
+              button.addEventListener('click', function () {
+                button.setAttribute('disabled', 'disabled');
+                message(status, 'Processing…');
+                tokenize(form, {
+                  amount: Number(invoice.amount_outstanding).toFixed(2),
+                  currencyCode: invoice.currency,
+                  intent: 'CHARGE',
+                  billingContact: {},
+                })
+                  .then(function (source) {
+                    return api('POST', '/portal/invoices/' + token + '/pay', source);
+                  })
+                  .then(
+                    function (result) {
+                      renderInvoice(token, result.invoice, result.receipt);
+                    },
+                    function (err) {
+                      message(status, err.message, 'critical');
+                      button.removeAttribute('disabled');
+                    },
+                  );
+              });
+            },
+            function (err) {
+              message(status, err.message, 'critical');
+            },
+          );
+        }
+
+        // --- saving a card, with the signed autopay agreement ------------
+        function renderCard(token, setup) {
+          document.title = 'Set up automatic payments — ' + setup.branch_name;
+          brand.textContent = setup.branch_name;
+          var greeting = el('p', { text: 'Hi ' + setup.customer_first_name + ',' });
+
+          if (setup.status === 'completed') {
+            var saved = setup.card && setup.card.last4 ? ' ending in ' + setup.card.last4 : '';
+            return show('Card saved', [
+              greeting,
+              el('p', { className: 'message good', text: 'Your card' + saved + ' is on file and your autopay agreement is signed.' }),
+              el('p', { className: 'muted', text: 'You can close this page.' }),
+            ]);
+          }
+          if (setup.expired || setup.status !== 'sent') {
+            return show('This link has expired', [greeting, el('p', { text: 'Please ask ' + setup.branch_name + ' to send you a new one.' })]);
+          }
+          if (!setup.payment || !setup.agreement) {
+            return show('Not available', [greeting, el('p', { text: 'Adding a card online is not available right now. Please contact ' + setup.branch_name + '.' })]);
+          }
+
+          var status = el('p', { className: 'message' });
+          var pad = signaturePad(function () {
+            if (status.className.indexOf('critical') !== -1) message(status, '');
+          });
+          var name = el('input', { type: 'text', id: 'signer-name', autocomplete: 'name', maxlength: '120' });
+          var button = el('button', { type: 'button', className: 'primary', text: 'Sign and save card', disabled: 'disabled' });
+
+          show('Set up automatic payments', [
+            greeting,
+            el('p', { text: 'Service at ' + setup.address_line1 + '.' }),
+            el('h2', { text: 'Contract and autopay agreement' }),
+            // The description sits directly above the box it is signed in.
+            el('p', { className: 'agreement', id: 'agreement-text', text: setup.agreement.text }),
+            pad.node,
+            el('label', { for: 'signer-name', text: 'Your full name' }),
+            name,
+            el('h2', { text: 'Card' }),
+            el('div', { id: 'card-container' }),
+            button,
+            status,
+            el('p', { className: 'muted', text: 'Your card is entered on Square’s secure form. ' + setup.branch_name + ' never sees the card number.' }),
+          ]);
+          pad.init();
+
+          loadSquare(setup.payment).then(
+            function (form) {
+              button.removeAttribute('disabled');
+              button.addEventListener('click', function () {
+                if (pad.isEmpty()) return message(status, 'Please sign in the box above.', 'critical');
+                if (name.value.trim().length < 2) return message(status, 'Please type your full name.', 'critical');
+
+                button.setAttribute('disabled', 'disabled');
+                message(status, 'Saving…');
+                tokenize(form, { intent: 'STORE', billingContact: {} })
+                  .then(function (source) {
+                    return api('POST', '/portal/cards/' + token, {
+                      source_id: source.source_id,
+                      verification_token: source.verification_token,
+                      signer_name: name.value.trim(),
+                      signature_png: pad.png(),
+                    });
+                  })
+                  .then(
+                    function (result) {
+                      renderCard(token, result);
+                    },
+                    function (err) {
+                      message(status, err.message, 'critical');
+                      button.removeAttribute('disabled');
+                    },
+                  );
+              });
+            },
+            function (err) {
+              message(status, err.message, 'critical');
+            },
+          );
+        }
+
+        function failed(err) {
+          show(err.status === 404 ? 'Link not found' : 'Something went wrong', [
+            el('p', { text: err.status === 404 ? 'Please check the link in your email, or contact the office.' : err.message }),
+          ]);
+        }
+
+        if (cardMatch) {
+          var cardToken = cardMatch[1];
+          api('GET', '/portal/cards/' + cardToken).then(function (setup) {
+            renderCard(cardToken, setup);
+          }, failed);
+        } else if (invoiceMatch) {
+          var invoiceToken = invoiceMatch[1];
+          api('GET', '/portal/invoices/' + invoiceToken).then(function (invoice) {
+            renderInvoice(invoiceToken, invoice, null);
+          }, failed);
+        } else {
+          failed({ status: 404 });
+        }
+      })();
+    </script>
+  </body>
+</html>

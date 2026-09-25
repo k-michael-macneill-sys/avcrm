@@ -195,10 +195,7 @@ describe('the leads map', () => {
         quote_id: opened.body.data.quote.id,
         signature_image_url: 'signatures/2026/01/map.png',
         terms_version: 'v1',
-        checklist: [
-          { item_code: 'terms_reviewed', checked: true },
-          { item_code: 'service_window_explained', checked: true },
-        ],
+        checklist: [],
       },
     });
     assert.equal(signed.status, 201, JSON.stringify(signed.body));

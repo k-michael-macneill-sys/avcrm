@@ -2,17 +2,21 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth, requireCorporate, resolveActor } from '../middleware/auth';
 import { recordAudit } from '../services/audit';
+import { envGateway, squareGateway } from '../services/gateway';
 import {
+  PAYMENTS_KEY,
   publicView,
   readIntegration,
   saveIntegration,
   SMS_KEY,
 } from '../services/integrations';
+import { PAYMENT_PROVIDERS } from '../services/paymentProviders';
 import { deliverSms } from '../services/sms';
-import { SMS_PROVIDERS } from '../services/smsProviders';
+import { SMS_PROVIDERS, type ProviderField } from '../services/smsProviders';
 import { SendFailure } from '../services/transport';
+import { config } from '../config';
 import { asyncHandler } from '../utils/async';
-import { ApiError, unauthorized } from '../utils/errors';
+import { ApiError, badRequest, unauthorized } from '../utils/errors';
 import { parse } from '../utils/validate';
 
 /**
@@ -27,6 +31,25 @@ export const settingsRouter = Router();
 
 settingsRouter.use(requireAuth, requireCorporate);
 
+function catalogue(
+  providers: { id: string; label: string; help: string; fields: ProviderField[] }[],
+) {
+  return providers.map((provider) => ({
+    id: provider.id,
+    label: provider.label,
+    help: provider.help,
+    fields: provider.fields.map((field) => ({
+      name: field.name,
+      label: field.label,
+      secret: field.secret ?? false,
+      required: field.required ?? false,
+      placeholder: field.placeholder ?? null,
+      help: field.help ?? null,
+      options: field.options ?? null,
+    })),
+  }));
+}
+
 /**
  * The catalogue, so the screen renders itself from what the server supports
  * rather than from a copy of this list kept in the client.
@@ -34,28 +57,14 @@ settingsRouter.use(requireAuth, requireCorporate);
 settingsRouter.get(
   '/sms/providers',
   asyncHandler(async (_req, res) => {
-    res.json({
-      data: SMS_PROVIDERS.map((provider) => ({
-        id: provider.id,
-        label: provider.label,
-        help: provider.help,
-        fields: provider.fields.map((field) => ({
-          name: field.name,
-          label: field.label,
-          secret: field.secret ?? false,
-          required: field.required ?? false,
-          placeholder: field.placeholder ?? null,
-          help: field.help ?? null,
-        })),
-      })),
-    });
+    res.json({ data: catalogue(SMS_PROVIDERS) });
   }),
 );
 
 settingsRouter.get(
   '/sms',
   asyncHandler(async (_req, res) => {
-    res.json({ data: publicView(await readIntegration(SMS_KEY)) });
+    res.json({ data: publicView(SMS_KEY, await readIntegration(SMS_KEY)) });
   }),
 );
 
@@ -78,7 +87,7 @@ settingsRouter.put(
     const body = parse(saveSchema, req.body);
     if (!req.user) throw unauthorized();
 
-    const before = publicView(await readIntegration(SMS_KEY));
+    const before = publicView(SMS_KEY, await readIntegration(SMS_KEY));
     const saved = await saveIntegration(SMS_KEY, body, req.user.id);
 
     // Worth auditing: this is the switch that decides whether customers are
@@ -134,5 +143,68 @@ settingsRouter.post(
     }
 
     res.json({ data: { sent_to: body.to, provider_message_id: result.provider_message_id } });
+  }),
+);
+
+settingsRouter.get(
+  '/payments/providers',
+  asyncHandler(async (_req, res) => {
+    res.json({ data: catalogue(PAYMENT_PROVIDERS) });
+  }),
+);
+
+settingsRouter.get(
+  '/payments',
+  asyncHandler(async (_req, res) => {
+    res.json({
+      data: {
+        ...publicView(PAYMENTS_KEY, await readIntegration(PAYMENTS_KEY)),
+        // What the settings screen needs to tell the admin, not configurable here.
+        webhook_url: `${config.messaging.appBaseUrl}/webhooks/square`,
+        currency: config.payments.currency.toUpperCase(),
+        env_gateway: envGateway.name,
+      },
+    });
+  }),
+);
+
+/**
+ * Connects a processor. This decides whose account every card payment goes
+ * into, so it is audited like the SMS switch — without the credentials, which
+ * are not in the public view.
+ */
+settingsRouter.put(
+  '/payments',
+  asyncHandler(async (req, res) => {
+    const body = parse(saveSchema, req.body);
+    if (!req.user) throw unauthorized();
+
+    const before = publicView(PAYMENTS_KEY, await readIntegration(PAYMENTS_KEY));
+    const saved = await saveIntegration(PAYMENTS_KEY, body, req.user.id);
+
+    await recordAudit(resolveActor(req), {
+      action: 'integration.updated',
+      entity_type: 'integration_setting',
+      entity_id: saved.id,
+      before,
+      after: saved,
+    });
+
+    res.json({ data: saved });
+  }),
+);
+
+/**
+ * Asks Square about the saved location with the saved token: proves both,
+ * and that the location bills in this install's currency. Moves no money.
+ */
+settingsRouter.post(
+  '/payments/test',
+  asyncHandler(async (_req, res) => {
+    const square = await squareGateway();
+    if (!square) {
+      throw badRequest('Save Square credentials before testing them');
+    }
+    res.json({ data: await square.checkConnection() });
   }),
 );

@@ -120,10 +120,7 @@ describe('opening a deal from the sales wizard', () => {
         quote_id: opened.body.data.quote.id,
         signature_image_url: 'signatures/2026/01/lead.png',
         terms_version: 'v1',
-        checklist: [
-          { item_code: 'terms_reviewed', checked: true },
-          { item_code: 'service_window_explained', checked: true },
-        ],
+        checklist: [],
       },
     });
     assert.equal(signed.status, 201, JSON.stringify(signed.body));
@@ -144,10 +141,7 @@ describe('opening a deal from the sales wizard', () => {
         quote_id: quoteId,
         signature_image_url: 'signatures/2026/01/monthly.png',
         terms_version: 'v1',
-        checklist: [
-          { item_code: 'terms_reviewed', checked: true },
-          { item_code: 'service_window_explained', checked: true },
-        ],
+        checklist: [],
       },
     });
     assert.equal(signed.status, 201, JSON.stringify(signed.body));
@@ -184,10 +178,7 @@ describe('opening a deal from the sales wizard', () => {
         quote_id: opened.body.data.quote.id,
         signature_image_url: 'signatures/2026/01/seasonal.png',
         terms_version: 'v1',
-        checklist: [
-          { item_code: 'terms_reviewed', checked: true },
-          { item_code: 'service_window_explained', checked: true },
-        ],
+        checklist: [],
       },
     });
     assert.equal(signed.status, 201, JSON.stringify(signed.body));
@@ -243,17 +234,15 @@ describe('signing by emailed link', () => {
     assert.equal(reply.status, 200, JSON.stringify(reply.body));
     assert.equal(reply.body.data.recurring_price, '109.00');
     assert.equal(reply.body.data.addon_salt, true);
-    // The card is taken after signing, on the processor's page.
-    const codes = reply.body.data.checklist.map((c: { code: string }) => c.code);
-    assert.ok(!codes.includes('card_on_file'));
-    assert.ok(codes.includes('terms_reviewed'));
+    // No checklist boxes are collected anywhere in the app any more.
+    assert.deepEqual(reply.body.data.checklist, []);
   });
 
   it('turns their signature into a contract, and the link then stops working', async () => {
     const { linkToken, quoteId } = await sentLink();
     const body = {
       signature_png: SIGNATURE_PNG,
-      confirmed: ['terms_reviewed', 'service_window_explained'],
+      confirmed: [],
     };
 
     const first = await call(h.server(), 'POST', `/public/sign/${linkToken}`, { body });
@@ -272,25 +261,13 @@ describe('signing by emailed link', () => {
     assert.equal(view.status, 409);
   });
 
-  it('refuses to sign without the required confirmations, and the link survives', async () => {
-    const { linkToken } = await sentLink();
-
-    const reply = await call(h.server(), 'POST', `/public/sign/${linkToken}`, {
-      body: { signature_png: SIGNATURE_PNG, confirmed: ['terms_reviewed'] },
-    });
-    assert.equal(reply.status, 400);
-
-    const retry = await call(h.server(), 'GET', `/public/sign/${linkToken}`);
-    assert.equal(retry.status, 200);
-  });
-
   it('refuses something that is not a PNG', async () => {
     const { linkToken } = await sentLink();
 
     const reply = await call(h.server(), 'POST', `/public/sign/${linkToken}`, {
       body: {
         signature_png: `data:image/png;base64,${Buffer.from('<script>alert(1)</script>').toString('base64')}`,
-        confirmed: ['terms_reviewed', 'service_window_explained'],
+        confirmed: [],
       },
     });
     assert.equal(reply.status, 400);

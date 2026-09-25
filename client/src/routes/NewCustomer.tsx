@@ -827,7 +827,7 @@ function AfterSigning({
         )
       ) : config && !config.card_capture ? (
         <p className="text-sm text-muted-foreground">
-          Card payments are not connected yet, so the office will follow up for the card. (Connect Stripe to take
+          Card payments are not connected yet, so the office will follow up for the card. (Connect Square to take
           cards here.)
         </p>
       ) : cardUrl ? (
@@ -863,7 +863,7 @@ function AfterSigning({
               })
             }
           >
-            {pending ? 'Opening…' : 'Add card (Stripe)'}
+            {pending ? 'Opening…' : 'Add card'}
           </Button>
         </>
       )}

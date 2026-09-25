@@ -16,6 +16,7 @@ import {
 } from '../services/invoices';
 import { invoicePdf } from '../services/documents';
 import { chargeInvoice, recordPayment } from '../services/payments';
+import { payLinkFor } from '../services/portal';
 import { INVOICE_STATUSES, PAYMENT_METHODS } from '../types/models';
 import { asyncHandler } from '../utils/async';
 import { unauthorized } from '../utils/errors';
@@ -112,6 +113,18 @@ invoicesRouter.get(
   asyncHandler(async (req, res) => {
     const { id } = parse(idParamSchema, req.params);
     res.json({ data: await getInvoice(id, resolveBranchScope(req, branchOf(req))) });
+  }),
+);
+
+/**
+ * The customer's link to this bill, for staff to text or read out. Made on
+ * first use and the same every time after, so it matches the one emailed.
+ */
+invoicesRouter.get(
+  '/:id/pay-link',
+  asyncHandler(async (req, res) => {
+    const { id } = parse(idParamSchema, req.params);
+    res.json({ data: await payLinkFor(id, resolveBranchScope(req, branchOf(req))) });
   }),
 );
 

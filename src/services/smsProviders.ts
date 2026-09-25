@@ -20,6 +20,8 @@ export interface ProviderField {
   required?: boolean;
   placeholder?: string;
   help?: string;
+  /** A fixed set of values; anything else is refused on save. */
+  options?: { value: string; label: string }[];
 }
 
 export interface OutboundSms {

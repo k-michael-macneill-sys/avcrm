@@ -30,6 +30,7 @@ interface ProviderField {
   required: boolean;
   placeholder: string | null;
   help: string | null;
+  options: { value: string; label: string }[] | null;
 }
 
 interface Provider {
@@ -39,7 +40,7 @@ interface Provider {
   fields: ProviderField[];
 }
 
-interface SmsSettings {
+interface IntegrationSettings {
   provider: string;
   is_enabled: boolean;
   settings: Record<string, string>;
@@ -47,11 +48,23 @@ interface SmsSettings {
   updated_at: string | null;
 }
 
+interface PaymentSettings extends IntegrationSettings {
+  webhook_url: string;
+  currency: string;
+  env_gateway: string;
+}
+
 const NONE = 'none';
 
 export function Settings(): JSX.Element {
   const { data, loading, error, reload } = useQuery(
-    () => Promise.all([api.get<Provider[]>('/settings/sms/providers'), api.get<SmsSettings>('/settings/sms')]),
+    () =>
+      Promise.all([
+        api.get<Provider[]>('/settings/sms/providers'),
+        api.get<IntegrationSettings>('/settings/sms'),
+        api.get<Provider[]>('/settings/payments/providers'),
+        api.get<PaymentSettings>('/settings/payments'),
+      ]),
     [],
   );
 
@@ -59,18 +72,73 @@ export function Settings(): JSX.Element {
   if (error) return <ErrorNotice message={error} />;
   if (!data) return <Loading />;
 
-  const [providers, current] = data;
-  return <SettingsBody providers={providers} current={current} onSaved={reload} />;
+  const [smsProviders, sms, paymentProviders, payments] = data;
+  return (
+    <>
+      <PageHeader title="Settings" subtitle="Outside services this company uses" />
+
+      <IntegrationSection
+        path="/settings/payments"
+        title="Card payments"
+        enableLabel="Take card payments through this processor"
+        statusOn="Taking payments"
+        statusOff="Not taking payments"
+        noneText={
+          payments.env_gateway === 'square'
+            ? 'Square is configured on the server and handles card payments. Connect it here instead to override that for this company.'
+            : 'No processor connected. Payments can still be recorded by hand, and nothing is charged automatically.'
+        }
+        providers={paymentProviders}
+        current={payments}
+        onSaved={reload}
+      >
+        <FieldList>
+          <Field label="Webhook URL">
+            <code className="break-all text-xs">{payments.webhook_url}</code>
+          </Field>
+          <Field label="Billing currency">{payments.currency}</Field>
+        </FieldList>
+      </IntegrationSection>
+      <PaymentTestSection />
+
+      <IntegrationSection
+        path="/settings/sms"
+        title="Text messages"
+        enableLabel="Send text messages to customers"
+        statusOn="Sending"
+        statusOff="Not sending"
+        noneText="No provider yet. Messages queued for SMS are rendered and logged, and nothing is sent until one is picked here."
+        providers={smsProviders}
+        current={sms}
+        onSaved={reload}
+      />
+      <TestSection />
+    </>
+  );
 }
 
-function SettingsBody({
+function IntegrationSection({
+  path,
+  title,
+  enableLabel,
+  statusOn,
+  statusOff,
+  noneText,
   providers,
   current,
   onSaved,
+  children,
 }: {
+  path: string;
+  title: string;
+  enableLabel: string;
+  statusOn: string;
+  statusOff: string;
+  noneText: string;
   providers: Provider[];
-  current: SmsSettings;
+  current: IntegrationSettings;
   onSaved: () => void;
+  children?: React.ReactNode;
 }): JSX.Element {
   const [chosen, setChosen] = React.useState(current.provider);
   const [enabled, setEnabled] = React.useState(current.is_enabled);
@@ -86,8 +154,9 @@ function SettingsBody({
       (provider?.fields ?? []).map((f) => ({
         name: f.name,
         label: f.label,
-        type: f.secret ? 'password' : 'text',
-        value: f.secret ? '' : (saved[f.name] ?? ''),
+        type: f.options ? 'select' : f.secret ? 'password' : 'text',
+        options: f.options ?? undefined,
+        value: f.secret ? '' : (saved[f.name] ?? f.options?.[0]?.value ?? ''),
         placeholder: f.secret
           ? storedSecrets.includes(f.name)
             ? 'Saved — leave blank to keep it'
@@ -118,23 +187,24 @@ function SettingsBody({
       // A blank secret means "keep what is stored", so it is not sent at all.
       else if (value) secrets[f.name] = value;
     }
-    run(() => api.put('/settings/sms', { provider: chosen, is_enabled: enabled, settings, secrets }));
+    run(() => api.put(path, { provider: chosen, is_enabled: enabled, settings, secrets }));
   };
+
+  const selectId = `${path.replace(/\W/g, '-')}-provider`;
 
   return (
     <>
-      <PageHeader title="Settings" subtitle="Outside services this company uses" />
-
-      <Section title="Text messages" className="mb-4">
+      <Section title={title} className="mb-4">
         <FieldList>
-          <Field label="Status">{current.is_enabled ? 'Sending' : 'Not sending'}</Field>
+          <Field label="Status">{current.is_enabled ? statusOn : statusOff}</Field>
           <Field label="Last changed">{current.updated_at ? stamp(current.updated_at) : 'never'}</Field>
         </FieldList>
+        {children}
 
         <div className="mt-4 flex flex-col gap-1.5">
-          <Label htmlFor="provider">Provider</Label>
+          <Label htmlFor={selectId}>Provider</Label>
           <Select value={chosen} onValueChange={setChosen}>
-            <SelectTrigger id="provider" className="max-w-xs">
+            <SelectTrigger id={selectId} className="max-w-xs">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -159,16 +229,13 @@ function SettingsBody({
               />
             </>
           ) : (
-            <p className="text-sm text-muted-foreground">
-              No provider yet. Messages queued for SMS are rendered and logged, and nothing is sent
-              until one is picked here.
-            </p>
+            <p className="text-sm text-muted-foreground">{noneText}</p>
           )}
         </div>
 
         <label className="mt-3 flex items-center gap-2 text-sm">
           <Checkbox checked={enabled} onCheckedChange={(v) => setEnabled(v === true)} />
-          Send text messages to customers
+          {enableLabel}
         </label>
 
         {error ? <ErrorNotice message={error} /> : null}
@@ -178,9 +245,50 @@ function SettingsBody({
           </Button>
         </div>
       </Section>
-
-      <TestSection />
     </>
+  );
+}
+
+function PaymentTestSection(): JSX.Element {
+  const [pending, setPending] = React.useState(false);
+  const [message, setMessage] = React.useState('');
+  const [tone, setTone] = React.useState<'good' | 'critical'>('good');
+
+  const check = (): void => {
+    setPending(true);
+    setMessage('Checking…');
+    api
+      .post<{ location_name: string; currency: string; environment: string }>('/settings/payments/test')
+      .then((result) => {
+        setTone('good');
+        setMessage(`Connected to ${result.location_name} (${result.environment}, ${result.currency}).`);
+      })
+      .catch((err: unknown) => {
+        if (err instanceof api.Unauthenticated) {
+          location.reload();
+          return;
+        }
+        setTone('critical');
+        setMessage(err instanceof api.ApiError ? err.full : String(err));
+      })
+      .finally(() => setPending(false));
+  };
+
+  return (
+    <Section title="Check the connection" className="mb-4">
+      <p className="mb-3 max-w-[60ch] text-xs text-muted-foreground">
+        Asks Square about the saved location using the saved access token. No money moves. Save
+        first — this checks what is stored, not what is typed above.
+      </p>
+      <Button type="button" variant="secondary" disabled={pending} onClick={check}>
+        Check connection
+      </Button>
+      {message ? (
+        <p className={`mt-2 text-sm ${tone === 'critical' ? 'text-critical' : 'text-good'}`} aria-live="polite">
+          {message}
+        </p>
+      ) : null}
+    </Section>
   );
 }
 
@@ -217,7 +325,7 @@ function TestSection(): JSX.Element {
   };
 
   return (
-    <Section title="Test it">
+    <Section title="Send a test text">
       <p className="mb-3 max-w-[60ch] text-xs text-muted-foreground">
         Sends one message through the saved credentials, whether or not sending is switched on.
         Save first — this tests what is stored, not what is typed above.

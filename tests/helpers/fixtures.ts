@@ -174,16 +174,6 @@ export async function buildWorld(): Promise<World> {
  * edited every time a message is added stops being run.
  */
 async function seedConfig(kingston: string, halifax: string): Promise<void> {
-  await db('checklist_requirements').insert([
-    { code: 'card_on_file', label: 'Card on file', is_required: false, sort_order: 1 },
-    { code: 'terms_reviewed', label: 'Terms reviewed', is_required: true, sort_order: 2 },
-    {
-      code: 'service_window_explained',
-      label: 'Service window explained',
-      is_required: true,
-      sort_order: 3,
-    },
-  ]);
 
   await db('document_requirements').insert([
     {
@@ -374,20 +364,22 @@ export async function makeContract(
     .returning('id');
 
   const requirements = await db('checklist_requirements').select('code');
-  await db('contract_checklist_items').insert(
-    requirements.map((r) => {
-      const checked =
-        r.code === 'card_on_file' ? Boolean(overrides.payment_method_token) : true;
-      // The table's own rule: a timestamp means it was ticked, and an
-      // unticked box cannot carry one.
-      return {
-        contract_id: contract?.id ?? '',
-        item_code: r.code,
-        checked,
-        checked_at: checked ? new Date() : null,
-      };
-    }),
-  );
+  if (requirements.length > 0) {
+    await db('contract_checklist_items').insert(
+      requirements.map((r) => {
+        const checked =
+          r.code === 'card_on_file' ? Boolean(overrides.payment_method_token) : true;
+        // The table's own rule: a timestamp means it was ticked, and an
+        // unticked box cannot carry one.
+        return {
+          contract_id: contract?.id ?? '',
+          item_code: r.code,
+          checked,
+          checked_at: checked ? new Date() : null,
+        };
+      }),
+    );
+  }
 
   return { ...made, quote_id: quote, contract_id: contract?.id ?? '' };
 }

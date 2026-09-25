@@ -25,9 +25,10 @@ function goodEnv(): Record<string, string> {
     SMTP_HOST: 'smtp.postmarkapp.com',
     SMTP_USER: 'user',
     SMTP_PASSWORD: 'pass',
-    PAYMENT_GATEWAY: 'stripe',
-    STRIPE_SECRET_KEY: 'sk_live_realkey',
-    STRIPE_WEBHOOK_SECRET: 'whsec_real',
+    SQUARE_ENVIRONMENT: 'production',
+    SQUARE_APPLICATION_ID: 'sq0idp-realapp',
+    SQUARE_LOCATION_ID: 'L_REAL',
+    SQUARE_ACCESS_TOKEN: 'EAAAl_realtoken',
     BACKUP_OFFSITE_CMD: 'rclone copy "$1" remote:backups',
   };
 }
@@ -100,8 +101,8 @@ describe('the deploy preflight', () => {
     );
   });
 
-  it('catches test Stripe keys on a live gateway', () => {
-    assert.ok(errors({ ...goodEnv(), STRIPE_SECRET_KEY: 'sk_test_abc' }).includes('STRIPE_SECRET_KEY'));
+  it('catches sandbox Square credentials on a live deploy', () => {
+    assert.ok(errors({ ...goodEnv(), SQUARE_ENVIRONMENT: 'sandbox' }).includes('SQUARE_ENVIRONMENT'));
   });
 
   it('catches a secret someone typed instead of generated', () => {
@@ -127,6 +128,6 @@ describe('the deploy preflight', () => {
     assert.deepEqual(errors(noBackup), []);
 
     assert.ok(warnings({ ...goodEnv(), TRUST_PROXY: 'false' }).includes('TRUST_PROXY'));
-    assert.ok(warnings({ ...goodEnv(), PAYMENT_GATEWAY: 'manual' }).includes('PAYMENT_GATEWAY'));
+    assert.ok(warnings({ ...goodEnv(), SQUARE_ACCESS_TOKEN: '' }).includes('SQUARE_ACCESS_TOKEN'));
   });
 });
