@@ -149,8 +149,8 @@ export async function settleCollectedPayment(
 /**
  * A lead often already has their house on file — dropped from the map, or
  * added when they were first logged. Signing them up uses that house rather
- * than tripping over it as a duplicate; anybody else's house at the same
- * address is still refused.
+ * than adding a second copy of it; anyone else at the same address gets
+ * their own property row.
  */
 async function propertyFor(
   customerId: string,

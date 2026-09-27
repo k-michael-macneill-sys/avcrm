@@ -2,7 +2,7 @@ import type { Knex } from 'knex';
 import { db as defaultDb } from '../db/client';
 import type { BranchScope } from '../types/auth';
 import type { LeadPin, PinStatus } from '../types/models';
-import { ApiError, forbidden, notFound } from '../utils/errors';
+import { forbidden, notFound } from '../utils/errors';
 import { applyBranchScope } from '../utils/scope';
 import { createCustomer } from './customers';
 import { createProperty } from './properties';
@@ -338,15 +338,7 @@ async function leadCustomer(
       access_notes: null,
       priority_flag: false,
     };
-    try {
-      // A savepoint, so a clash with an address already on file rolls back
-      // just this step and the lead is still written.
-      await db.transaction((savepoint) => createProperty(customer.id, scope, house, savepoint));
-    } catch (err) {
-      // The house is already somebody's on the books. The lead still counts;
-      // the office can sort out whose address it is.
-      if (!(err instanceof ApiError && err.status === 409)) throw err;
-    }
+    await createProperty(customer.id, scope, house, db);
   }
 
   return customer.id;

@@ -2,15 +2,13 @@ import type { Knex } from 'knex';
 import { db as defaultDb } from '../db/client';
 import type { BranchScope } from '../types/auth';
 import type { Property } from '../types/models';
-import { badRequest, conflict, notFound } from '../utils/errors';
+import { badRequest, notFound } from '../utils/errors';
 import { offsetOf, paginated, type Paginated, type Pagination } from '../utils/pagination';
-import { isPgError, PG_FK_VIOLATION, PG_UNIQUE_VIOLATION } from '../utils/pg';
 import { applyBranchScope } from '../utils/scope';
 
 /**
- * These two expressions must stay identical to the ones in the
- * properties_normalized_address_unique index, or the duplicate pre-check and
- * the database will disagree.
+ * These two expressions match properties_normalized_address_index, so the
+ * lookup for other customers at the same address uses it.
  */
 const NORMALIZED_POSTAL = "upper(regexp_replace(properties.postal_code, '\\s+', '', 'g'))";
 const NORMALIZED_LINE1 =
@@ -176,31 +174,13 @@ export async function createProperty(
     throw badRequest('customer_id does not match a customer you can access');
   }
 
-  // Checked before the insert rather than after it fails: this runs inside
-  // other transactions (a deal, a lead from the map), and after a failed
-  // statement Postgres refuses every query until rollback — including the
-  // one that would say who already has the address.
-  const existing = await findDuplicateAddress(input.postal_code, input.address_line1, scope, db);
-  if (existing) {
-    throw conflict('That address is already on the books', existing);
+  const [property] = await db('properties')
+    .insert({ customer_id: customerId, ...normalize(input) })
+    .returning('*');
+  if (!property) {
+    throw new Error('Insert returned no property row');
   }
-
-  try {
-    const [property] = await db('properties')
-      .insert({ customer_id: customerId, ...normalize(input) })
-      .returning('*');
-    if (!property) {
-      throw new Error('Insert returned no property row');
-    }
-    return property;
-  } catch (err) {
-    // Two reps signing the same house at the same moment: the index is the
-    // backstop the check above cannot be.
-    if (isPgError(err, PG_UNIQUE_VIOLATION)) {
-      throw conflict('That address is already on the books');
-    }
-    throw err;
-  }
+  return property;
 }
 
 export async function updateProperty(
@@ -217,18 +197,11 @@ export async function updateProperty(
   // Confirm visibility first: the update itself cannot join to customers.
   await getProperty(id, scope, db);
 
-  try {
-    const [property] = await db('properties').where({ id }).update(patch).returning('*');
-    if (!property) {
-      throw notFound('Property not found');
-    }
-    return property;
-  } catch (err) {
-    if (isPgError(err, PG_UNIQUE_VIOLATION)) {
-      throw conflict('That address is already on the books');
-    }
-    throw err;
+  const [property] = await db('properties').where({ id }).update(patch).returning('*');
+  if (!property) {
+    throw notFound('Property not found');
   }
+  return property;
 }
 
 

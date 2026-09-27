@@ -50,7 +50,7 @@ describe('customers and the addresses they own', () => {
     assert.equal(check.body.data.duplicate.branch_name, 'Kingston');
   });
 
-  it('refuses the duplicate itself, with the existing one in the error', async () => {
+  it('files a second property at an address already on the books', async () => {
     const world = h.world();
     const existing = await makeCustomer(world.branches.kingston, world.users.sales);
 
@@ -67,9 +67,8 @@ describe('customers and the addresses they own', () => {
       },
     });
 
-    assert.equal(reply.status, 409);
-    assert.equal(reply.body.error.details.property_id, existing.property_id);
-    assert.equal(reply.body.error.details.branch_name, 'Kingston');
+    assert.equal(reply.status, 201, JSON.stringify(reply.body));
+    assert.notEqual(reply.body.data.id, existing.property_id);
   });
 
   it('deletes a customer nobody has signed', async () => {
