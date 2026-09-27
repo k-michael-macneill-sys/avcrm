@@ -36,6 +36,10 @@ async function main(): Promise<void> {
   const app = createApp();
   const server = app.listen(config.port, () => {
     logger.info(`API listening on http://localhost:${config.port} (${config.env})`);
+    logger.info(`Customer links (card, pay, review) point at ${config.messaging.appBaseUrl}`);
+    if (config.isProduction && /\/\/(localhost|127\.0\.0\.1)\b/.test(config.messaging.appBaseUrl)) {
+      logger.error('APP_BASE_URL is not set, so customer links point at localhost and will not open. Set it to this site\'s public https address.');
+    }
   });
 
   const shutdown = (signal: string) => {

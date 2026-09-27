@@ -63,7 +63,13 @@ const envSchema = z.object({
   SECRETS_KEY: z.string().min(32, 'SECRETS_KEY must be at least 32 characters').optional(),
 
   // Where the customer-facing links in outbound messages point.
-  APP_BASE_URL: z.string().url().default('http://localhost:3000'),
+  APP_BASE_URL: blankIsUnset(z.string().trim().url()),
+  /**
+   * Set by Render on every web service to its public address. Used when
+   * APP_BASE_URL is not, so card and pay links never point at localhost on
+   * a deploy nobody configured.
+   */
+  RENDER_EXTERNAL_URL: blankIsUnset(z.string().trim().url()),
   // Where a happy customer is sent to leave a public review.
   GOOGLE_REVIEW_URL: z.string().url().default('https://g.page/r/example/review'),
   // How many times the queue worker retries a message before giving up.
@@ -269,7 +275,7 @@ export const config = {
     apiBase: env.SMS_API_BASE ?? null,
   },
   messaging: {
-    appBaseUrl: env.APP_BASE_URL.replace(/\/+$/, ''),
+    appBaseUrl: (env.APP_BASE_URL ?? env.RENDER_EXTERNAL_URL ?? 'http://localhost:3000').replace(/\/+$/, ''),
     googleReviewUrl: env.GOOGLE_REVIEW_URL,
     maxAttempts: env.MESSAGE_MAX_ATTEMPTS,
   },
