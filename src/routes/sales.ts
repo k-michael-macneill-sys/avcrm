@@ -7,6 +7,8 @@ import {
   resolveBranchScope,
   resolveWriteBranch,
 } from '../middleware/auth';
+import { cleanAgreement, dealFromAgreement } from '../services/agreement';
+import { updateCustomer } from '../services/customers';
 import { openDeal, settleCollectedPayment } from '../services/sales';
 import { requestSignature } from '../services/signing';
 import { BILLING_TYPES, CUSTOMER_STATUSES, PREFERRED_CONTACTS } from '../types/models';
@@ -151,6 +153,62 @@ salesRouter.post(
         customer_id: body.customer_id,
         property: body.property,
         quote: body.quote,
+        lead_pin_id: body.lead_pin_id,
+      },
+      resolveActor(req),
+    );
+
+    res.status(201).json({ data: result });
+  }),
+);
+
+const agreementDealSchema = z.object({
+  branch_id: z.string().uuid().optional(),
+  /** The lead being signed up, when there is one on file already. */
+  customer_id: z.string().uuid().optional(),
+  lead_pin_id: z.string().uuid().optional(),
+  latitude: z.number().min(-90).max(90).nullable().default(null),
+  longitude: z.number().min(-180).max(180).nullable().default(null),
+  /** The PDF agreement's fields, as filled in on screen. */
+  agreement: z.record(z.union([z.string().max(2000), z.boolean()])),
+});
+
+/**
+ * The sign-up as the company's own agreement: the filled-in PDF fields are
+ * the customer, the address, the package and the price. Opens the same deal
+ * /deals does, with the agreement kept on the quote so the signed PDF can be
+ * produced from it.
+ */
+salesRouter.post(
+  '/agreement-deals',
+  asyncHandler(async (req, res) => {
+    const body = parse(agreementDealSchema, req.body);
+    if (!req.user) throw unauthorized();
+
+    const deal = dealFromAgreement(cleanAgreement(body.agreement));
+    const scope = resolveBranchScope(req, body.branch_id);
+    const branchId = body.customer_id ? null : resolveWriteBranch(req, body.branch_id);
+
+    // A lead's details are often thin; what is on the agreement is the latest word.
+    if (body.customer_id) await updateCustomer(body.customer_id, scope, deal.customer);
+
+    const result = await openDeal(
+      branchId,
+      req.user.id,
+      scope,
+      {
+        ...(body.customer_id
+          ? { customer_id: body.customer_id }
+          : { customer: { ...deal.customer, notes: null, status: 'lead' as const } }),
+        property: {
+          ...deal.property,
+          address_line2: null,
+          latitude: body.latitude,
+          longitude: body.longitude,
+          driveway_size_cars: null,
+          priority_flag: false,
+        },
+        quote: { ...deal.quote, notes: null, addon_salt: false, addon_vehicle: false, addon_stairs: false },
         lead_pin_id: body.lead_pin_id,
       },
       resolveActor(req),

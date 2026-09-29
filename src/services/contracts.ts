@@ -14,6 +14,7 @@ import { isPgError, pgConstraint, PG_UNIQUE_VIOLATION } from '../utils/pg';
 import { applyBranchScope } from '../utils/scope';
 import { recordAudit, type AuditActor } from './audit';
 import { generateInvoicesForContract } from './invoices';
+import { attachSignedAgreement } from './agreement';
 import { lock as lockQuote } from './quotes';
 
 /** A quote is signable once it has been shown to the customer. */
@@ -58,6 +59,7 @@ const PUBLIC_CONTRACT_COLUMNS = [
   'contracts.autopay_signed_ip',
   'contracts.autopay_expires_on',
   'contracts.pdf_url',
+  'contracts.provider_signature_url',
   'contracts.status',
   'contracts.created_at',
   'contracts.updated_at',
@@ -85,6 +87,7 @@ export interface ChecklistInput {
 
 export interface ContractInput {
   signature_image_url: string;
+  provider_signature_image_url?: string | null;
   /** Defaults to now: the rep is standing there. */
   signed_at: Date | null;
   signed_lat: number | null;
@@ -198,6 +201,7 @@ export async function createContract(
           customer_id: property.customer_id,
           property_id: property.id,
           signature_image_url: input.signature_image_url,
+          provider_signature_url: input.provider_signature_image_url ?? null,
           signed_at: signedAt,
           // Taken from the request, never the body: that is what makes it
           // evidence that the rep was there.
@@ -228,6 +232,22 @@ export async function createContract(
           checked_at: checked.get(requirement.code) === true ? signedAt : null,
         })),
       );
+    }
+
+    // Signed on the company's PDF agreement: the signed copy is produced
+    // now, inside this transaction, so the contract never exists without it.
+    if (quote.agreement_fields) {
+      const owner = (await trx('customers').where({ id: property.customer_id }).first('branch_id')) as {
+        branch_id: string;
+      };
+      contract.pdf_url = await attachSignedAgreement(trx, {
+        contractId: contract.id,
+        branchId: owner.branch_id,
+        values: quote.agreement_fields,
+        customerSignatureKey: input.signature_image_url,
+        providerSignatureKey: input.provider_signature_image_url ?? null,
+        signedAt,
+      });
     }
 
     // Somebody with a signed contract is not a lead any more. Only ever

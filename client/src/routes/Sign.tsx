@@ -2,13 +2,12 @@ import * as React from 'react';
 import { useParams } from 'react-router-dom';
 import logo from '@/assets/drift-logo.jpg';
 import { ErrorNotice, Loading } from '@/components/Misc';
-import { SignaturePad, type SignaturePadHandle } from '@/components/SignaturePad';
+import type { AgreementValues } from '../../../src/types/agreement';
+import { AgreementPdf } from '@/components/AgreementPdf';
+import { SignDialog, type Signature } from '@/components/SignDialog';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { ApiError } from '@/lib/api';
-import { money } from '@/lib/format';
 import { publicGet, publicPost } from '@/lib/publicApi';
-import { ADDONS } from '@/lib/sales';
 import { ThemeToggle } from '@/theme/ThemeToggle';
 
 /**
@@ -37,6 +36,7 @@ interface Invitation {
   addon_stairs: boolean;
   terms_version: string;
   checklist: { code: string; label: string; is_required: boolean }[];
+  agreement: AgreementValues;
 }
 
 export function Sign(): JSX.Element {
@@ -52,7 +52,7 @@ export function Sign(): JSX.Element {
 
   return (
     <div className="min-h-screen px-4 py-8">
-      <div className="mx-auto w-full max-w-2xl">
+      <div className="mx-auto w-full max-w-3xl">
         <div className="mb-6 flex items-center justify-between">
           <img src={logo} alt="Drift Property Services" className="h-12 w-auto rounded-md" />
           <ThemeToggle />
@@ -78,35 +78,23 @@ export function Sign(): JSX.Element {
 }
 
 function Agreement({ token, invitation: inv }: { token: string; invitation: Invitation }): JSX.Element {
-  const padRef = React.useRef<SignaturePadHandle>(null);
-  const [confirmed, setConfirmed] = React.useState<Record<string, boolean>>({});
+  const [signature, setSignature] = React.useState<Signature | null>(null);
+  const [signing, setSigning] = React.useState(false);
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [done, setDone] = React.useState(false);
 
-  const monthly = inv.billing_type === 'monthly';
-  const includes = ADDONS.filter((a) => inv[a.key]).map((a) => a.label);
-  const missing = inv.checklist.filter((c) => c.is_required && !confirmed[c.code]);
-
   const submit = async (): Promise<void> => {
     setError(null);
-    if (missing.length > 0) {
-      setError(`Please confirm: ${missing.map((m) => m.label.toLowerCase()).join(', ')}.`);
-      return;
-    }
-    const blob = await padRef.current?.toBlob();
-    if (!blob) {
-      setError('Please sign in the box above.');
+    if (!signature) {
+      setError('Please sign on the “Customer signature” line — tap it to open the signing pad.');
       return;
     }
     setPending(true);
     try {
       const result = await publicPost<{ contract_id: string; card_url: string | null }>(
         `/public/sign/${encodeURIComponent(token)}`,
-        {
-          signature_png: await toDataUrl(blob),
-          confirmed: Object.keys(confirmed).filter((code) => confirmed[code]),
-        },
+        { signature_png: await toDataUrl(signature.blob), confirmed: [] },
       );
       if (result.card_url) {
         window.location.assign(result.card_url);
@@ -133,68 +121,50 @@ function Agreement({ token, invitation: inv }: { token: string; invitation: Invi
   }
 
   return (
-    <Panel>
-      <h1 className="text-2xl font-semibold tracking-tight">Snow clearing agreement</h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        For {inv.customer_name} · {inv.branch_name}
-      </p>
+    <>
+      <Panel>
+        <h1 className="text-2xl font-semibold tracking-tight">Your snow removal agreement</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          For {inv.customer_name} · {inv.branch_name}. Read it through, then tap the highlighted “Customer signature”
+          line to sign.
+        </p>
+      </Panel>
 
-      <dl className="mt-5 grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
-        <Item label="Service address">
-          {inv.address_line1}
-          {inv.address_line2 ? `, Unit ${inv.address_line2}` : ''}
-          <br />
-          {inv.city}, {inv.province} {inv.postal_code}
-        </Item>
-        <Item label="Season">
-          {inv.season_start} to {inv.season_end}
-        </Item>
-        <Item label="Includes">{['Driveway clearing', ...includes].join(', ')}</Item>
-        <Item label={monthly ? 'Price' : 'Season price'}>
-          {Number(inv.initial_price) > Number(inv.discounted_price) ? (
-            <span className="mr-1 text-muted-foreground line-through">{money(inv.initial_price)}</span>
-          ) : null}
-          {money(inv.discounted_price)}
-          {monthly && inv.recurring_price ? (
-            <span className="block text-muted-foreground">
-              first month, then {money(inv.recurring_price)} per month, charged to your card automatically
-            </span>
-          ) : (
-            <span className="block text-muted-foreground">one payment for the season</span>
-          )}
-        </Item>
-      </dl>
-
-      <div className="mt-6 flex flex-col gap-2 border-t border-border pt-5">
-        {inv.checklist.map((c) => (
-          <label key={c.code} className="flex items-start gap-2 text-sm">
-            <Checkbox
-              className="mt-0.5"
-              checked={confirmed[c.code] ?? false}
-              onCheckedChange={(v) => setConfirmed((s) => ({ ...s, [c.code]: v === true }))}
-            />
-            <span>
-              {c.label}
-              {c.is_required ? <span className="text-critical"> *</span> : null}
-            </span>
-          </label>
-        ))}
+      <div className="my-4">
+        <AgreementPdf
+          values={inv.agreement}
+          signatures={{ customer_signature: signature?.url ?? null }}
+          onSign={() => setSigning(true)}
+          invalid={error && !signature ? ['customer_signature'] : []}
+        />
       </div>
 
-      <p className="mb-1.5 mt-6 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-        Your signature
-      </p>
-      <SignaturePad ref={padRef} />
-      <p className="text-xs text-muted-foreground">
-        By signing you agree to the service agreement (version {inv.terms_version}). Next you'll add a card on our
-        payment provider's secure page — we never see your card number.
-      </p>
+      <Panel>
+        <p className="text-xs text-muted-foreground">
+          By signing you agree to this agreement, including the Terms & Conditions on page 2. Next you'll add a card on
+          our payment provider's secure page — we never see your card number.
+        </p>
+        {error ? <div className="mt-4"><ErrorNotice message={error} /></div> : null}
+        <Button type="button" className="mt-5 w-full" disabled={pending} onClick={() => void submit()}>
+          {pending ? 'Signing…' : 'Sign and continue to payment'}
+        </Button>
+      </Panel>
 
-      {error ? <div className="mt-4"><ErrorNotice message={error} /></div> : null}
-      <Button type="button" className="mt-5 w-full" disabled={pending} onClick={() => void submit()}>
-        {pending ? 'Signing…' : 'Sign and continue to payment'}
-      </Button>
-    </Panel>
+      <SignDialog
+        field={signing ? 'customer_signature' : null}
+        onClose={() => setSigning(false)}
+        onSigned={(_field, sig) => {
+          setSignature(sig);
+          setSigning(false);
+          setError(null);
+        }}
+        onClear={() => {
+          setSignature(null);
+          setSigning(false);
+        }}
+        hasSignature={!!signature}
+      />
+    </>
   );
 }
 
@@ -215,11 +185,3 @@ function Panel({ children }: { children: React.ReactNode }): JSX.Element {
   );
 }
 
-function Item({ label, children }: { label: string; children: React.ReactNode }): JSX.Element {
-  return (
-    <div>
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5 text-foreground">{children}</dd>
-    </div>
-  );
-}

@@ -1,4 +1,5 @@
 import { Link, useParams, useNavigate } from 'react-router-dom';
+import { FileText } from 'lucide-react';
 import type {
   CardSetup,
   ChecklistRequirement,
@@ -18,6 +19,7 @@ import { FileImage } from '@/components/FileWidgets';
 import { Field, FieldList, Loading, ErrorNotice } from '@/components/Misc';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/auth/AuthContext';
+import { openFile } from '@/lib/upload';
 import { useQuery } from '@/lib/useQuery';
 import { useSubmit } from '@/lib/useSubmit';
 import * as api from '@/lib/api';
@@ -108,6 +110,16 @@ export function ContractDetail(): JSX.Element {
             alt="The signature captured at the door"
             className="block w-full max-w-[340px] rounded-md border border-border bg-white p-1.5"
           />
+          {contract.pdf_url ? (
+            <Button
+              type="button"
+              variant="secondary"
+              className="mt-3"
+              onClick={() => void openFile(contract.pdf_url!, 'signed-agreement.pdf')}
+            >
+              <FileText className="size-4" /> Signed agreement (PDF)
+            </Button>
+          ) : null}
         </div>
 
         {actionError ? <ErrorNotice message={actionError} /> : null}

@@ -45,6 +45,10 @@ export interface QuoteInput {
   addon_salt: boolean;
   addon_vehicle: boolean;
   addon_stairs: boolean;
+  /** From the PDF agreement sign-up only. */
+  package?: 'basic' | 'premium' | null;
+  addons?: string[];
+  agreement_fields?: Record<string, string | boolean> | null;
 }
 
 /** Quotes are scoped through their property's customer's branch. */
@@ -134,6 +138,9 @@ export async function createQuote(
           season_end: input.season_end,
           status: input.status,
           notes: input.notes,
+          package: input.package ?? null,
+          addons: input.addons ?? [],
+          agreement_fields: input.agreement_fields ?? null,
         })
         .returning('*');
       if (!quote) {

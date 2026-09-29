@@ -13,6 +13,8 @@ import {
   listChecklistRequirements,
   type ContractWithChecklist,
 } from './contracts';
+import type { AgreementValues } from '../types/agreement';
+import { agreementFromDeal } from './agreement';
 import { enqueueMessage } from './messages';
 import { keyFor, ruleFor, storage } from './storage';
 
@@ -68,6 +70,8 @@ export interface SigningInvitation {
   terms_version: string;
   /** What the customer confirms before signing. The card comes after. */
   checklist: { code: string; label: string; is_required: boolean }[];
+  /** The agreement's fields as filled in, for showing the PDF being signed. */
+  agreement: AgreementValues;
 }
 
 interface QuoteRow {
@@ -93,6 +97,9 @@ interface QuoteRow {
   addon_salt: boolean;
   addon_vehicle: boolean;
   addon_stairs: boolean;
+  agreement_fields: AgreementValues | null;
+  phone: string | null;
+  access_notes: string | null;
 }
 
 const QUOTE_COLUMNS = [
@@ -107,7 +114,9 @@ const QUOTE_COLUMNS = [
   'quotes.addon_salt',
   'quotes.addon_vehicle',
   'quotes.addon_stairs',
+  'quotes.agreement_fields',
   'customers.id as customer_id',
+  'customers.phone',
   'customers.branch_id',
   'customers.email',
   'customers.first_name',
@@ -118,6 +127,7 @@ const QUOTE_COLUMNS = [
   'properties.city',
   'properties.province',
   'properties.postal_code',
+  'properties.access_notes',
 ];
 
 function quoteQuery(db: Knex): Knex.QueryBuilder {
@@ -242,6 +252,11 @@ export async function openInvitation(
     addon_stairs: quote.addon_stairs,
     expires_at: request.expires_at,
     terms_version: CURRENT_TERMS_VERSION,
+    agreement: agreementFromDeal(
+      { first_name: quote.first_name, last_name: quote.last_name, email: quote.email, phone: quote.phone },
+      quote,
+      quote,
+    ),
     checklist: (await listChecklistRequirements(db))
       .filter((r) => r.code !== CARD_ON_FILE)
       .map((r) => ({ code: r.code, label: r.label, is_required: r.is_required })),

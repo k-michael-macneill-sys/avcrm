@@ -47,6 +47,9 @@ export interface CustomerPin {
   addon_salt: boolean;
   addon_vehicle: boolean;
   addon_stairs: boolean;
+  /** From the PDF agreement: 'basic' or 'premium', and its add-on codes. */
+  package: string | null;
+  addons: string[];
 }
 
 function inBounds(qb: Knex.QueryBuilder, table: string, b: Bounds): Knex.QueryBuilder {
@@ -111,7 +114,7 @@ export async function listCustomerPins(
     'properties.city',
     'properties.access_notes',
     'properties.priority_flag',
-  )) as Omit<CustomerPin, 'billing_type' | 'addon_salt' | 'addon_vehicle' | 'addon_stairs'>[];
+  )) as Omit<CustomerPin, 'billing_type' | 'addon_salt' | 'addon_vehicle' | 'addon_stairs' | 'package' | 'addons'>[];
 
   // What each house is paying for, from its active contract.
   const services: {
@@ -120,6 +123,8 @@ export async function listCustomerPins(
     addon_salt: boolean;
     addon_vehicle: boolean;
     addon_stairs: boolean;
+    package: string | null;
+    addons: string[];
   }[] = await db('contracts')
     .join('quotes', 'quotes.id', 'contracts.quote_id')
     .whereIn(
@@ -133,6 +138,8 @@ export async function listCustomerPins(
       'quotes.addon_salt',
       'quotes.addon_vehicle',
       'quotes.addon_stairs',
+      'quotes.package',
+      'quotes.addons',
     );
   const byProperty = new Map(services.map((s) => [s.property_id, s]));
 
@@ -144,6 +151,8 @@ export async function listCustomerPins(
       addon_salt: service?.addon_salt ?? false,
       addon_vehicle: service?.addon_vehicle ?? false,
       addon_stairs: service?.addon_stairs ?? false,
+      package: service?.package ?? null,
+      addons: service?.addons ?? [],
     };
   });
 }

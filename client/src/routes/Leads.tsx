@@ -15,6 +15,7 @@ import * as api from '@/lib/api';
 import { relative } from '@/lib/format';
 import { addressAt, loadGoogleMaps, type GeocodedAddress } from '@/lib/googleMaps';
 import { usePublicConfig } from '@/lib/publicApi';
+import { AGREEMENT_ADDONS } from '../../../src/types/agreement';
 import { ADDONS } from '@/lib/sales';
 import { useQuery } from '@/lib/useQuery';
 import { useSubmit } from '@/lib/useSubmit';
@@ -44,6 +45,8 @@ interface CustomerPin {
   addon_salt: boolean;
   addon_vehicle: boolean;
   addon_stairs: boolean;
+  package: string | null;
+  addons: string[];
 }
 
 type Layer = PinStatus | 'customer';
@@ -638,7 +641,11 @@ function ExistingPin({
 }
 
 function CustomerCard({ customer }: { customer: CustomerPin }): JSX.Element {
-  const services = ADDONS.filter((a) => customer[a.key]).map((a) => a.label);
+  const services = [
+    ...(customer.package ? [`${customer.package === 'premium' ? 'Premium' : 'Basic'} package`] : ['Driveway']),
+    ...AGREEMENT_ADDONS.filter((a) => customer.addons.includes(a.code)).map((a) => a.label),
+    ...ADDONS.filter((a) => customer[a.key]).map((a) => a.label),
+  ];
   return (
     <div className="pr-6 text-sm">
       <p className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -653,7 +660,7 @@ function CustomerCard({ customer }: { customer: CustomerPin }): JSX.Element {
       </p>
       <p className="mt-2">
         <span className="text-muted-foreground">Services: </span>
-        {['Driveway', ...services].join(', ')}
+        {services.join(', ')}
       </p>
       {customer.access_notes ? (
         <p className="mt-2 rounded-lg bg-accent/40 px-3 py-2 text-secondary-foreground">{customer.access_notes}</p>

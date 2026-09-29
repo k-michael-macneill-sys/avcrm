@@ -316,6 +316,10 @@ export interface Quote {
   addon_salt: boolean;
   addon_vehicle: boolean;
   addon_stairs: boolean;
+  /** Set when the quote was written on the PDF agreement; null before that. */
+  agreement_fields: Record<string, string | boolean> | null;
+  package: 'basic' | 'premium' | null;
+  addons: string[];
   created_at: Date;
   updated_at: Date;
 }
@@ -355,6 +359,7 @@ export interface Contract {
   payment_method_last4: string | null;
   payment_method_brand: string | null;
   pdf_url: string | null;
+  provider_signature_url: string | null;
   status: ContractStatus;
   created_at: Date;
   updated_at: Date;
