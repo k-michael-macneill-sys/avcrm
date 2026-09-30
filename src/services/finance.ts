@@ -1,6 +1,14 @@
 import type { Knex } from 'knex';
 import { db as defaultDb } from '../db/client';
 import { EXPENSE_CATEGORY_INFO } from './expenses';
+import { billingPeriods, today } from './invoices';
+import {
+  contractRevenueByMonth,
+  roundCents,
+  SEASON_LENGTH,
+  seasonFor,
+  type Season,
+} from './projectionModel';
 
 /**
  * The top-line money: what was billed, what came in, what went out on
@@ -175,5 +183,94 @@ export async function financialSummary(
         count: Number(row.count),
       }))
       .sort((a, b) => cents(b.total) - cents(a.total)),
+  };
+}
+
+export interface FinanceProjection {
+  season: Season;
+  /** Customers marked active, as the Customers list counts them. */
+  active_customers: number;
+  /** Active customers with an active contract that bills this season. */
+  contracted_customers: number;
+  active_operators: number;
+  /** The contracts' revenue, November to March. */
+  monthly_revenue: string[];
+  base_revenue: string;
+  /** base_revenue per contracted customer; zero while there are none. */
+  average_contract_value: string;
+}
+
+interface ProjectedContract {
+  customer_id: string;
+  billing_type: 'monthly' | 'seasonal_upfront';
+  discounted_price: string;
+  recurring_price: string | null;
+  season_start: string;
+  season_end: string;
+}
+
+/**
+ * What the season looks like on the contracts already signed: every active
+ * contract of an active customer that has not ended before the season starts,
+ * billed the way the invoices will bill it (see contractRevenueByMonth).
+ */
+export async function financialProjection(
+  options: { branch_id?: string; today?: string },
+  db: Knex = defaultDb,
+): Promise<FinanceProjection> {
+  const season = seasonFor(options.today ?? today());
+
+  const customers = db('customers').where({ status: 'active' });
+  const contracts = db('contracts')
+    .join('customers', 'customers.id', 'contracts.customer_id')
+    .join('quotes', 'quotes.id', 'contracts.quote_id')
+    .where('contracts.status', 'active')
+    .andWhere('customers.status', 'active')
+    .andWhere('quotes.season_end', '>=', season.start)
+    .select(
+      'contracts.customer_id',
+      'quotes.billing_type',
+      'quotes.discounted_price',
+      'quotes.recurring_price',
+      db.raw(`to_char(quotes.season_start, 'YYYY-MM-DD') as season_start`),
+      db.raw(`to_char(quotes.season_end, 'YYYY-MM-DD') as season_end`),
+    );
+  const operators = db('users').where({ role: 'operator', is_active: true });
+  if (options.branch_id) {
+    customers.where('branch_id', options.branch_id);
+    contracts.where('customers.branch_id', options.branch_id);
+    operators.where('branch_id', options.branch_id);
+  }
+
+  const [[customerCount], rows, [operatorCount]] = await Promise.all([
+    customers.count({ count: '*' }) as Promise<{ count: string }[]>,
+    contracts as Promise<ProjectedContract[]>,
+    operators.count({ count: '*' }) as Promise<{ count: string }[]>,
+  ]);
+
+  const months = new Array<number>(SEASON_LENGTH).fill(0);
+  const contracted = new Set<string>();
+  for (const row of rows) {
+    contracted.add(row.customer_id);
+    const revenue = contractRevenueByMonth({
+      billing_type: row.billing_type,
+      discounted_price: Number(row.discounted_price),
+      recurring_price: row.recurring_price === null ? null : Number(row.recurring_price),
+      periods: billingPeriods(row.season_start, row.season_end).length,
+    });
+    revenue.forEach((amount, i) => {
+      months[i] = roundCents((months[i] ?? 0) + amount);
+    });
+  }
+  const base = roundCents(months.reduce((sum, m) => sum + m, 0));
+
+  return {
+    season,
+    active_customers: Number(customerCount?.count ?? 0),
+    contracted_customers: contracted.size,
+    active_operators: Number(operatorCount?.count ?? 0),
+    monthly_revenue: months.map((m) => m.toFixed(2)),
+    base_revenue: base.toFixed(2),
+    average_contract_value: (contracted.size > 0 ? base / contracted.size : 0).toFixed(2),
   };
 }

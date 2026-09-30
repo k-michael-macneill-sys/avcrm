@@ -15,6 +15,7 @@ import {
   CloudSnow,
   ArrowLeftRight,
   TrendingUp,
+  LineChart as LineChartIcon,
   BookOpenCheck,
   Mail,
   Megaphone,
@@ -83,6 +84,7 @@ const OPERATIONS_NAV: NavItem[] = [
 
 const BUSINESS_NAV: NavItem[] = [
   { to: '/business', label: 'Financials', icon: TrendingUp, roles: CORPORATE, end: true },
+  { to: '/business/projections', label: 'Projections', icon: LineChartIcon, roles: CORPORATE },
   { to: '/business/bookkeeping', label: 'Bookkeeping', icon: BookOpenCheck, roles: CORPORATE },
   { to: '/business/cold-email', label: 'Cold Email', icon: Mail, roles: CORPORATE },
   { to: '/business/meta-ads', label: 'Meta Ads', icon: Megaphone, roles: CORPORATE },
@@ -108,6 +110,7 @@ const PHONE_TABS = [
   '/contracts',
   '/operators',
   '/business',
+  '/business/projections',
   '/business/bookkeeping',
   '/business/cold-email',
   '/business/meta-ads',

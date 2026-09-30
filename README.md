@@ -849,6 +849,7 @@ link carries the real `/app/…` href so middle-click, "open in new tab" and
 | Reports | The branch comparison, revenue by month, operator scorecards |
 | *Business Console* | |
 | Financials | Collected against expenses, net cash, by month and by category |
+| Projections | The season (Nov 1 – Mar 31) on signed contracts against operator pay, and a What-If report |
 | Bookkeeping | Receipts and deductions: **Add +**, and the list sorted four ways |
 | Cold Email | Who opted in, where each is in the sequence, the landing page form |
 | Meta Ads | The slot for Meta ads performance |
@@ -1533,6 +1534,37 @@ actually kept. Revenue is bucketed by the billing period it pays for, exactly
 as on Reports, so the two pages never disagree about a month; expenses by the
 date on the receipt. Narrowing to a branch drops company-wide expenses — a
 branch's figures should not carry head office's insurance.
+
+### Financial projections
+
+The snow season is always exactly five months, 1 November to 31 March: the
+one under way, or from April on the next one. `GET /finance/projection`
+counts active customers (as the Customers list does) and bills every active
+contract of an active customer the way its invoices will. A seasonal
+contract pays once, in November. A monthly one pays its discounted first
+month and then its recurring price, for as many months as it runs, up to
+five. The average contract value is that revenue divided by the customers
+with a contract.
+
+The page adds operator salaries, one line per position (or the whole crew on
+one line), which it remembers on that device. It draws cumulative revenue,
+labour and net month by month, and redraws as the salaries change:
+
+- **Labour** = monthly salaries × 5
+- **Base net** = projected revenue − labour
+
+Below that is the **What-If** generator. It is prefilled with today's
+customer count and average contract value, uses the salaries from above,
+and runs these formulas when you press **Generate Report**:
+
+- **Effective customers** = target × (1 − churn% / 100)
+- **Service revenue** = effective customers × ACV
+- **Cancellation fees** = (target − effective customers) × fee
+- **Expenses** = (salaries + other monthly expenses) × 5
+- **Net** = service revenue + cancellation fees − expenses
+
+The formulas live in `src/services/projectionModel.ts`, shared by the server
+and the page.
 
 ### Bookkeeping
 
