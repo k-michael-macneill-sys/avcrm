@@ -7,6 +7,7 @@ import { ConfirmDelete } from '@/components/ConfirmDelete';
 import { ErrorNotice, Loading } from '@/components/Misc';
 import { PageHeader } from '@/components/PageHeader';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -408,9 +409,17 @@ interface LeadContactForm {
   last_name: string;
   phone: string;
   email: string;
+  /** They said yes to the cold email sequence, at the door. */
+  email_opt_in: boolean;
 }
 
-const EMPTY_CONTACT: LeadContactForm = { first_name: '', last_name: '', phone: '', email: '' };
+const EMPTY_CONTACT: LeadContactForm = {
+  first_name: '',
+  last_name: '',
+  phone: '',
+  email: '',
+  email_opt_in: false,
+};
 
 function contactBody(c: LeadContactForm) {
   return {
@@ -418,6 +427,7 @@ function contactBody(c: LeadContactForm) {
     last_name: c.last_name.trim(),
     phone: c.phone.trim() || null,
     email: c.email.trim() || null,
+    email_opt_in: c.email_opt_in && c.email.trim() !== '',
   };
 }
 
@@ -696,7 +706,7 @@ function ContactFields({
   value: LeadContactForm;
   onChange: (next: LeadContactForm) => void;
 }): JSX.Element {
-  const field = (key: keyof LeadContactForm, label: string, type = 'text') => (
+  const field = (key: Exclude<keyof LeadContactForm, 'email_opt_in'>, label: string, type = 'text') => (
     <div className="flex flex-col gap-1">
       <Label htmlFor={`lead-${key}`} className="text-xs">
         {label}
@@ -716,6 +726,18 @@ function ContactFields({
       {field('phone', 'Phone', 'tel')}
       {field('email', 'Email', 'email')}
       <p className="col-span-2 text-xs text-muted-foreground">A phone or an email, so someone can follow up.</p>
+      <label className="col-span-2 flex items-start gap-2 text-xs text-foreground">
+        <Checkbox
+          className="mt-0.5"
+          checked={value.email_opt_in}
+          disabled={value.email.trim() === ''}
+          onCheckedChange={(v) => onChange({ ...value, email_opt_in: v === true })}
+        />
+        <span>
+          They agreed to get follow-up emails about snow clearing. Only tick this if they said yes — they can
+          unsubscribe from any email.
+        </span>
+      </label>
     </div>
   );
 }

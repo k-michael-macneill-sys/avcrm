@@ -21,6 +21,8 @@
     "job:message-queue": "tsx src/jobs/messageQueue.ts",
     "job:review-requests": "tsx src/jobs/reviewRequests.ts",
     "job:billing": "tsx src/jobs/billing.ts",
+    "job:weather-alerts": "tsx src/jobs/weatherAlerts.ts",
+    "job:cold-email": "tsx src/jobs/coldEmail.ts",
     "build:api": "tsc",
     "build:web": "vite build --config client/vite.config.ts",
     "dev:web": "vite --config client/vite.config.ts",

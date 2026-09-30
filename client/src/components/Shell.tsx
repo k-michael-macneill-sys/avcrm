@@ -12,9 +12,15 @@ import {
   LogOut,
   MapPin,
   Menu,
+  CloudSnow,
+  ArrowLeftRight,
+  TrendingUp,
+  BookOpenCheck,
+  Mail,
+  Megaphone,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
@@ -38,7 +44,29 @@ const SELLERS: UserRole[] = ['corporate', 'sales'];
 const CREW: UserRole[] = ['corporate', 'operator'];
 const CORPORATE: UserRole[] = ['corporate'];
 
-const NAV: NavItem[] = [
+/**
+ * Two consoles. Operations is the day-to-day running of the routes — selling,
+ * clearing, billing — and is where everybody starts. Business is the owner's
+ * side: the money, the books and the marketing. Business pages all live
+ * under /business, so the address says which console a page belongs to.
+ */
+export type ConsoleName = 'operations' | 'business';
+
+const CONSOLE_LABEL: Record<ConsoleName, string> = {
+  operations: 'Operations Console',
+  business: 'Business Console',
+};
+
+const CONSOLE_HOME: Record<ConsoleName, string> = {
+  operations: '/',
+  business: '/business',
+};
+
+export function consoleOf(pathname: string): ConsoleName {
+  return pathname === '/business' || pathname.startsWith('/business/') ? 'business' : 'operations';
+}
+
+const OPERATIONS_NAV: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ALL, end: true },
   { to: '/leads', label: 'Leads', icon: MapPin, roles: SELLERS },
   { to: '/customers', label: 'Customers', icon: Users, roles: SELLERS },
@@ -47,10 +75,23 @@ const NAV: NavItem[] = [
   { to: '/work-orders', label: 'Dispatch', icon: Truck, roles: CREW },
   { to: '/invoices', label: 'Invoices', icon: Receipt, roles: CORPORATE },
   { to: '/operators', label: 'Crew', icon: HardHat, roles: CREW },
+  { to: '/weather', label: 'Weather Alerts', icon: CloudSnow, roles: CORPORATE },
   { to: '/reports', label: 'Reports', icon: BarChart3, roles: CORPORATE },
   { to: '/admin', label: 'Company', icon: Building2, roles: CORPORATE },
   { to: '/settings', label: 'Settings', icon: SettingsIcon, roles: CORPORATE },
 ];
+
+const BUSINESS_NAV: NavItem[] = [
+  { to: '/business', label: 'Financials', icon: TrendingUp, roles: CORPORATE, end: true },
+  { to: '/business/bookkeeping', label: 'Bookkeeping', icon: BookOpenCheck, roles: CORPORATE },
+  { to: '/business/cold-email', label: 'Cold Email', icon: Mail, roles: CORPORATE },
+  { to: '/business/meta-ads', label: 'Meta Ads', icon: Megaphone, roles: CORPORATE },
+];
+
+const NAV: Record<ConsoleName, NavItem[]> = {
+  operations: OPERATIONS_NAV,
+  business: BUSINESS_NAV,
+};
 
 /**
  * On a phone the sidebar becomes a bar of tabs along the bottom, where a
@@ -58,7 +99,19 @@ const NAV: NavItem[] = [
  * the sections that earn a tab, most-used first; each person gets the first
  * four they're allowed to see, and everything else lives behind "More".
  */
-const PHONE_TABS = ['/', '/leads', '/work-orders', '/customers', '/quotes', '/contracts', '/operators'];
+const PHONE_TABS = [
+  '/',
+  '/leads',
+  '/work-orders',
+  '/customers',
+  '/quotes',
+  '/contracts',
+  '/operators',
+  '/business',
+  '/business/bookkeeping',
+  '/business/cold-email',
+  '/business/meta-ads',
+];
 const PHONE_TAB_COUNT = 4;
 
 const ROLE_LABEL: Record<UserRole, string> = {
@@ -101,12 +154,60 @@ function SectionLinks({ items }: { items: NavItem[] }): JSX.Element {
   );
 }
 
-function Account(): JSX.Element | null {
+/** Where each console was last left, so switching back lands there again. */
+const LAST_PATH_KEY = 'avcrm.console.last';
+
+function rememberPath(name: ConsoleName, path: string): void {
+  try {
+    const stored = JSON.parse(sessionStorage.getItem(LAST_PATH_KEY) ?? '{}') as Record<string, string>;
+    stored[name] = path;
+    sessionStorage.setItem(LAST_PATH_KEY, JSON.stringify(stored));
+  } catch {
+    // Private windows and blocked storage just start from the console's home.
+  }
+}
+
+function lastPath(name: ConsoleName): string {
+  try {
+    const stored = JSON.parse(sessionStorage.getItem(LAST_PATH_KEY) ?? '{}') as Record<string, string>;
+    const path = stored[name];
+    if (path && consoleOf(path) === name) return path;
+  } catch {
+    // As above.
+  }
+  return CONSOLE_HOME[name];
+}
+
+/** The button at the foot of the menu that flips between the two consoles. */
+function SwitchConsoles({ current }: { current: ConsoleName }): JSX.Element {
+  const navigate = useNavigate();
+  const other: ConsoleName = current === 'operations' ? 'business' : 'operations';
+
+  return (
+    <Button
+      type="button"
+      variant="secondary"
+      className="h-auto w-full justify-start gap-2.5 px-2.5 py-2 text-left max-[720px]:py-3"
+      title={`Go to the ${CONSOLE_LABEL[other]}`}
+      onClick={() => navigate(lastPath(other))}
+    >
+      <ArrowLeftRight className="size-4 shrink-0" />
+      <span className="flex flex-col">
+        <span className="text-[13px] font-medium">Switch Consoles</span>
+        <span className="text-[11px] font-normal text-muted-foreground">to {CONSOLE_LABEL[other]}</span>
+      </span>
+    </Button>
+  );
+}
+
+function Account({ console: current }: { console: ConsoleName }): JSX.Element | null {
   const { user, signOut } = useAuth();
   if (!user) return null;
 
   return (
     <div className="mt-auto flex flex-col gap-3 border-t border-border pt-4">
+      {/* The Business Console is the owner's side, so only corporate can switch. */}
+      {user.role === 'corporate' ? <SwitchConsoles current={current} /> : null}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <Avatar>
@@ -136,10 +237,12 @@ export function Shell(): JSX.Element {
   // Picking a section from the menu navigates; the menu shouldn't linger
   // over the page it just opened.
   useEffect(() => setMenuOpen(false), [pathname]);
+  useEffect(() => rememberPath(consoleOf(pathname), pathname), [pathname]);
 
   if (!user) return <Outlet />;
 
-  const items = NAV.filter((item) => item.roles.includes(user.role));
+  const activeConsole: ConsoleName = user.role === 'corporate' ? consoleOf(pathname) : 'operations';
+  const items = NAV[activeConsole].filter((item) => item.roles.includes(user.role));
   const current = sectionFor(pathname, items);
   const tabs = PHONE_TABS.map((to) => items.find((item) => item.to === to))
     .filter((item): item is NavItem => item !== undefined)
@@ -151,9 +254,14 @@ export function Shell(): JSX.Element {
       <aside className="flex flex-col gap-6 border-r border-border bg-background/70 p-3.5 backdrop-blur-xl max-[720px]:hidden">
         <div className="px-2">
           <img src={logo} alt="Drift Property Services" className="h-9 w-auto rounded-md" />
+          {user.role === 'corporate' ? (
+            <p className="mt-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {CONSOLE_LABEL[activeConsole]}
+            </p>
+          ) : null}
         </div>
         <SectionLinks items={items} />
-        <Account />
+        <Account console={activeConsole} />
       </aside>
 
       {/* Phone: a slim bar on top saying where you are, tabs on the bottom. */}
@@ -180,11 +288,16 @@ export function Shell(): JSX.Element {
             <img src={logo} alt="" className="h-9 w-auto rounded-md" />
             <SheetTitle className="sr-only">Menu</SheetTitle>
             <SheetDescription className="sr-only">Every section you can open</SheetDescription>
+            {user.role === 'corporate' ? (
+              <p className="mt-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                {CONSOLE_LABEL[activeConsole]}
+              </p>
+            ) : null}
           </div>
           <div className="-mx-1 overflow-y-auto px-1">
             <SectionLinks items={items} />
           </div>
-          <Account />
+          <Account console={activeConsole} />
         </SheetContent>
       </Sheet>
 

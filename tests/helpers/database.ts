@@ -16,6 +16,8 @@ import { db } from '../../src/db/client';
 /** Every table that holds test data, children before parents. */
 const TABLES = [
   'audit_log',
+  'weather_alert_runs',
+  'expenses',
   'integration_settings',
   'card_setups',
   'payments',
@@ -24,6 +26,7 @@ const TABLES = [
   'meta_messages',
   'meta_conversations',
   'message_log',
+  'email_leads',
   'message_templates',
   'service_photos',
   'work_orders',

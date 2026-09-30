@@ -4,6 +4,7 @@ import type { BranchScope } from '../types/auth';
 import type { LeadPin, PinStatus } from '../types/models';
 import { forbidden, notFound } from '../utils/errors';
 import { applyBranchScope } from '../utils/scope';
+import { DEFAULT_CONSENT, optIn } from './coldEmail';
 import { createCustomer } from './customers';
 import { createProperty } from './properties';
 
@@ -170,6 +171,11 @@ export interface LeadContact {
   last_name: string;
   email: string | null;
   phone: string | null;
+  /**
+   * They said yes at the door to hearing from us by email, which puts them
+   * into the cold email sequence (services/coldEmail.ts).
+   */
+  email_opt_in?: boolean;
 }
 
 export interface NewPinInput extends PinAddress {
@@ -210,6 +216,7 @@ export async function createPin(
       })
       .returning('*');
     if (!pin) throw new Error('Insert returned no lead_pin row');
+    await enrolFromDoor(pin as LeadPin, userId, input.lead, trx);
     return pin as LeadPin;
   });
 }
@@ -263,8 +270,34 @@ export async function updatePin(
     }
 
     const [updated] = await trx('lead_pins').where({ id }).update(patch).returning('*');
+    await enrolFromDoor(updated as LeadPin, userId, input.lead ?? null, trx);
     return updated as LeadPin;
   });
+}
+
+/** A door-to-door opt-in: the rep ticked the box with the person's say-so. */
+async function enrolFromDoor(
+  pin: LeadPin,
+  userId: string,
+  lead: LeadContact | null,
+  trx: Knex,
+): Promise<void> {
+  if (!lead?.email_opt_in || !lead.email) return;
+  await optIn(
+    {
+      branch_id: pin.branch_id,
+      first_name: lead.first_name,
+      last_name: lead.last_name,
+      email: lead.email,
+      phone: lead.phone,
+      source: 'door_to_door',
+      consent_text: `${DEFAULT_CONSENT} (Agreed in person at ${pin.address_line1 ?? 'the door'}.)`,
+      lead_pin_id: pin.id,
+      customer_id: pin.customer_id,
+      created_by_user_id: userId,
+    },
+    trx,
+  );
 }
 
 /** A pin dropped on the wrong house. Its creator or the office may take it back. */

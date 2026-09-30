@@ -48,6 +48,12 @@ export const TONES: Record<string, Tone> = {
   bounced: 'critical',
   // Flags
   priority: 'serious',
+  // Cold email leads
+  converted: 'good',
+  unsubscribed: 'neutral',
+  // Weather alerts
+  alerted: 'serious',
+  below_threshold: 'neutral',
   // Review routing
   google_review: 'good',
   internal_feedback: 'serious',

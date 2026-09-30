@@ -172,6 +172,25 @@ const envSchema = z.object({
    * deploy.
    */
   META_GRAPH_API_BASE: z.string().trim().url().default('https://graph.facebook.com/v19.0'),
+
+  /**
+   * The weather bot. Forecasts come from Open-Meteo, which needs no key; the
+   * bases are overridable so the suite can point them at a stand-in. From
+   * WEATHER_CHECK_HOUR (the branch's own local time) until midnight it checks
+   * each postal region every hour, and texts or emails the active customers
+   * there once the snow forecast before 5am passes the threshold.
+   */
+  WEATHER_ALERTS_ENABLED: booleanish.default('true'),
+  WEATHER_API_BASE: z.string().trim().url().default('https://api.open-meteo.com/v1'),
+  WEATHER_GEOCODING_API_BASE: z
+    .string()
+    .trim()
+    .url()
+    .default('https://geocoding-api.open-meteo.com/v1'),
+  WEATHER_SNOWFALL_THRESHOLD_CM: z.coerce.number().min(0).max(100).default(3),
+  WEATHER_CHECK_HOUR: z.coerce.number().int().min(0).max(23).default(18),
+  /** The hour the crews start: the forecast window runs up to it. */
+  WEATHER_SERVICE_HOUR: z.coerce.number().int().min(1).max(12).default(5),
 });
 
 /**
@@ -291,6 +310,14 @@ export const config = {
     appSecret: env.META_APP_SECRET ?? null,
     verifyToken: env.META_VERIFY_TOKEN ?? null,
     graphApiBase: env.META_GRAPH_API_BASE.replace(/\/+$/, ''),
+  },
+  weather: {
+    enabled: env.WEATHER_ALERTS_ENABLED,
+    apiBase: env.WEATHER_API_BASE.replace(/\/+$/, ''),
+    geocodingApiBase: env.WEATHER_GEOCODING_API_BASE.replace(/\/+$/, ''),
+    thresholdCm: env.WEATHER_SNOWFALL_THRESHOLD_CM,
+    checkHour: env.WEATHER_CHECK_HOUR,
+    serviceHour: env.WEATHER_SERVICE_HOUR,
   },
 } as const;
 

@@ -180,7 +180,7 @@ export function Reports(): JSX.Element {
           ]}
         />
         <p className="mt-3 text-xs text-muted-foreground">
-          Revenue only — nothing in the system records a cost, so there is no margin here to show.
+          Revenue only. Costs are logged in the Business Console’s Bookkeeping, and netted on its Financials page.
         </p>
       </Section>
 
