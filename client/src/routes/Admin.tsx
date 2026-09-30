@@ -70,6 +70,7 @@ function branchName(branches: Branch[], id: string | null): string {
 function positionOf(user: PublicUser, branches: Branch[]): string {
   if (user.role === 'operator') return 'Operator';
   if (user.role === 'sales') return 'Sales rep';
+  if (user.role === 'branch') return 'Branch sign-in';
   const managed = branches.find((b) => b.manager_user_id === user.id);
   if (managed) return `Manager, ${managed.name}`;
   return 'Corporate';

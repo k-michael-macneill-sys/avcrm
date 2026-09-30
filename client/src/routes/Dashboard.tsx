@@ -20,13 +20,14 @@ import { count, date, money, percent, relative } from '@/lib/format';
  * dashboard.
  */
 export function Dashboard(): JSX.Element {
-  const { isCorporate, isSales } = useAuth();
+  const { isCorporate, isSales, isBranch } = useAuth();
   if (isCorporate) return <CorporateDashboard />;
-  return isSales ? <SalesDashboard /> : <OperatorDashboard />;
+  // A branch's own sign-in writes the branch's deals, so it opens on them.
+  return isSales || isBranch ? <SalesDashboard /> : <OperatorDashboard />;
 }
 
 function SalesDashboard(): JSX.Element {
-  const { user } = useAuth();
+  const { user, branch, isBranch } = useAuth();
   const { data, loading, error } = useQuery(
     () =>
       Promise.all([
@@ -46,8 +47,8 @@ function SalesDashboard(): JSX.Element {
   return (
     <>
       <PageHeader
-        title={`Hi, ${user.first_name}`}
-        subtitle="Your deals"
+        title={isBranch ? `${branch?.name ?? user.first_name} branch` : `Hi, ${user.first_name}`}
+        subtitle={isBranch ? 'Deals signed from this branch’s sign-in' : 'Your deals'}
         actions={
           <Button asChild>
             <Link to="/customers/new">Add customer</Link>

@@ -24,7 +24,7 @@ import { parse } from '../utils/validate';
  */
 export const metaMessagingRouter = Router();
 
-metaMessagingRouter.use(requireAuth, requireRole('corporate', 'sales'));
+metaMessagingRouter.use(requireAuth, requireRole('corporate', 'sales', 'branch'));
 
 const idParamSchema = z.object({ id: z.string().uuid('id must be a UUID') });
 

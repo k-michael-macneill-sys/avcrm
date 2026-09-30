@@ -31,8 +31,8 @@ import { ColdEmail } from '@/routes/ColdEmail';
 import { MetaAds } from '@/routes/MetaAds';
 import { CorporateOnly, RoleOnly } from '@/components/CorporateOnly';
 
-const SELLERS: UserRole[] = ['corporate', 'sales'];
-const CREW: UserRole[] = ['corporate', 'operator'];
+const SELLERS: UserRole[] = ['corporate', 'sales', 'branch'];
+const CREW: UserRole[] = ['corporate', 'operator', 'branch'];
 
 export default function App(): JSX.Element {
   return (

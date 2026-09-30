@@ -39,9 +39,9 @@ interface NavItem {
   end?: boolean;
 }
 
-const ALL: UserRole[] = ['corporate', 'sales', 'operator'];
-const SELLERS: UserRole[] = ['corporate', 'sales'];
-const CREW: UserRole[] = ['corporate', 'operator'];
+const ALL: UserRole[] = ['corporate', 'sales', 'operator', 'branch'];
+const SELLERS: UserRole[] = ['corporate', 'sales', 'branch'];
+const CREW: UserRole[] = ['corporate', 'operator', 'branch'];
 const CORPORATE: UserRole[] = ['corporate'];
 
 /**
@@ -118,6 +118,7 @@ const ROLE_LABEL: Record<UserRole, string> = {
   corporate: 'Corporate',
   sales: 'Sales rep',
   operator: 'Operator',
+  branch: 'Branch',
 };
 
 function initials(firstName: string, lastName: string): string {

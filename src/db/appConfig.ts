@@ -1,4 +1,5 @@
 import type { Knex } from 'knex';
+import { ensureSignInBranches } from '../services/branchSignIn';
 import type {
   ChecklistRequirement,
   DocumentRequirement,
@@ -380,6 +381,8 @@ export const MESSAGE_TEMPLATES: MessageTemplateRow[] = [
 ];
 
 export interface ConfigInstalled {
+  /** The sign-in screen's branches that were missing and have been added. */
+  branches: number;
   document_requirements: number;
   checklist_requirements: number;
   message_templates: number;
@@ -392,6 +395,10 @@ export interface ConfigInstalled {
  * new feature needs, not quietly undo the wording a branch manager chose.
  */
 export async function installAppConfig(knex: Knex): Promise<ConfigInstalled> {
+  // The branches the sign-in screen offers are part of how the app runs, not
+  // sample data: without them the dropdown signs in to nothing.
+  const branches = await ensureSignInBranches(knex);
+
   const docs = await knex('document_requirements')
     .insert(DOCUMENT_REQUIREMENTS)
     .onConflict('code')
@@ -417,6 +424,7 @@ export async function installAppConfig(knex: Knex): Promise<ConfigInstalled> {
     .returning('code');
 
   return {
+    branches,
     document_requirements: docs.length,
     checklist_requirements: checklist.length,
     message_templates: templates.length,

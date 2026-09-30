@@ -75,7 +75,7 @@ const STEPS: Step[] = (() => {
   }
   return steps;
 })();
-const stepOf = (name: string): number => STEPS.findIndex((s) => (s.kind === 'field' ? s.name === name : s.names.includes(name)));
+const NONE: string[] = [];
 
 async function renderTemplate(): Promise<Rendered> {
   const pdfjs = await import('pdfjs-dist');
@@ -131,6 +131,7 @@ export function AgreementPdf({
   signatures,
   onSign,
   invalid = [],
+  locked = NONE,
   signedAt,
 }: {
   values: AgreementValues;
@@ -142,6 +143,11 @@ export function AgreementPdf({
   onSign?: (field: SignatureField) => void;
   /** Fields the server said are missing or wrong, outlined in red. */
   invalid?: string[];
+  /**
+   * Fields shown as filled in but not editable, and skipped by Next: the
+   * city on a branch sign-in's agreement, which the server fills anyway.
+   */
+  locked?: string[];
   signedAt?: Date;
 }): JSX.Element {
   const [rendered, setRendered] = React.useState<Rendered | null>(null);
@@ -187,7 +193,7 @@ export function AgreementPdf({
                 spec={SPEC.get(w.name)!}
                 pageWidth={page.width}
                 value={values[w.name]}
-                editable={!!onChange}
+                editable={!!onChange && !locked.includes(w.name)}
                 bad={invalid.includes(w.name)}
                 signature={
                   SPEC.get(w.name)?.kind === 'signature' ? (signatures[w.name as SignatureField] ?? null) : null
@@ -217,6 +223,7 @@ export function AgreementPdf({
           values={values}
           onChange={onChange}
           onMove={setEditing}
+          locked={locked}
         />
       ) : null}
     </div>
@@ -361,16 +368,22 @@ function FieldEditor({
   values,
   onChange,
   onMove,
+  locked,
 }: {
   name: string | null;
   values: AgreementValues;
   onChange: (next: AgreementValues) => void;
   onMove: (name: string | null) => void;
+  locked: string[];
 }): JSX.Element {
-  const index = name ? stepOf(name) : -1;
-  const step = index >= 0 ? STEPS[index] : undefined;
-  const nextStep = index >= 0 ? STEPS[index + 1] : undefined;
-  const previousStep = index > 0 ? STEPS[index - 1] : undefined;
+  const steps = React.useMemo(
+    () => STEPS.filter((s) => !(s.kind === 'field' && locked.includes(s.name))),
+    [locked],
+  );
+  const index = name ? steps.findIndex((s) => (s.kind === 'field' ? s.name === name : s.names.includes(name))) : -1;
+  const step = index >= 0 ? steps[index] : undefined;
+  const nextStep = index >= 0 ? steps[index + 1] : undefined;
+  const previousStep = index > 0 ? steps[index - 1] : undefined;
   const nameOf = (s: Step | undefined): string | null => (s ? (s.kind === 'field' ? s.name : s.names[0]!) : null);
   const spec = step?.kind === 'field' ? SPEC.get(step.name) : undefined;
   const value = spec && typeof values[spec.name] === 'string' ? (values[spec.name] as string) : '';
@@ -392,7 +405,7 @@ function FieldEditor({
         <DialogHeader>
           <DialogTitle>{step?.kind === 'group' ? step.title : spec?.label}</DialogTitle>
           <DialogDescription>
-            Step {index + 1} of {STEPS.length}. It goes onto the agreement exactly as entered.
+            Step {index + 1} of {steps.length}. It goes onto the agreement exactly as entered.
           </DialogDescription>
         </DialogHeader>
         <form

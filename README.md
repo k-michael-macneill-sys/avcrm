@@ -158,19 +158,22 @@ evening. See [The weather bot](#the-weather-bot).
 
 ## Seed accounts
 
-The seed installs no sample business data — no demo branches, crew or
-customers. All of that is the operator's own, added through the app itself
-(Company admin → Add a branch / Add someone, and Add customer on the
-Customers screen) once they have signed in. The one thing a fresh database
+The seed installs no sample business data — no demo crew or customers, and
+no branches beyond the four the sign-in screen offers (Cranbrook, Kingston,
+Alberta and Regina, installed as configuration). Everything else is the
+operator's own, added through the app itself (Company admin → Add a branch /
+Add someone, and Add customer on the Customers screen) once they have signed
+in. The one thing a fresh database
 cannot bootstrap through its own UI is the first login, so the seed creates
 exactly one account for that:
 
 | Email | Role | Branch | Notes |
 | --- | --- | --- | --- |
-| `corporate@avcrm.test` | corporate | — | Sees every branch; add the first one from here |
+| `corporate@avcrm.test` | corporate | — | Sees every branch; sign in as **ADMIN** |
 
-It shares the password in `SEED_PASSWORD` (default `Password123!`). Sign in,
-change the password, then add branches, crew and customers as they come in.
+It shares the password in `SEED_PASSWORD` (default `Password123!`). On the
+sign-in screen choose **ADMIN** and enter that password; choose a branch and
+enter `BRANCH_SIGN_IN_PASSWORD` (default `1234`) to sign in as the branch.
 
 ## Auth and permissions
 
@@ -216,6 +219,42 @@ instead of whenever the token expires. That is one indexed primary-key lookup
 per request.
 
 ### Signing in
+
+**The sign-in screen asks for a branch and a password — no email.** The
+dropdown offers **Cranbrook**, **Kingston**, **Alberta**, **Regina** and
+**ADMIN** (`POST /auth/sign-in` with `{ choice, password }`).
+
+- **A branch** signs in to that branch's own shared account with the branch
+  password, `BRANCH_SIGN_IN_PASSWORD` — **`1234` unless you set it**. The
+  account has the `branch` role: customers, quotes, contracts, the leads map,
+  dispatch and crew, in that branch only; none of corporate's screens (Reports,
+  Company, Settings, Weather Alerts, the Business Console). It is created the
+  first time somebody signs in to it — as `cranbrook@branch.avcrm.local` and so
+  on, with a random password the email route can never match — and so is the
+  branch itself if it is missing.
+- **ADMIN** keeps the corporate accounts' own passwords: the password is
+  checked against each active corporate account in turn, oldest first, and
+  signs in as the one it matches.
+
+The response carries the branch as well as the user (`{ token, user, branch }`,
+`branch` null for ADMIN), and the client keeps it with the session.
+
+**Each branch's city.** `branches.default_city` is the city a branch's
+customers live in: Cranbrook, Kingston and Regina have their own; Alberta has
+none, because it covers several towns across Southern Alberta. When a branch
+sign-in writes an agreement or adds a property, the server fills the branch
+and that city in, whatever was sent — so the property, and the city printed on
+the signed contract, always match the branch. On screen, Add customer shows no
+branch picker for a branch sign-in, and the agreement's city is filled in and
+not tappable; on an Alberta agreement the city box starts blank for the rep to
+type. ADMIN's form is unchanged: branch picker, and the city as typed.
+
+**A shared four-digit password is weak, on purpose.** Anyone who knows it can
+sign in as any branch. The rate limits below apply to it — by address, and per
+branch choice, so guessing at one branch from many addresses runs out too —
+but set `BRANCH_SIGN_IN_PASSWORD` to something longer before the app faces the
+internet. `POST /auth/login` (email and password) is still there for staff
+accounts and scripts.
 
 `/auth/login` is a password oracle open to the internet: without a limit, a
 list of common passwords against one known address is free, and nothing in the
@@ -302,6 +341,8 @@ A suspension is only lifted by corporate, never by the automatic refresh.
 | GET | `/ready` | public | Readiness — database, queue and storage; 503 when degraded |
 | POST | `/auth/register` | public | Always creates a pending operator |
 | POST | `/auth/login` | public | Returns `{ token, user }` |
+| POST | `/auth/sign-in` | public | `{ choice, password }`: a branch or `ADMIN`; returns `{ token, user, branch }` |
+| GET | `/auth/sign-in/choices` | public | The dropdown's options |
 | GET | `/auth/me` | any | |
 | GET | `/branches` | any | Operators see only their own |
 | POST | `/branches` | corporate | |

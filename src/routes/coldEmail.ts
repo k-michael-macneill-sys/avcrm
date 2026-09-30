@@ -96,7 +96,7 @@ coldEmailRouter.get(
 
 coldEmailRouter.post(
   '/leads',
-  requireRole('corporate', 'sales'),
+  requireRole('corporate', 'sales', 'branch'),
   asyncHandler(async (req, res) => {
     const { consent: _consent, branch_id, ...body } = parse(createSchema, req.body);
     if (!req.user) throw unauthorized();
