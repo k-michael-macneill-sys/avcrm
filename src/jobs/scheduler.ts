@@ -1,13 +1,15 @@
 import { closeConnection } from '../db/client';
 import { closeTransport } from '../services/notifications';
+import { runColdEmailDrip } from '../services/coldEmail';
 import { runReviewRequests } from '../services/reviews';
+import { runWeatherAlerts } from '../services/weather';
 import { logger } from '../utils/logger';
 import { runBilling } from './billing';
 import { runDocumentExpiry } from './documentExpiry';
 import { runMessageQueue } from './messageQueue';
 
 /**
- * Runs the four jobs, so a deployment is `docker compose up` and nothing else.
+ * Runs the jobs, so a deployment is `docker compose up` and nothing else.
  *
  * Cron on the host would work just as well, and is documented in the README
  * for anyone who prefers it. This exists because the alternative is a machine
@@ -37,7 +39,7 @@ const HOUR = 60 * MINUTE;
 export interface ScheduledJob {
   name: string;
   everyMs: number;
-  /** Staggered so a restart does not run all four at once. */
+  /** Staggered so a restart does not run them all at once. */
   delayMs: number;
   run: () => Promise<unknown>;
 }
@@ -67,6 +69,22 @@ const JOBS: ScheduledJob[] = [
     everyMs: 24 * HOUR,
     delayMs: 90_000,
     run: () => runBilling(),
+  },
+  {
+    // Follow-ups fall due by the day; a quarter of an hour late is nothing.
+    name: 'cold-email-drip',
+    everyMs: 15 * MINUTE,
+    delayMs: 120_000,
+    run: () => runColdEmailDrip(),
+  },
+  {
+    // Hourly, and each branch only acts in its own evening: see
+    // services/weather.ts. Re-checking a region already alerted costs a
+    // query and nothing more.
+    name: 'weather-alerts',
+    everyMs: HOUR,
+    delayMs: 150_000,
+    run: () => runWeatherAlerts(),
   },
 ];
 
@@ -178,7 +196,7 @@ function main(): void {
 }
 
 // Only when run as the process entry point, so importing this for a test does
-// not arm four real timers against the database.
+// not arm real timers against the database.
 if (require.main === module) {
   main();
 }

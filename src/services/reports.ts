@@ -10,10 +10,9 @@ import { applyBranchScope } from '../utils/scope';
  *
  * Two things worth being straight about:
  *
- * 1. This is a revenue roll-up, not a P&L. Nothing in the schema records a
- *    cost — no operator pay, no fuel, no salt, no vehicle. A margin computed
- *    here would be a number we made up, so there isn't one. Costs need their
- *    own tables before the other half of a P&L can exist.
+ * 1. This is a revenue roll-up, not a P&L. Costs are logged in the
+ *    bookkeeping table (services/expenses.ts) and netted against revenue on
+ *    the Business Console's financial dashboard (services/finance.ts).
  *
  * 2. Every figure is built from a handful of grouped aggregates, one per
  *    domain, stitched together in TypeScript. That is deliberately not one

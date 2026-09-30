@@ -56,9 +56,15 @@ const leadContactSchema = z
     last_name: z.string().trim().min(1).max(100),
     email: z.string().trim().email().max(255).nullable().default(null),
     phone: z.string().trim().max(40).nullable().default(null),
+    // Ticked at the door: they agreed to the cold email sequence.
+    email_opt_in: z.boolean().default(false),
   })
   .refine((c) => !!c.email || !!c.phone, {
     message: 'A lead needs an email or a phone number to follow up on',
+    path: ['email'],
+  })
+  .refine((c) => !c.email_opt_in || !!c.email, {
+    message: 'An email opt-in needs an email address',
     path: ['email'],
   });
 

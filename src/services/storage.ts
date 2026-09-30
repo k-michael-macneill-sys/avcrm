@@ -77,6 +77,12 @@ const RULES: Record<UploadPurpose, PurposeRule> = {
     contentTypes: ['application/pdf'],
     maxBytes: 25 * 1024 * 1024,
   },
+  // A phone photo of a till slip, or the PDF a supplier emailed.
+  receipt: {
+    prefix: 'receipts',
+    contentTypes: ['application/pdf', 'image/jpeg', 'image/png'],
+    maxBytes: 12 * 1024 * 1024,
+  },
 };
 
 const EXTENSIONS: Record<string, string> = {

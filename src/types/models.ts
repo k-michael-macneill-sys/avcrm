@@ -113,6 +113,15 @@ export const TEMPLATE_CODES = [
   'operator_suspended_internal',
   'low_rating_internal',
   'payment_failed_internal',
+  // The cold email sequence: the confirmation sent the moment somebody opts
+  // in, then the follow-ups the drip job sends on schedule. See
+  // services/coldEmail.ts for the timing.
+  'drip_welcome',
+  'drip_followup_1',
+  'drip_followup_2',
+  'drip_followup_3',
+  // The night-before notice the weather bot sends when snow is coming.
+  'snowfall_notice',
 ] as const;
 export type TemplateCode = (typeof TEMPLATE_CODES)[number];
 
@@ -143,6 +152,8 @@ export const UPLOAD_PURPOSES = [
   'contract_pdf',
   'invoice_pdf',
   'service_report_pdf',
+  /** A photo or scan of a receipt, filed against a bookkeeping entry. */
+  'receipt',
 ] as const;
 export type UploadPurpose = (typeof UPLOAD_PURPOSES)[number];
 
@@ -176,6 +187,45 @@ export type MetaDirection = (typeof META_DIRECTIONS)[number];
 /** Inbound is only ever `received`; outbound moves through the queue. */
 export const META_MESSAGE_STATUSES = ['received', 'queued', 'sent', 'failed'] as const;
 export type MetaMessageStatus = (typeof META_MESSAGE_STATUSES)[number];
+
+/**
+ * What a business expense was for. The labels, and which line of the CRA's
+ * T2125 each one is claimed on, live in services/expenses.ts and are served
+ * from GET /expenses/categories, so the form is built from the server's list.
+ */
+export const EXPENSE_CATEGORIES = [
+  'equipment_maintenance',
+  'fuel',
+  'commercial_insurance',
+  'vehicle_upkeep',
+  'subcontractors',
+  'protective_gear',
+  'salt_and_supplies',
+  'small_tools',
+  'advertising',
+  'phone_and_internet',
+  'office_and_software',
+  'professional_fees',
+  'licences_and_permits',
+  'wages',
+  'rent_and_storage',
+  'interest_and_bank_charges',
+  'meals',
+  'other',
+] as const;
+export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
+
+/** Where somebody said yes to hearing from us by email. */
+export const OPT_IN_SOURCES = ['google_ads', 'door_to_door'] as const;
+export type OptInSource = (typeof OPT_IN_SOURCES)[number];
+
+/**
+ * active: still in the sequence. completed: every step sent. unsubscribed:
+ * asked to stop, and nothing more is ever sent. converted: became a customer,
+ * so the selling emails stop.
+ */
+export const EMAIL_LEAD_STATUSES = ['active', 'completed', 'unsubscribed', 'converted'] as const;
+export type EmailLeadStatus = (typeof EMAIL_LEAD_STATUSES)[number];
 
 export const UPLOAD_STATUSES = ['pending', 'stored'] as const;
 export type UploadStatus = (typeof UPLOAD_STATUSES)[number];
@@ -446,6 +496,7 @@ export interface MessageLogEntry {
   branch_id: string | null;
   customer_id: string | null;
   work_order_id: string | null;
+  email_lead_id: string | null;
   template_code: string;
   channel: MessageChannel;
   recipient: string;
@@ -629,6 +680,69 @@ export interface MetaMessage {
   error: string | null;
   attempts: number;
   last_attempt_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface Expense {
+  id: string;
+  /** Null for a company-wide cost that belongs to no one branch. */
+  branch_id: string | null;
+  category: ExpenseCategory;
+  /** What it was, when the category is `other`, or any note worth keeping. */
+  description: string | null;
+  vendor: string | null;
+  /** numeric — money is a string all the way through. */
+  amount: string;
+  /** The day on the receipt. */
+  spent_on: string;
+  receipt_key: string | null;
+  receipt_file_name: string | null;
+  created_by_user_id: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface EmailLead {
+  id: string;
+  branch_id: string;
+  first_name: string;
+  last_name: string | null;
+  email: string;
+  phone: string | null;
+  source: OptInSource;
+  status: EmailLeadStatus;
+  /** How many steps of the sequence have been queued. */
+  steps_sent: number;
+  next_send_at: Date | null;
+  opted_in_at: Date;
+  /** The words they agreed to, kept as the record of consent CASL asks for. */
+  consent_text: string;
+  unsubscribe_token: string;
+  unsubscribed_at: Date | null;
+  campaign: string | null;
+  gclid: string | null;
+  lead_pin_id: string | null;
+  customer_id: string | null;
+  created_by_user_id: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface WeatherAlertRun {
+  id: string;
+  branch_id: string;
+  /** The morning the crews go out, in the branch's own timezone. */
+  service_date: string;
+  /** A postal region: the first three characters of a postal code, or a ZIP. */
+  region: string;
+  latitude: string;
+  longitude: string;
+  snowfall_cm: string;
+  threshold_cm: string;
+  triggered: boolean;
+  /** Customers queued a notice because of this region. */
+  notified: number;
   created_at: Date;
   updated_at: Date;
 }
