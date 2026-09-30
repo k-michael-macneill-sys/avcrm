@@ -4,7 +4,10 @@ import { authRouter } from './auth';
 import { branchesRouter } from './branches';
 import { cardSetupsRouter } from './cards';
 import { checklistRequirementsRouter, contractsRouter } from './contracts';
+import { coldEmailRouter } from './coldEmail';
 import { customersRouter } from './customers';
+import { expensesRouter } from './expenses';
+import { financeRouter } from './finance';
 import { invoicesRouter } from './invoices';
 import { messageLogRouter, messageTemplatesRouter } from './messages';
 import { metaMessagingRouter } from './metaMessaging';
@@ -22,6 +25,7 @@ import { salesRouter } from './sales';
 import { settingsRouter } from './settings';
 import { filesRouter, uploadsRouter } from './uploads';
 import { usersRouter } from './users';
+import { weatherRouter } from './weather';
 import { workOrdersRouter } from './workOrders';
 
 /**
@@ -58,3 +62,9 @@ apiRouter.use('/reports', reportsRouter);
 apiRouter.use('/settings', settingsRouter);
 apiRouter.use('/portal', portalRouter);
 apiRouter.use('/audit-log', auditLogRouter);
+// The Business Console.
+apiRouter.use('/expenses', expensesRouter);
+apiRouter.use('/finance', financeRouter);
+apiRouter.use('/cold-email', coldEmailRouter);
+// The weather bot, in the Operations Console.
+apiRouter.use('/weather', weatherRouter);

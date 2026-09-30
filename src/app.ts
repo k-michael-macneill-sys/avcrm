@@ -4,6 +4,7 @@ import { config } from './config';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { requestLogger } from './middleware/requestLogger';
 import { apiRouter } from './routes';
+import { AGREEMENT_TEMPLATE } from './services/agreement';
 import { checkReadiness } from './services/health';
 import { webhooksRouter } from './routes/webhooks';
 
@@ -87,6 +88,13 @@ export function createApp(): Express {
   app.get(/^\/pay\/(?:card\/)?[A-Za-z0-9_-]{20,80}$/, (_req, res) => {
     res.set('Cache-Control', 'private, no-store');
     res.sendFile(path.join(publicDir, 'pay.html'));
+  });
+
+  // The blank agreement the sign-up screen fills in. Nothing in it is
+  // private — it is the company's standard contract — so no session.
+  app.get('/agreement-template.pdf', (_req, res) => {
+    res.set('Cache-Control', 'no-cache');
+    res.type('application/pdf').sendFile(AGREEMENT_TEMPLATE);
   });
 
   app.get('/', (_req, res) => res.redirect('/app'));

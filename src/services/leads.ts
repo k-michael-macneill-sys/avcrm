@@ -2,8 +2,9 @@ import type { Knex } from 'knex';
 import { db as defaultDb } from '../db/client';
 import type { BranchScope } from '../types/auth';
 import type { LeadPin, PinStatus } from '../types/models';
-import { ApiError, forbidden, notFound } from '../utils/errors';
+import { forbidden, notFound } from '../utils/errors';
 import { applyBranchScope } from '../utils/scope';
+import { DEFAULT_CONSENT, optIn } from './coldEmail';
 import { createCustomer } from './customers';
 import { createProperty } from './properties';
 
@@ -47,6 +48,9 @@ export interface CustomerPin {
   addon_salt: boolean;
   addon_vehicle: boolean;
   addon_stairs: boolean;
+  /** From the PDF agreement: 'basic' or 'premium', and its add-on codes. */
+  package: string | null;
+  addons: string[];
 }
 
 function inBounds(qb: Knex.QueryBuilder, table: string, b: Bounds): Knex.QueryBuilder {
@@ -111,7 +115,7 @@ export async function listCustomerPins(
     'properties.city',
     'properties.access_notes',
     'properties.priority_flag',
-  )) as Omit<CustomerPin, 'billing_type' | 'addon_salt' | 'addon_vehicle' | 'addon_stairs'>[];
+  )) as Omit<CustomerPin, 'billing_type' | 'addon_salt' | 'addon_vehicle' | 'addon_stairs' | 'package' | 'addons'>[];
 
   // What each house is paying for, from its active contract.
   const services: {
@@ -120,6 +124,8 @@ export async function listCustomerPins(
     addon_salt: boolean;
     addon_vehicle: boolean;
     addon_stairs: boolean;
+    package: string | null;
+    addons: string[];
   }[] = await db('contracts')
     .join('quotes', 'quotes.id', 'contracts.quote_id')
     .whereIn(
@@ -133,6 +139,8 @@ export async function listCustomerPins(
       'quotes.addon_salt',
       'quotes.addon_vehicle',
       'quotes.addon_stairs',
+      'quotes.package',
+      'quotes.addons',
     );
   const byProperty = new Map(services.map((s) => [s.property_id, s]));
 
@@ -144,6 +152,8 @@ export async function listCustomerPins(
       addon_salt: service?.addon_salt ?? false,
       addon_vehicle: service?.addon_vehicle ?? false,
       addon_stairs: service?.addon_stairs ?? false,
+      package: service?.package ?? null,
+      addons: service?.addons ?? [],
     };
   });
 }
@@ -161,6 +171,11 @@ export interface LeadContact {
   last_name: string;
   email: string | null;
   phone: string | null;
+  /**
+   * They said yes at the door to hearing from us by email, which puts them
+   * into the cold email sequence (services/coldEmail.ts).
+   */
+  email_opt_in?: boolean;
 }
 
 export interface NewPinInput extends PinAddress {
@@ -201,6 +216,7 @@ export async function createPin(
       })
       .returning('*');
     if (!pin) throw new Error('Insert returned no lead_pin row');
+    await enrolFromDoor(pin as LeadPin, userId, input.lead, trx);
     return pin as LeadPin;
   });
 }
@@ -254,8 +270,34 @@ export async function updatePin(
     }
 
     const [updated] = await trx('lead_pins').where({ id }).update(patch).returning('*');
+    await enrolFromDoor(updated as LeadPin, userId, input.lead ?? null, trx);
     return updated as LeadPin;
   });
+}
+
+/** A door-to-door opt-in: the rep ticked the box with the person's say-so. */
+async function enrolFromDoor(
+  pin: LeadPin,
+  userId: string,
+  lead: LeadContact | null,
+  trx: Knex,
+): Promise<void> {
+  if (!lead?.email_opt_in || !lead.email) return;
+  await optIn(
+    {
+      branch_id: pin.branch_id,
+      first_name: lead.first_name,
+      last_name: lead.last_name,
+      email: lead.email,
+      phone: lead.phone,
+      source: 'door_to_door',
+      consent_text: `${DEFAULT_CONSENT} (Agreed in person at ${pin.address_line1 ?? 'the door'}.)`,
+      lead_pin_id: pin.id,
+      customer_id: pin.customer_id,
+      created_by_user_id: userId,
+    },
+    trx,
+  );
 }
 
 /** A pin dropped on the wrong house. Its creator or the office may take it back. */
@@ -338,15 +380,7 @@ async function leadCustomer(
       access_notes: null,
       priority_flag: false,
     };
-    try {
-      // A savepoint, so a clash with an address already on file rolls back
-      // just this step and the lead is still written.
-      await db.transaction((savepoint) => createProperty(customer.id, scope, house, savepoint));
-    } catch (err) {
-      // The house is already somebody's on the books. The lead still counts;
-      // the office can sort out whose address it is.
-      if (!(err instanceof ApiError && err.status === 409)) throw err;
-    }
+    await createProperty(customer.id, scope, house, db);
   }
 
   return customer.id;

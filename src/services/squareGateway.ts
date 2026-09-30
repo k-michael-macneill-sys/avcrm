@@ -176,7 +176,9 @@ export class SquareGateway implements PaymentGateway {
       return new ApiError(
         502,
         'processor_rejected_credentials',
-        'Square did not accept the saved access token. Check it under Settings.',
+        `Square did not accept the access token for its ${this.environment} environment. ` +
+          'A sandbox token only works with environment "sandbox" and a production token only ' +
+          'with "production" (SQUARE_ENVIRONMENT on the server, or the Environment field in Settings).',
       );
     }
     return new ApiError(

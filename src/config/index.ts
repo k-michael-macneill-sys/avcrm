@@ -63,7 +63,13 @@ const envSchema = z.object({
   SECRETS_KEY: z.string().min(32, 'SECRETS_KEY must be at least 32 characters').optional(),
 
   // Where the customer-facing links in outbound messages point.
-  APP_BASE_URL: z.string().url().default('http://localhost:3000'),
+  APP_BASE_URL: blankIsUnset(z.string().trim().url()),
+  /**
+   * Set by Render on every web service to its public address. Used when
+   * APP_BASE_URL is not, so card and pay links never point at localhost on
+   * a deploy nobody configured.
+   */
+  RENDER_EXTERNAL_URL: blankIsUnset(z.string().trim().url()),
   // Where a happy customer is sent to leave a public review.
   GOOGLE_REVIEW_URL: z.string().url().default('https://g.page/r/example/review'),
   // How many times the queue worker retries a message before giving up.
@@ -166,6 +172,25 @@ const envSchema = z.object({
    * deploy.
    */
   META_GRAPH_API_BASE: z.string().trim().url().default('https://graph.facebook.com/v19.0'),
+
+  /**
+   * The weather bot. Forecasts come from Open-Meteo, which needs no key; the
+   * bases are overridable so the suite can point them at a stand-in. From
+   * WEATHER_CHECK_HOUR (the branch's own local time) until midnight it checks
+   * each postal region every hour, and texts or emails the active customers
+   * there once the snow forecast before 5am passes the threshold.
+   */
+  WEATHER_ALERTS_ENABLED: booleanish.default('true'),
+  WEATHER_API_BASE: z.string().trim().url().default('https://api.open-meteo.com/v1'),
+  WEATHER_GEOCODING_API_BASE: z
+    .string()
+    .trim()
+    .url()
+    .default('https://geocoding-api.open-meteo.com/v1'),
+  WEATHER_SNOWFALL_THRESHOLD_CM: z.coerce.number().min(0).max(100).default(3),
+  WEATHER_CHECK_HOUR: z.coerce.number().int().min(0).max(23).default(18),
+  /** The hour the crews start: the forecast window runs up to it. */
+  WEATHER_SERVICE_HOUR: z.coerce.number().int().min(1).max(12).default(5),
 });
 
 /**
@@ -269,7 +294,7 @@ export const config = {
     apiBase: env.SMS_API_BASE ?? null,
   },
   messaging: {
-    appBaseUrl: env.APP_BASE_URL.replace(/\/+$/, ''),
+    appBaseUrl: (env.APP_BASE_URL ?? env.RENDER_EXTERNAL_URL ?? 'http://localhost:3000').replace(/\/+$/, ''),
     googleReviewUrl: env.GOOGLE_REVIEW_URL,
     maxAttempts: env.MESSAGE_MAX_ATTEMPTS,
   },
@@ -285,6 +310,14 @@ export const config = {
     appSecret: env.META_APP_SECRET ?? null,
     verifyToken: env.META_VERIFY_TOKEN ?? null,
     graphApiBase: env.META_GRAPH_API_BASE.replace(/\/+$/, ''),
+  },
+  weather: {
+    enabled: env.WEATHER_ALERTS_ENABLED,
+    apiBase: env.WEATHER_API_BASE.replace(/\/+$/, ''),
+    geocodingApiBase: env.WEATHER_GEOCODING_API_BASE.replace(/\/+$/, ''),
+    thresholdCm: env.WEATHER_SNOWFALL_THRESHOLD_CM,
+    checkHour: env.WEATHER_CHECK_HOUR,
+    serviceHour: env.WEATHER_SERVICE_HOUR,
   },
 } as const;
 

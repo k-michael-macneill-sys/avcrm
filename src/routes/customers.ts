@@ -1,14 +1,15 @@
 import { Router } from 'express';
+import { deleteCustomer } from '../services/deletion';
 import { z } from 'zod';
 import {
   requireAuth,
   resolveBranchScope,
   resolveWriteBranch,
   sellersWrite,
+  resolveDeleter,
 } from '../middleware/auth';
 import {
   createCustomer,
-  deleteCustomer,
   getCustomer,
   listCustomers,
   updateCustomer,
@@ -151,7 +152,7 @@ customersRouter.delete(
   asyncHandler(async (req, res) => {
     const { id } = parse(idParamSchema, req.params);
     const scope = resolveBranchScope(req, req.query.branch_id as string | undefined);
-    await deleteCustomer(id, scope);
+    await deleteCustomer(id, scope, resolveDeleter(req));
     res.status(204).send();
   }),
 );

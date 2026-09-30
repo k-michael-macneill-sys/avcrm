@@ -96,6 +96,8 @@ npm run job:billing            # raise and send what is due, flag what is late
 npm run job:message-queue      # drain the outbound queue
 npm run job:review-requests    # ask about yesterday's finished visits
 npm run job:document-expiry    # nightly compliance sweep
+npm run job:cold-email         # send the cold email follow-ups that are due
+npm run job:weather-alerts     # the evening snowfall check
 ```
 
 Each exits non-zero on failure, so a scheduler can alert on them.
@@ -142,6 +144,17 @@ suspends any operator who loses a **required** document, and warns operators at
 `runDocumentExpiry(today)` takes an injectable date, so the whole ladder can be
 exercised without waiting for real time to pass. It queues its warnings rather
 than sending them, like everything else.
+
+### `job:cold-email`
+
+Sends each cold email follow-up as it falls due. See
+[Cold email](#cold-email). `runColdEmailDrip(now)` takes an injectable clock.
+
+### `job:weather-alerts`
+
+The weather bot's check. Run it hourly: each branch acts only in its own
+evening. See [The weather bot](#the-weather-bot).
+`runWeatherAlerts(now)` takes an injectable clock.
 
 ## Seed accounts
 
@@ -385,6 +398,23 @@ A suspension is only lifted by corporate, never by the automatic refresh.
 | GET | `/settings/sms/providers` | corporate | The catalogue the screen renders itself from |
 | POST | `/settings/sms/test` | corporate | One real message through the saved credentials |
 | GET | `/audit-log` | corporate | `entity_type`, `entity_id`, `user_id`, `action` |
+| GET | `/finance/summary` | corporate | Collected, invoiced and expenses, netted; `from`, `to`, `branch_id` |
+| GET | `/expenses/categories` | corporate | The deduction categories and their T2125 lines |
+| GET | `/expenses` | corporate | `sort` (`recent`, `category`, `amount_desc`, `amount_asc`), `category`, `branch_id`, `from`, `to` |
+| POST | `/expenses` | corporate | `receipt_key` must be a stored `receipt` upload of your own |
+| DELETE | `/expenses/:id` | corporate | Audited; the receipt file stays |
+| GET | `/cold-email/sequence` | corporate | The drip steps and their timing |
+| GET | `/cold-email/stats` | corporate | Counts by status and source |
+| GET | `/cold-email/leads` | corporate | `status`, `source`, `branch_id` |
+| GET | `/cold-email/leads/:id` | corporate | With every email the sequence sent them |
+| POST | `/cold-email/leads` | corporate, sales | An opt-in taken by hand; `consent: true` required |
+| POST | `/cold-email/leads/:id/stop` | corporate | `unsubscribed` or `converted`; withdraws anything still queued |
+| POST | `/public/opt-in` | **public** | Google Ads landing page sign-ups; JSON or a form post; rate-limited |
+| GET | `/public/unsubscribe/:token` | **public** | Shows a button; opening the link changes nothing |
+| POST | `/public/unsubscribe/:token` | **public** | Unsubscribes |
+| GET | `/weather/settings` | corporate | Threshold, check hour, service hour |
+| GET | `/weather/runs` | corporate | What the bot decided, per region and morning |
+| POST | `/weather/check` | corporate | Tonight's forecast for a branch; `send: true` also alerts |
 
 ### Response shapes
 
@@ -669,10 +699,9 @@ roll-up. Same query, same definitions, different scope. The skeleton comes from
 `branches` rather than from activity, so a branch that sold nothing in the
 window shows as zeroes instead of dropping out of the comparison.
 
-**It is a revenue roll-up, not a P&L.** Nothing in the schema records a cost —
-no operator pay, no fuel, no salt, no vehicle — so there is no margin here,
-because any margin would be invented. Costs need their own tables before the
-other half of a P&L can exist.
+**It is a revenue roll-up, not a P&L.** Costs are logged in the Business
+Console's [bookkeeping](#bookkeeping), and netted against revenue on its
+[financial dashboard](#financial-dashboard) rather than here.
 
 ### What each figure means
 
@@ -775,7 +804,22 @@ link carries the real `/app/…` href so middle-click, "open in new tab" and
 | Invoices | Send, record a payment, refund, void |
 | Crew | Compliance per operator, and approving documents |
 | Company | Branches, and adding staff — corporate only |
+| Weather Alerts | The weather bot's rules, tonight's forecast by postal region, and what it decided |
 | Reports | The branch comparison, revenue by month, operator scorecards |
+| *Business Console* | |
+| Financials | Collected against expenses, net cash, by month and by category |
+| Bookkeeping | Receipts and deductions: **Add +**, and the list sorted four ways |
+| Cold Email | Who opted in, where each is in the sequence, the landing page form |
+| Meta Ads | The slot for Meta ads performance |
+
+**Two consoles.** Corporate's menu has a **Switch Consoles** button at the
+foot of the sidebar (and of the phone menu). The *Operations Console* is
+everything above the line — the day-to-day of selling, clearing and billing —
+and is where everybody starts. The *Business Console* is the owner's side:
+the money, the books and the marketing. Its pages all live under
+`/app/business`, so a link says which console it belongs to, and switching
+back lands on the page you left. Sales reps and operators never see the
+button: nothing in the Business Console is theirs.
 
 **The two roles get genuinely different apps.** An operator's nav has no
 Invoices or Reports, their dashboard is their run sheet rather than a company
@@ -1433,6 +1477,158 @@ records it.
   after 24 hours (`HUMAN_AGENT` needs Meta's approval), and more than one
   Page are not handled.
 
+## The Business Console
+
+The owner's side of the company, behind **Switch Consoles** — see
+[What it shows](#what-it-shows). Everything in it is corporate only, in the
+API as well as on screen.
+
+### Financial dashboard
+
+`GET /finance/summary`: invoiced, collected, outstanding and overdue, against
+what the bookkeeping log says was spent — as totals, by month and by
+category. *Net cash* is collected less expenses: the money the business
+actually kept. Revenue is bucketed by the billing period it pays for, exactly
+as on Reports, so the two pages never disagree about a month; expenses by the
+date on the receipt. Narrowing to a branch drops company-wide expenses — a
+branch's figures should not carry head office's insurance.
+
+### Bookkeeping
+
+A manual log of deductions (`expenses`), each with the receipt that backs it.
+**Add +** opens the form: attach a receipt (PDF, JPG or PNG, uploaded through
+the ordinary two-step upload with purpose `receipt`), pick a category, enter
+the amount. The date, vendor, a note and the branch are optional.
+
+The categories are served by `GET /expenses/categories` rather than written
+into the form, and follow the CRA's Form T2125 for a snow removal business —
+equipment maintenance, fuel, commercial insurance, vehicle upkeep,
+subcontractors, protective gear, salt and supplies, advertising and the rest,
+each with the line it is usually claimed on, plus **Other**, which must say
+what it was. The line numbers are a guide for whoever does the return, not tax
+advice: a plow bought outright is capital cost allowance, not an expense, and
+meals are only half deductible.
+
+A receipt key is only accepted if it is a stored `receipt` upload by the
+person filing it, so a key seen elsewhere (a signature, a crew member's
+licence) cannot be filed against an expense and read back through it. Money
+is `numeric(12,2)` and a string end to end; an amount with a third decimal is
+refused rather than rounded.
+
+The list sorts four ways — **Recent** (the default: newest receipt first),
+**Category** (alphabetically by label), **Amount: High-to-Low** and
+**Amount: Low-to-High** — and is a table on a desk and a list of cards on a
+phone.
+
+### Cold email
+
+An automatic follow-up sequence for people who asked to hear from us, from a
+**Google Ads** landing page or **at the door**:
+
+| Step | When | Template |
+| --- | --- | --- |
+| Opt-in confirmation | the moment they opt in | `drip_welcome` |
+| How the service works | 2 days later | `drip_followup_1` |
+| Book before the first snowfall | 5 days | `drip_followup_2` |
+| Last note | 10 days | `drip_followup_3` |
+
+The confirmation is queued in the same transaction as the opt-in and sent by
+the message queue within the minute; `job:cold-email` sends each follow-up as
+it falls due. The wording is in `message_templates`, so a branch can reword
+it like any other message; the timing is `DRIP_SEQUENCE` in
+`src/services/coldEmail.ts`.
+
+**Where opt-ins come from.**
+
+- *Google Ads.* `POST /public/opt-in` takes the landing page's form — as JSON
+  from a script (it answers any origin; there is nothing to steal) or as a
+  plain HTML form post, which gets a thank-you page back. The Cold Email page
+  prints a ready-made form with the branch filled in. `utm_campaign` and
+  `gclid` are kept for attribution. A hidden `website` field catches bots:
+  filled in, the request is thanked and ignored. Rate-limited per address.
+- *Door-to-door.* On the leads map, the lead's contact form has a box for
+  "they agreed to get follow-up emails". Ticked, the lead is enrolled with the
+  address the pin is at recorded as where they agreed.
+- *By hand*, from **Add opt-in** on the Cold Email page.
+
+**Consent (CASL).** Nobody is enrolled without it: the public form needs
+`consent`, the office form a ticked box. The words they agreed to are stored
+on `email_leads.consent_text`, because under CASL it is the sender who has to
+prove consent. Every email carries its own unsubscribe link; opening it shows
+a button and only pressing it unsubscribes, because mail scanners follow
+links. Unsubscribing withdraws anything already queued for them.
+
+**When it stops.** On unsubscribe; when the office stops it by hand; and when
+the person becomes an active customer in that branch — matched by the linked
+customer or by email address — because selling to somebody who has already
+bought is how a mailing list becomes spam. Opting in again while already in
+the sequence changes their details and restarts nothing; opting in again
+after unsubscribing is fresh consent, and starts over.
+
+### Meta Ads
+
+The Business Console has a **Meta Ads** slot at `/app/business/meta-ads`,
+moved out of the main menu. No ads performance page existed in this
+repository when the consoles were split, so the slot shows a "not connected
+yet" card; the page mounts there, unchanged, when it is added. (The Facebook
+and Instagram *messages* inbox below is a separate, API-only feature.)
+
+## The weather bot
+
+Every evening it checks the forecast for each postal region a branch serves,
+and when **more than 3 cm** of snow is forecast before the crews go out at
+**5am**, it tells every active customer in that region, by text, email or both
+as they prefer:
+
+> Snowfall notice: Our team is scheduled to service your drive tomorrow
+> morning. Please park all vehicles outside the driveway tonight so we can
+> perform a full clearance.
+
+(That is the `snowfall_notice` template; a branch can reword it.)
+
+**Regions.** A region is a postal region: the first three characters of a
+Canadian postal code (the forward sortation area), or a US ZIP code. Snow falls
+unevenly across a city, and a notice to move the car when nothing falls is how
+people learn to ignore them. A region is located at the average of its
+customers' property coordinates; one with none is placed through Open-Meteo's
+geocoder from the postal code.
+
+**Forecast.** [Open-Meteo](https://open-meteo.com), which needs no key: hourly
+snowfall in centimetres, in the branch's timezone. The window is fixed per
+service morning, from `WEATHER_CHECK_HOUR` the evening before to
+`WEATHER_SERVICE_HOUR`, so every re-check measures the same night — snow that
+fell at 9pm is still on the driveway at 5am.
+
+**Schedule.** `job:weather-alerts` runs hourly, and each branch acts only from
+`WEATHER_CHECK_HOUR` (6pm) until midnight in its own timezone. A region that
+crosses the line is alerted at most **once per morning**: `weather_alert_runs`
+has one row per branch, region and morning, and the insert that marks a region
+alerted is the same statement that refuses to mark it twice, so two
+overlapping runs cannot both send. A region below the line is checked again
+every hour, because the 10pm forecast is the one that counts. A customer with
+properties in two regions gets one notice. If the forecast cannot be reached,
+nothing is recorded and the next hour tries again.
+
+**From the screen.** *Operations Console → Weather Alerts* shows the rules,
+tonight's forecast region by region (looking only; `POST /weather/check` with
+`send: true` is there for anyone who needs to send by hand), and every
+decision the bot has made.
+
+| Variable | Default | What it is |
+| --- | --- | --- |
+| `WEATHER_ALERTS_ENABLED` | `true` | The off switch |
+| `WEATHER_SNOWFALL_THRESHOLD_CM` | `3` | Alert when the forecast is *more* than this |
+| `WEATHER_CHECK_HOUR` | `18` | Local hour the evening checks start |
+| `WEATHER_SERVICE_HOUR` | `5` | Local hour the crews go out; the window ends here |
+| `WEATHER_API_BASE` | Open-Meteo | Overridable for the test suite's stand-in |
+| `WEATHER_GEOCODING_API_BASE` | Open-Meteo | Likewise |
+
+`tests/weather.test.mts` runs the bot against a stand-in Open-Meteo
+(`tests/helpers/weatherApi.ts`): the threshold (exactly 3 cm does not alert),
+the window, one alert per region per morning, per-region forecasts, the
+geocoder fallback, preferred channels, the evening-only schedule and a
+forecast that is down.
+
 ## What is mocked
 
 Nothing is mocked any more. Email goes out over SMTP ([Mail](#mail)), text
@@ -1617,7 +1813,7 @@ still just `docker compose up -d --build`.
 
 ### The jobs
 
-`scheduler` runs all four in one process, so a deployment is `docker compose
+`scheduler` runs them all in one process, so a deployment is `docker compose
 up` and nothing else — rather than a machine where everything looks healthy
 and no customer has been emailed for a week because one crontab line was never
 added.
@@ -1628,6 +1824,8 @@ added.
 | `review-requests` | hourly |
 | `document-expiry` | daily |
 | `billing` | daily |
+| `cold-email-drip` | every 15 minutes |
+| `weather-alerts` | hourly; each branch acts only from `WEATHER_CHECK_HOUR` to midnight, its own time |
 
 Intervals run from boot rather than at a wall-clock hour. Every one of them is
 safe to run twice, so a redeploy shifting the hour costs nothing. A job that
@@ -1642,6 +1840,8 @@ half.
 15 *    * * *  cd /srv/avcrm && docker compose run --rm app node dist/jobs/reviewRequests.js
 30 2    * * *  cd /srv/avcrm && docker compose run --rm app node dist/jobs/documentExpiry.js
 0  3    * * *  cd /srv/avcrm && docker compose run --rm app node dist/jobs/billing.js
+*/15 *  * * *  cd /srv/avcrm && docker compose run --rm app node dist/jobs/coldEmail.js
+5  *    * * *  cd /srv/avcrm && docker compose run --rm app node dist/jobs/weatherAlerts.js
 ```
 
 That buys you billing at 3am specifically, at the cost of configuration that
@@ -1927,8 +2127,9 @@ Other conventions worth keeping:
 - Reports run their aggregates live against the operational tables. That is
   right at this size and will not be past a few hundred thousand invoices —
   materialise them, or read from a replica, before it becomes a problem.
-- There is no cost data anywhere, so `/reports/branch-summary` is revenue only.
-  A real P&L needs operator pay, materials and vehicle costs first.
+- `/reports/branch-summary` is revenue only. Costs come from the bookkeeping
+  log, and only as well as it is kept: payroll run elsewhere is not in it
+  unless somebody files it.
 - Taking a card at the door needs the customer to have a phone or an email.
   Tap-to-pay would close that, and needs a native app — see
   [Payments](#payments).

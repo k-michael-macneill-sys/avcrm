@@ -249,7 +249,7 @@ describe('the leads map', () => {
     assert.equal(opened.body.data.property.access_notes, 'Side gate');
   });
 
-  it('says the address is taken, rather than failing, when a deal repeats one', async () => {
+  it('signs a new customer up at an address someone else already has', async () => {
     const world = h.world();
     const existing = await makeCustomer(world.branches.kingston, world.users.sales);
     const property = (await db('properties').where({ id: existing.property_id }).first())!;
@@ -269,9 +269,8 @@ describe('the leads map', () => {
       },
     });
 
-    assert.equal(reply.status, 409, JSON.stringify(reply.body));
-    assert.match(JSON.stringify(reply.body), /already on the books/);
-    const orphan = await db('customers').where({ last_name: 'House', first_name: 'Same' }).first();
-    assert.equal(orphan, undefined);
+    assert.equal(reply.status, 201, JSON.stringify(reply.body));
+    assert.notEqual(reply.body.data.property.id, existing.property_id);
+    assert.equal(reply.body.data.customer.last_name, 'House');
   });
 });

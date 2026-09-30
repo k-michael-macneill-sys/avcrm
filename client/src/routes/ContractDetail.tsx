@@ -1,4 +1,5 @@
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
+import { FileText } from 'lucide-react';
 import type {
   CardSetup,
   ChecklistRequirement,
@@ -9,6 +10,7 @@ import type {
   Property,
   WorkOrder,
 } from '../../../src/types/models';
+import { ConfirmDelete } from '@/components/ConfirmDelete';
 import { PageHeader } from '@/components/PageHeader';
 import { Section } from '@/components/Section';
 import { DataTable } from '@/components/DataTable';
@@ -17,6 +19,7 @@ import { FileImage } from '@/components/FileWidgets';
 import { Field, FieldList, Loading, ErrorNotice } from '@/components/Misc';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/auth/AuthContext';
+import { openFile } from '@/lib/upload';
 import { useQuery } from '@/lib/useQuery';
 import { useSubmit } from '@/lib/useSubmit';
 import * as api from '@/lib/api';
@@ -31,6 +34,7 @@ const EMPTY_PAGE = { data: [] as Invoice[], meta: { page: 1, page_size: 0, total
 export function ContractDetail(): JSX.Element {
   const { id = '' } = useParams();
   const { isCorporate } = useAuth();
+  const navigate = useNavigate();
 
   const { data, loading, error, reload } = useQuery(async () => {
     const contract = await api.get<ContractDetailModel>(`/contracts/${id}`);
@@ -61,6 +65,16 @@ export function ContractDetail(): JSX.Element {
       <PageHeader
         title={property.address_line1}
         subtitle={`${customer.first_name} ${customer.last_name} — signed ${stamp(contract.signed_at)}`}
+        actions={
+          isCorporate ? (
+            <ConfirmDelete
+              what="this contract"
+              consequences="Its invoices, payments, card on file and visits are deleted with it. The customer and their quote stay, so the quote can be signed again."
+              onConfirm={() => api.del(`/contracts/${contract.id}`)}
+              onDeleted={() => navigate(`/customers/${customer.id}`)}
+            />
+          ) : undefined
+        }
       />
 
       <Section title="Contract" className="mb-4">
@@ -96,6 +110,16 @@ export function ContractDetail(): JSX.Element {
             alt="The signature captured at the door"
             className="block w-full max-w-[340px] rounded-md border border-border bg-white p-1.5"
           />
+          {contract.pdf_url ? (
+            <Button
+              type="button"
+              variant="secondary"
+              className="mt-3"
+              onClick={() => void openFile(contract.pdf_url!, 'signed-agreement.pdf')}
+            >
+              <FileText className="size-4" /> Signed agreement (PDF)
+            </Button>
+          ) : null}
         </div>
 
         {actionError ? <ErrorNotice message={actionError} /> : null}

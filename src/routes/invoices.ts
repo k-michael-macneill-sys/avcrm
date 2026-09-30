@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { resolveDeleter } from '../middleware/auth';
+import { deleteInvoice } from '../services/deletion';
 import { z } from 'zod';
 import {
   requireAuth,
@@ -220,5 +222,15 @@ invoicesRouter.get(
 
     const document = await invoicePdf(id, scope, req.user);
     sendPdf(res, document);
+  }),
+);
+
+/** Deletes it and everything beneath it; corporate only. See services/deletion.ts. */
+invoicesRouter.delete(
+  '/:id',
+  asyncHandler(async (req, res) => {
+    const { id } = parse(idParamSchema, req.params);
+    await deleteInvoice(id, resolveBranchScope(req, req.query.branch_id as string | undefined), resolveDeleter(req));
+    res.status(204).send();
   }),
 );

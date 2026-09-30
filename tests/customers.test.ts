@@ -50,7 +50,7 @@ describe('customers and the addresses they own', () => {
     assert.equal(check.body.data.duplicate.branch_name, 'Kingston');
   });
 
-  it('refuses the duplicate itself, with the existing one in the error', async () => {
+  it('files a second property at an address already on the books', async () => {
     const world = h.world();
     const existing = await makeCustomer(world.branches.kingston, world.users.sales);
 
@@ -67,9 +67,8 @@ describe('customers and the addresses they own', () => {
       },
     });
 
-    assert.equal(reply.status, 409);
-    assert.equal(reply.body.error.details.property_id, existing.property_id);
-    assert.equal(reply.body.error.details.branch_name, 'Kingston');
+    assert.equal(reply.status, 201, JSON.stringify(reply.body));
+    assert.notEqual(reply.body.data.id, existing.property_id);
   });
 
   it('deletes a customer nobody has signed', async () => {
@@ -83,7 +82,7 @@ describe('customers and the addresses they own', () => {
     assert.equal(await db('customers').where({ id: made.customer_id }).first(), undefined);
   });
 
-  it('refuses to delete one with a contract, rather than failing at the database', async () => {
+  it('leaves deleting a signed customer to the office, since it takes their paperwork too', async () => {
     const world = h.world();
     const made = await makeCustomer(world.branches.kingston, world.users.sales);
     const quote = await makeQuote(made.property_id, world.users.sales, { status: 'accepted' });
@@ -100,9 +99,9 @@ describe('customers and the addresses they own', () => {
     const token = await login(h.server(), world.emails.sales);
     const reply = await call(h.server(), 'DELETE', `/customers/${made.customer_id}`, { token });
 
-    // A foreign key violation is a 409 with an explanation, never a 500.
-    assert.equal(reply.status, 409);
-    assert.match(reply.body.error.message.toLowerCase(), /contract|in use|referenc/);
+    assert.equal(reply.status, 403);
+    assert.match(reply.body.error.message, /corporate/);
+    assert.ok(await db('customers').where({ id: made.customer_id }).first(), 'nothing was deleted');
   });
   it('tells a rep an address is taken without saying whose it is', async () => {
     const world = h.world();

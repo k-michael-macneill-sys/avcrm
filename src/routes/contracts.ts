@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { resolveDeleter } from '../middleware/auth';
+import { deleteContract } from '../services/deletion';
 import { z } from 'zod';
 import {
   requireAuth,
@@ -68,6 +70,8 @@ const createBodySchema = z.object({
   quote_id: z.string().uuid(),
   // Object storage key for the captured signature image.
   signature_image_url: z.string().trim().min(1).max(500),
+  /** The rep's signature on the agreement's service-provider line. */
+  provider_signature_image_url: z.string().trim().min(1).max(500).nullable().default(null),
   signed_at: signedAt.optional(),
   signed_lat: z.number().min(-90).max(90).nullable().default(null),
   signed_lng: z.number().min(-180).max(180).nullable().default(null),
@@ -133,6 +137,7 @@ contractsRouter.post(
       scope,
       {
         signature_image_url: body.signature_image_url,
+        provider_signature_image_url: body.provider_signature_image_url,
         signed_at: body.signed_at ?? null,
         signed_lat: body.signed_lat,
         signed_lng: body.signed_lng,
@@ -198,5 +203,15 @@ checklistRequirementsRouter.get(
   '/',
   asyncHandler(async (_req, res) => {
     res.json({ data: await listChecklistRequirements() });
+  }),
+);
+
+/** Deletes it and everything beneath it; corporate only. See services/deletion.ts. */
+contractsRouter.delete(
+  '/:id',
+  asyncHandler(async (req, res) => {
+    const { id } = parse(idParamSchema, req.params);
+    await deleteContract(id, resolveBranchScope(req, req.query.branch_id as string | undefined), resolveDeleter(req));
+    res.status(204).send();
   }),
 );

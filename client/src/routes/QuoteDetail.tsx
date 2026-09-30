@@ -7,6 +7,7 @@ import type {
   Property,
   Quote,
 } from '../../../src/types/models';
+import { ConfirmDelete } from '@/components/ConfirmDelete';
 import { PageHeader } from '@/components/PageHeader';
 import { Section } from '@/components/Section';
 import { StatusPill } from '@/components/StatusPill';
@@ -32,6 +33,7 @@ const NEXT: Record<string, string[]> = {
 };
 
 export function QuoteDetail(): JSX.Element {
+  const navigate = useNavigate();
   const { id = '' } = useParams();
   const { data, loading, error, reload } = useQuery(async () => {
     const quote = await api.get<Quote>(`/quotes/${id}`);
@@ -58,6 +60,16 @@ export function QuoteDetail(): JSX.Element {
       <PageHeader
         title={property.address_line1}
         subtitle={`${customer.first_name} ${customer.last_name} — ${property.city}, ${property.province}`}
+        actions={
+          <ConfirmDelete
+            what="this quote"
+            consequences={
+              contract ? 'The contract signed from it, with its invoices, payments and visits, is deleted too.' : undefined
+            }
+            onConfirm={() => api.del(`/quotes/${quote.id}`)}
+            onDeleted={() => navigate('/quotes')}
+          />
+        }
       />
 
       <Section title="Quote" className="mb-4">

@@ -1,16 +1,17 @@
 import { Router } from 'express';
+import { deleteQuote } from '../services/deletion';
 import { z } from 'zod';
 import {
   requireAuth,
   resolveActor,
   resolveBranchScope,
   sellersWrite,
+  resolveDeleter,
 } from '../middleware/auth';
 import { listContracts } from '../services/contracts';
 import {
   changeQuoteStatus,
   createQuote,
-  deleteQuote,
   getQuote,
   listQuotes,
   updateQuote,
@@ -208,7 +209,7 @@ quotesRouter.delete(
   asyncHandler(async (req, res) => {
     const { id } = parse(idParamSchema, req.params);
     const scope = resolveBranchScope(req, req.query.branch_id as string | undefined);
-    await deleteQuote(id, scope);
+    await deleteQuote(id, scope, resolveDeleter(req));
     res.status(204).send();
   }),
 );

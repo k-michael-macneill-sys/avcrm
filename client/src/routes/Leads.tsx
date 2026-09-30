@@ -1,11 +1,13 @@
 import * as React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Crosshair, Trash2, X } from 'lucide-react';
+import { Crosshair, X } from 'lucide-react';
 import type { Branch, LeadPin, PinStatus } from '../../../src/types/models';
 import { useAuth } from '@/auth/AuthContext';
+import { ConfirmDelete } from '@/components/ConfirmDelete';
 import { ErrorNotice, Loading } from '@/components/Misc';
 import { PageHeader } from '@/components/PageHeader';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -14,6 +16,7 @@ import * as api from '@/lib/api';
 import { relative } from '@/lib/format';
 import { addressAt, loadGoogleMaps, type GeocodedAddress } from '@/lib/googleMaps';
 import { usePublicConfig } from '@/lib/publicApi';
+import { AGREEMENT_ADDONS } from '../../../src/types/agreement';
 import { ADDONS } from '@/lib/sales';
 import { useQuery } from '@/lib/useQuery';
 import { useSubmit } from '@/lib/useSubmit';
@@ -43,6 +46,8 @@ interface CustomerPin {
   addon_salt: boolean;
   addon_vehicle: boolean;
   addon_stairs: boolean;
+  package: string | null;
+  addons: string[];
 }
 
 type Layer = PinStatus | 'customer';
@@ -404,9 +409,17 @@ interface LeadContactForm {
   last_name: string;
   phone: string;
   email: string;
+  /** They said yes to the cold email sequence, at the door. */
+  email_opt_in: boolean;
 }
 
-const EMPTY_CONTACT: LeadContactForm = { first_name: '', last_name: '', phone: '', email: '' };
+const EMPTY_CONTACT: LeadContactForm = {
+  first_name: '',
+  last_name: '',
+  phone: '',
+  email: '',
+  email_opt_in: false,
+};
 
 function contactBody(c: LeadContactForm) {
   return {
@@ -414,6 +427,7 @@ function contactBody(c: LeadContactForm) {
     last_name: c.last_name.trim(),
     phone: c.phone.trim() || null,
     email: c.email.trim() || null,
+    email_opt_in: c.email_opt_in && c.email.trim() !== '',
   };
 }
 
@@ -622,21 +636,12 @@ function ExistingPin({
               Save notes
             </Button>
             {canDelete ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="text-critical"
-                disabled={pending}
-                onClick={() =>
-                  run(async () => {
-                    await api.del(`/leads/pins/${pin.id}`);
-                    onDone();
-                  })
-                }
-              >
-                <Trash2 className="size-3.5" /> Remove pin
-              </Button>
+              <ConfirmDelete
+                what={pin.address_line1 ? `the pin at ${pin.address_line1}` : 'this pin'}
+                label="Remove pin"
+                onConfirm={() => api.del(`/leads/pins/${pin.id}`)}
+                onDeleted={onDone}
+              />
             ) : null}
           </div>
         </>
@@ -646,7 +651,11 @@ function ExistingPin({
 }
 
 function CustomerCard({ customer }: { customer: CustomerPin }): JSX.Element {
-  const services = ADDONS.filter((a) => customer[a.key]).map((a) => a.label);
+  const services = [
+    ...(customer.package ? [`${customer.package === 'premium' ? 'Premium' : 'Basic'} package`] : ['Driveway']),
+    ...AGREEMENT_ADDONS.filter((a) => customer.addons.includes(a.code)).map((a) => a.label),
+    ...ADDONS.filter((a) => customer[a.key]).map((a) => a.label),
+  ];
   return (
     <div className="pr-6 text-sm">
       <p className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -661,7 +670,7 @@ function CustomerCard({ customer }: { customer: CustomerPin }): JSX.Element {
       </p>
       <p className="mt-2">
         <span className="text-muted-foreground">Services: </span>
-        {['Driveway', ...services].join(', ')}
+        {services.join(', ')}
       </p>
       {customer.access_notes ? (
         <p className="mt-2 rounded-lg bg-accent/40 px-3 py-2 text-secondary-foreground">{customer.access_notes}</p>
@@ -697,7 +706,7 @@ function ContactFields({
   value: LeadContactForm;
   onChange: (next: LeadContactForm) => void;
 }): JSX.Element {
-  const field = (key: keyof LeadContactForm, label: string, type = 'text') => (
+  const field = (key: Exclude<keyof LeadContactForm, 'email_opt_in'>, label: string, type = 'text') => (
     <div className="flex flex-col gap-1">
       <Label htmlFor={`lead-${key}`} className="text-xs">
         {label}
@@ -717,6 +726,18 @@ function ContactFields({
       {field('phone', 'Phone', 'tel')}
       {field('email', 'Email', 'email')}
       <p className="col-span-2 text-xs text-muted-foreground">A phone or an email, so someone can follow up.</p>
+      <label className="col-span-2 flex items-start gap-2 text-xs text-foreground">
+        <Checkbox
+          className="mt-0.5"
+          checked={value.email_opt_in}
+          disabled={value.email.trim() === ''}
+          onCheckedChange={(v) => onChange({ ...value, email_opt_in: v === true })}
+        />
+        <span>
+          They agreed to get follow-up emails about snow clearing. Only tick this if they said yes — they can
+          unsubscribe from any email.
+        </span>
+      </label>
     </div>
   );
 }

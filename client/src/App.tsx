@@ -24,6 +24,11 @@ import { Operators } from '@/routes/Operators';
 import { OperatorDetail } from '@/routes/OperatorDetail';
 import { Admin } from '@/routes/Admin';
 import { Settings } from '@/routes/Settings';
+import { Weather } from '@/routes/Weather';
+import { Financials } from '@/routes/Financials';
+import { Bookkeeping } from '@/routes/Bookkeeping';
+import { ColdEmail } from '@/routes/ColdEmail';
+import { MetaAds } from '@/routes/MetaAds';
 import { CorporateOnly, RoleOnly } from '@/components/CorporateOnly';
 
 const SELLERS: UserRole[] = ['corporate', 'sales'];
@@ -107,6 +112,51 @@ export default function App(): JSX.Element {
                     </CorporateOnly>
                   }
                 />
+
+                <Route
+                  path="weather"
+                  element={
+                    <CorporateOnly message="The weather bot is run from the office.">
+                      <Weather />
+                    </CorporateOnly>
+                  }
+                />
+
+                {/* The Business Console: the owner's side of the company. */}
+                <Route path="business">
+                  <Route
+                    index
+                    element={
+                      <CorporateOnly message="The company's finances are corporate work.">
+                        <Financials />
+                      </CorporateOnly>
+                    }
+                  />
+                  <Route
+                    path="bookkeeping"
+                    element={
+                      <CorporateOnly message="The books are corporate work.">
+                        <Bookkeeping />
+                      </CorporateOnly>
+                    }
+                  />
+                  <Route
+                    path="cold-email"
+                    element={
+                      <CorporateOnly message="Email marketing is run from the office. Door-to-door opt-ins go in from the leads map.">
+                        <ColdEmail />
+                      </CorporateOnly>
+                    }
+                  />
+                  <Route
+                    path="meta-ads"
+                    element={
+                      <CorporateOnly message="Ad performance is corporate work.">
+                        <MetaAds />
+                      </CorporateOnly>
+                    }
+                  />
+                </Route>
 
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Route>

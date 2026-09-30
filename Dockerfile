@@ -24,6 +24,7 @@ COPY tsconfig.json ./
 COPY src ./src
 COPY client ./client
 COPY public ./public
+COPY assets ./assets
 
 RUN npm run build
 
@@ -51,6 +52,7 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/client/dist ./client/dist
 COPY --from=build /app/public ./public
+COPY --from=build /app/assets ./assets
 COPY package.json ./
 
 # node, not root. The volume is chowned by the compose file's init.

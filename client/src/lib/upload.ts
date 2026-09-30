@@ -12,7 +12,8 @@ export type UploadPurpose =
   | 'service_photo'
   | 'operator_document'
   | 'contract_pdf'
-  | 'invoice_pdf';
+  | 'invoice_pdf'
+  | 'receipt';
 
 interface UploadTarget {
   upload_id: string;

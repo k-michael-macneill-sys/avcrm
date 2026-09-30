@@ -293,6 +293,80 @@ export const MESSAGE_TEMPLATES: MessageTemplateRow[] = [
         'what you will be charged, and takes your signature and card in one go. ' +
         'The link is yours alone — please do not forward it.\n\n— {{branch_name}}',
     },
+    // The cold email sequence. Every one carries the unsubscribe link: CASL
+    // requires it in each commercial message, not just the first.
+    {
+      code: 'drip_welcome',
+      channel: 'email',
+      branch_id: null,
+      subject: 'Thanks, {{first_name}} — you are on the list for snow clearing',
+      body:
+        'Hi {{first_name}},\n\nThanks for asking about snow clearing with ' +
+        '{{branch_name}}. This confirms you signed up to hear from us by email.\n\n' +
+        'Over the next week or so we will send a few short notes: how the ' +
+        'seasonal service works, what it costs, and how to lock in your spot ' +
+        'before the first storm. Reply to any of them with a question and a ' +
+        'real person will answer.\n\n— {{branch_name}}\n\n' +
+        'Not interested? Unsubscribe here: {{unsubscribe_url}}',
+    },
+    {
+      code: 'drip_followup_1',
+      channel: 'email',
+      branch_id: null,
+      subject: 'How seasonal snow clearing works',
+      body:
+        'Hi {{first_name}},\n\nOne flat price for the season. When the snow ' +
+        'passes our trigger depth, a crew clears your driveway before you leave ' +
+        'in the morning — no calls, no waiting, no shovelling.\n\n' +
+        'Every visit is logged with before and after photos, so you always ' +
+        'know it was done.\n\nWant a quote? Just reply with your address.\n\n' +
+        '— {{branch_name}}\n\nUnsubscribe: {{unsubscribe_url}}',
+    },
+    {
+      code: 'drip_followup_2',
+      channel: 'email',
+      branch_id: null,
+      subject: 'Routes fill up before the first snowfall',
+      body:
+        'Hi {{first_name}},\n\nEvery route has a limited number of ' +
+        'driveways, and they fill up before the first real storm. Signing up ' +
+        'now holds your spot for the whole season.\n\nReply with your ' +
+        'address and we will send your price the same day.\n\n' +
+        '— {{branch_name}}\n\nUnsubscribe: {{unsubscribe_url}}',
+    },
+    {
+      code: 'drip_followup_3',
+      channel: 'email',
+      branch_id: null,
+      subject: 'Last note from us, {{first_name}}',
+      body:
+        'Hi {{first_name}},\n\nThis is our last email about this season. ' +
+        'If you would still like a clear driveway every snowy morning, reply ' +
+        'and we will take it from there.\n\nThanks for your time either way.\n\n' +
+        '— {{branch_name}}\n\nUnsubscribe: {{unsubscribe_url}}',
+    },
+    // The weather bot's night-before notice. The wording is the owner's own.
+    {
+      code: 'snowfall_notice',
+      channel: 'sms',
+      branch_id: null,
+      subject: null,
+      body:
+        'Snowfall notice: Our team is scheduled to service your drive tomorrow ' +
+        'morning. Please park all vehicles outside the driveway tonight so we ' +
+        'can perform a full clearance.',
+    },
+    {
+      code: 'snowfall_notice',
+      channel: 'email',
+      branch_id: null,
+      subject: 'Snowfall notice for tomorrow morning',
+      body:
+        'Hi {{customer_first_name}},\n\nSnowfall notice: Our team is ' +
+        'scheduled to service your drive tomorrow morning. Please park all ' +
+        'vehicles outside the driveway tonight so we can perform a full ' +
+        'clearance.\n\n— {{branch_name}}',
+    },
     {
       code: 'payment_failed_internal',
       channel: 'email',

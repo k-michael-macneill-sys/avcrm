@@ -90,6 +90,7 @@ export interface EnqueueInput {
   branch_id?: string | null;
   customer_id?: string | null;
   work_order_id?: string | null;
+  email_lead_id?: string | null;
 }
 
 /**
@@ -118,6 +119,7 @@ export async function enqueueMessage(
       branch_id: input.branch_id ?? null,
       customer_id: input.customer_id ?? null,
       work_order_id: input.work_order_id ?? null,
+      email_lead_id: input.email_lead_id ?? null,
       template_code: input.template_code,
       channel: input.channel,
       recipient,

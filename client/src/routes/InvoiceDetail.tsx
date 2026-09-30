@@ -1,7 +1,8 @@
 import * as React from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import { PAYMENT_METHODS } from '../../../src/types/models';
 import type { Customer, Invoice, Payment } from '../../../src/types/models';
+import { ConfirmDelete } from '@/components/ConfirmDelete';
 import { PageHeader } from '@/components/PageHeader';
 import { Section } from '@/components/Section';
 import { DataTable } from '@/components/DataTable';
@@ -24,6 +25,7 @@ interface InvoiceDetailModel extends Invoice {
 export function InvoiceDetail(): JSX.Element {
   const { id = '' } = useParams();
   const { isCorporate } = useAuth();
+  const navigate = useNavigate();
 
   const { data, loading, error, reload } = useQuery(async () => {
     const invoice = await api.get<InvoiceDetailModel>(`/invoices/${id}`);
@@ -46,6 +48,16 @@ export function InvoiceDetail(): JSX.Element {
       <PageHeader
         title={`${money(invoice.amount_due)} — ${customer.first_name} ${customer.last_name}`}
         subtitle={`${date(invoice.billing_period_start)} to ${date(invoice.billing_period_end)}`}
+        actions={
+          isCorporate ? (
+            <ConfirmDelete
+              what="this invoice"
+              consequences="Every payment recorded against it is deleted too. Nothing is refunded at Square — refund first if money was taken."
+              onConfirm={() => api.del(`/invoices/${invoice.id}`)}
+              onDeleted={() => navigate('/invoices')}
+            />
+          ) : undefined
+        }
       />
 
       <Section title="Invoice" className="mb-4">
