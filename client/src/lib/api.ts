@@ -1,4 +1,4 @@
-import type { PublicUser } from '../../../src/types/models';
+import type { Branch, PublicUser, SignInChoice } from '../../../src/types/models';
 
 /**
  * The only place that talks to the API. Everything else asks this for data.
@@ -11,6 +11,10 @@ import type { PublicUser } from '../../../src/types/models';
 
 const TOKEN_KEY = 'avcrm.token';
 const USER_KEY = 'avcrm.user';
+const BRANCH_KEY = 'avcrm.branch';
+
+/** The branch a session signed in to, as the sign-in screen chose it. */
+export type SessionBranch = Pick<Branch, 'id' | 'name' | 'province' | 'default_city'>;
 
 export interface ApiErrorDetail {
   path?: string;
@@ -60,6 +64,17 @@ export function currentUser(): PublicUser | null {
   }
 }
 
+/** Null for ADMIN, which works across every branch. */
+export function currentBranch(): SessionBranch | null {
+  const raw = localStorage.getItem(BRANCH_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as SessionBranch;
+  } catch {
+    return null;
+  }
+}
+
 export function isCorporate(): boolean {
   return currentUser()?.role === 'corporate';
 }
@@ -67,6 +82,7 @@ export function isCorporate(): boolean {
 export function signOut(): void {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
+  localStorage.removeItem(BRANCH_KEY);
 }
 
 /** Raised on a 401 so the shell can bounce back to the login screen. */
@@ -151,6 +167,35 @@ export async function del(path: string): Promise<void> {
 export interface Session {
   token: string;
   user: PublicUser;
+  branch: SessionBranch | null;
+}
+
+/** The sign-in screen: a branch (or ADMIN) from the dropdown, and a password. */
+export async function signInAs(choice: SignInChoice, password: string): Promise<Session> {
+  // Not through request(), for the same reason as signIn below.
+  const response = await fetch('/auth/sign-in', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ choice, password }),
+  });
+  const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+
+  if (!response.ok) {
+    const error = (payload.error ?? {}) as Record<string, unknown>;
+    throw new ApiError(
+      response.status,
+      String(error.code ?? 'error'),
+      String(error.message ?? 'Could not sign in'),
+      [],
+    );
+  }
+
+  const session = (payload.data ?? {}) as Session;
+  localStorage.setItem(TOKEN_KEY, session.token);
+  localStorage.setItem(USER_KEY, JSON.stringify(session.user));
+  if (session.branch) localStorage.setItem(BRANCH_KEY, JSON.stringify(session.branch));
+  else localStorage.removeItem(BRANCH_KEY);
+  return session;
 }
 
 export async function signIn(email: string, password: string): Promise<Session> {
@@ -176,8 +221,9 @@ export async function signIn(email: string, password: string): Promise<Session> 
     );
   }
 
-  const session = (payload.data ?? {}) as Session;
+  const session = { branch: null, ...(payload.data ?? {}) } as Session;
   localStorage.setItem(TOKEN_KEY, session.token);
   localStorage.setItem(USER_KEY, JSON.stringify(session.user));
+  localStorage.removeItem(BRANCH_KEY);
   return session;
 }

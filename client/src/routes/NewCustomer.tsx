@@ -77,14 +77,31 @@ export function NewCustomer(): JSX.Element {
   return <AgreementSignup branches={branches} lead={lead} prefill={params} />;
 }
 
-function startingValues(lead: Customer | null, prefill: URLSearchParams, branch: Branch | undefined): AgreementValues {
+/** The agreement's city field is filled in by the branch, and not editable. */
+const CITY_LOCKED = ['customer_city'];
+
+/**
+ * The city a new agreement starts with. A branch sign-in with a default city
+ * gets that, fixed; one without (Alberta covers several towns) starts blank
+ * for the rep to type; ADMIN keeps whatever the map handed over.
+ */
+function startingCity(prefill: URLSearchParams, sessionCity: string | null): string {
+  return sessionCity ?? prefill.get('city') ?? '';
+}
+
+function startingValues(
+  lead: Customer | null,
+  prefill: URLSearchParams,
+  branch: Branch | undefined,
+  city: string,
+): AgreementValues {
   return {
     customer_name: lead ? `${lead.first_name} ${lead.last_name}`.trim() : '',
     customer_email: lead?.email ?? '',
     customer_phone: lead?.phone ?? '',
     // The map hands an address over when a rep taps a house.
     customer_street: prefill.get('address_line1') ?? '',
-    customer_city: prefill.get('city') ?? '',
+    customer_city: city,
     customer_province: prefill.get('province') ?? branch?.province ?? '',
     customer_postal: prefill.get('postal_code') ?? '',
     ...defaultAgreementYears(),
@@ -100,9 +117,19 @@ function AgreementSignup({
   lead: Customer | null;
   prefill: URLSearchParams;
 }): JSX.Element {
-  const { isCorporate } = useAuth();
+  const { isCorporate, isBranch, branch: sessionBranch } = useAuth();
   const [branchId, setBranchId] = React.useState(lead?.branch_id ?? branches[0]?.id ?? '');
-  const [values, setValues] = React.useState<AgreementValues>(() => startingValues(lead, prefill, branches[0]));
+  // A branch sign-in's own city, when the branch has one. Alberta's is null:
+  // several towns, so the rep types it.
+  const branchCity = isBranch ? (sessionBranch?.default_city ?? null) : null;
+  const [values, setValues] = React.useState<AgreementValues>(() =>
+    startingValues(
+      lead,
+      prefill,
+      branches.find((b) => b.id === sessionBranch?.id) ?? branches[0],
+      startingCity(prefill, branchCity),
+    ),
+  );
   const [signatures, setSignatures] = React.useState<Partial<Record<SignatureField, Signature>>>({});
   const [signing, setSigning] = React.useState<SignatureField | null>(null);
   const [invalid, setInvalid] = React.useState<string[]>([]);
@@ -243,6 +270,7 @@ function AgreementSignup({
           }}
           onSign={setSigning}
           invalid={invalid}
+          locked={branchCity ? CITY_LOCKED : undefined}
         />
       </div>
 

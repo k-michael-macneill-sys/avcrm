@@ -27,7 +27,7 @@ export const leadsRouter = Router();
 
 leadsRouter.use(requireAuth);
 
-const sellers = requireRole('corporate', 'sales');
+const sellers = requireRole('corporate', 'sales', 'branch');
 
 const boundsSchema = z
   .object({

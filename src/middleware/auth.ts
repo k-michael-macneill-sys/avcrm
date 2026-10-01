@@ -108,7 +108,8 @@ export function resolveCrewActor(req: Request): CrewActor {
   if (!req.user) {
     throw unauthorized();
   }
-  return { user_id: req.user.id, is_corporate: req.user.role === 'corporate' };
+  const role = req.user.role;
+  return { user_id: req.user.id, dispatches: role === 'corporate' || role === 'branch' };
 }
 
 /** Route guard for roles. Use after requireAuth. */
@@ -147,9 +148,9 @@ export function writesOnlyFor(...roles: UserRole[]): RequestHandler {
 }
 
 /** Customers, properties, quotes, contracts and cards: the sales side. */
-export const sellersWrite = writesOnlyFor('corporate', 'sales');
+export const sellersWrite = writesOnlyFor('corporate', 'sales', 'branch');
 /** Visits, their status and photos: the crew side. */
-export const crewWrite = writesOnlyFor('corporate', 'operator');
+export const crewWrite = writesOnlyFor('corporate', 'operator', 'branch');
 
 /**
  * Which branches this request may READ.

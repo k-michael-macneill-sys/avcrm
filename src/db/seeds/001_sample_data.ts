@@ -13,7 +13,9 @@ import { installAppConfig } from '../appConfig';
  * Operators and Customers screens after the first sign-in — not fake rows
  * to delete before the CRM is usable. The one thing a fresh install cannot
  * bootstrap through its own UI is the first login, so this creates exactly
- * one corporate account for that.
+ * one corporate account for that. (The four branches the sign-in screen
+ * offers do come back, through installAppConfig: they are how the app is
+ * signed in to, not sample data.)
  */
 export async function seed(knex: Knex): Promise<void> {
   // This seed wipes every table it owns, so in production it is allowed only

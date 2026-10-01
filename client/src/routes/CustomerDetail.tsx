@@ -9,6 +9,7 @@ import { StatusPill } from '@/components/StatusPill';
 import { Disclosure } from '@/components/Disclosure';
 import { InlineForm } from '@/components/InlineForm';
 import { Field, FieldList, Loading, ErrorNotice } from '@/components/Misc';
+import { useAuth } from '@/auth/AuthContext';
 import { useQuery } from '@/lib/useQuery';
 import * as api from '@/lib/api';
 import { date, money, stamp } from '@/lib/format';
@@ -16,6 +17,8 @@ import { date, money, stamp } from '@/lib/format';
 export function CustomerDetail(): JSX.Element {
   const { id = '' } = useParams();
   const navigate = useNavigate();
+  const { isBranch, branch } = useAuth();
+  const branchCity = isBranch ? (branch?.default_city ?? null) : null;
   const { data, loading, error, reload } = useQuery(
     () =>
       Promise.all([
@@ -117,7 +120,8 @@ export function CustomerDetail(): JSX.Element {
             submitLabel="Add property"
             specs={[
               { name: 'address_line1', label: 'Address', required: true },
-              { name: 'city', label: 'City', required: true },
+              // A branch sign-in with its own city has it filled in by the server.
+              ...(branchCity ? [] : [{ name: 'city', label: 'City', required: true }]),
               { name: 'province', label: 'Province', required: true },
               { name: 'postal_code', label: 'Postal code', required: true },
               {
@@ -133,7 +137,7 @@ export function CustomerDetail(): JSX.Element {
               api.post<Property>('/properties', {
                 customer_id: customer.id,
                 address_line1: values.address_line1,
-                city: values.city,
+                ...(branchCity ? {} : { city: values.city }),
                 province: values.province,
                 postal_code: values.postal_code,
                 driveway_size_cars: Number(values.driveway_size_cars),

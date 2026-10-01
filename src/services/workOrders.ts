@@ -48,7 +48,8 @@ const GEOTAG_RADIUS_M = 500;
 /** The caller as these rules see them: who, and whether they dispatch. */
 export interface CrewActor {
   user_id: string;
-  is_corporate: boolean;
+  /** Corporate, or a branch's own sign-in: may work any visit they can see. */
+  dispatches: boolean;
 }
 
 export interface WorkOrderFilters {
@@ -444,11 +445,11 @@ async function assertAssignable(
 
 /**
  * Branch scope says which visits you can see. This says whose you may touch:
- * the operator the job is assigned to, or corporate. Without it, any operator
+ * the operator the job is assigned to, or whoever dispatches. Without it, any operator
  * in the branch could complete a colleague's job.
  */
 function assertMayWork(workOrder: WorkOrder, actor: CrewActor): void {
-  if (actor.is_corporate) return;
+  if (actor.dispatches) return;
   if (workOrder.assigned_user_id !== actor.user_id) {
     throw forbidden('This visit is assigned to another operator');
   }

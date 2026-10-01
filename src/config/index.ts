@@ -157,6 +157,14 @@ const envSchema = z.object({
   BRANCH_PASSWORD: blankIsUnset(z.string().min(4)),
 
   /**
+   * The password for signing in as a branch (Cranbrook, Kingston, Alberta,
+   * Regina) from the sign-in screen. One password, shared by every branch
+   * sign-in — change it here to change it everywhere. The ADMIN choice keeps
+   * the corporate accounts' own passwords.
+   */
+  BRANCH_SIGN_IN_PASSWORD: blankIsUnset(z.string().min(1)),
+
+  /**
    * Facebook Page and Instagram direct messages. The Page access token sends
    * replies; the app secret is what webhook signatures are checked against;
    * the verify token is the string Meta echoes back when the webhook is
@@ -305,6 +313,7 @@ export const config = {
     googleApiKey: env.GOOGLE_MAPS_API_KEY ?? null,
   },
   branchPassword: env.BRANCH_PASSWORD ?? null,
+  branchSignInPassword: env.BRANCH_SIGN_IN_PASSWORD ?? '1234',
   meta: {
     pageAccessToken: env.META_PAGE_ACCESS_TOKEN ?? null,
     appSecret: env.META_APP_SECRET ?? null,

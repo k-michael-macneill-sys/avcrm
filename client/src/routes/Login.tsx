@@ -1,25 +1,36 @@
 import * as React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
+import { SIGN_IN_CHOICES, type SignInChoice } from '../../../src/types/models';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/auth/AuthContext';
 import { ApiError } from '@/lib/api';
 import { ThemeToggle } from '@/theme/ThemeToggle';
 import logo from '@/assets/drift-logo.jpg';
 
-const SEED_ACCOUNT: [string, string] = ['corporate@avcrm.test', 'Corporate — add the first branch and crew from here'];
+/** The last choice on this device, so a branch's tablet opens on its own branch. */
+const LAST_CHOICE_KEY = 'avcrm.signInChoice';
+
+function lastChoice(): SignInChoice | '' {
+  try {
+    const stored = localStorage.getItem(LAST_CHOICE_KEY);
+    return SIGN_IN_CHOICES.find((c) => c === stored) ?? '';
+  } catch {
+    return '';
+  }
+}
 
 /**
- * The one account a fresh install has is listed because this is a
- * development build and guessing it from the README while looking at a
- * login box is nobody's idea of a good time. Everything else — branches,
- * crew, customers — is added through the app after this first sign-in.
+ * Sign in by branch: pick Cranbrook, Kingston, Alberta or Regina and enter
+ * the branch password, or pick ADMIN and enter a corporate account's own
+ * password. No email: the branch is who you are.
  */
 export function Login(): JSX.Element {
   const { user, signIn } = useAuth();
   const location = useLocation();
-  const [email, setEmail] = React.useState('corporate@avcrm.test');
-  const [password, setPassword] = React.useState('Password123!');
+  const [choice, setChoice] = React.useState<SignInChoice | ''>(lastChoice);
+  const [password, setPassword] = React.useState('');
   const [error, setError] = React.useState('');
   const [pending, setPending] = React.useState(false);
 
@@ -30,9 +41,20 @@ export function Login(): JSX.Element {
 
   const onSubmit = (event: React.FormEvent): void => {
     event.preventDefault();
+    if (!choice) {
+      setError('Choose your branch first');
+      return;
+    }
     setError('');
     setPending(true);
-    signIn(email.trim(), password)
+    signIn(choice, password)
+      .then(() => {
+        try {
+          localStorage.setItem(LAST_CHOICE_KEY, choice);
+        } catch {
+          // Remembering the branch is a convenience; signing in worked.
+        }
+      })
       .catch((err: unknown) => {
         setError(err instanceof ApiError ? err.message : 'Could not sign in');
       })
@@ -49,17 +71,27 @@ export function Login(): JSX.Element {
         <h1 className="mb-4 mt-1 text-2xl font-semibold tracking-tight">Sign in</h1>
 
         <form onSubmit={onSubmit} className="flex flex-col gap-1">
-          <label htmlFor="email" className="mt-2 text-xs text-muted-foreground">
-            Email
+          <label htmlFor="branch" className="mt-2 text-xs text-muted-foreground">
+            Branch
           </label>
-          <Input
-            id="email"
-            type="email"
-            autoComplete="username"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
+          <Select
+            value={choice}
+            onValueChange={(v) => {
+              setChoice(v as SignInChoice);
+              setError('');
+            }}
+          >
+            <SelectTrigger id="branch">
+              <SelectValue placeholder="Choose your branch" />
+            </SelectTrigger>
+            <SelectContent>
+              {SIGN_IN_CHOICES.map((c) => (
+                <SelectItem key={c} value={c}>
+                  {c}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
           <label htmlFor="password" className="mt-2 text-xs text-muted-foreground">
             Password
@@ -81,25 +113,6 @@ export function Login(): JSX.Element {
             {pending ? 'Signing in…' : 'Sign in'}
           </Button>
         </form>
-
-        <div className="mt-5 border-t border-border pt-4 text-xs text-muted-foreground">
-          <p>Seeded account:</p>
-          <ul className="mt-1.5 list-none space-y-1 pl-0">
-            <li>
-              <button
-                type="button"
-                className="text-primary hover:underline"
-                onClick={() => {
-                  setEmail(SEED_ACCOUNT[0]);
-                  setPassword('Password123!');
-                }}
-              >
-                {SEED_ACCOUNT[0]}
-              </button>{' '}
-              — {SEED_ACCOUNT[1]}
-            </li>
-          </ul>
-        </div>
       </div>
     </div>
   );

@@ -14,7 +14,9 @@ import {
   listProperties,
   updateProperty,
 } from '../services/properties';
+import { forcedCity } from '../services/branchSignIn';
 import { asyncHandler } from '../utils/async';
+import { badRequest, unauthorized } from '../utils/errors';
 import { paginationSchema } from '../utils/pagination';
 import { parse } from '../utils/validate';
 
@@ -46,6 +48,8 @@ const addressFields = {
 const createBodySchema = z.object({
   customer_id: z.string().uuid(),
   ...addressFields,
+  // A branch sign-in with a default city leaves it out; see below.
+  city: addressFields.city.optional(),
   latitude: z.number().min(-90).max(90).nullable().default(null),
   longitude: z.number().min(-180).max(180).nullable().default(null),
   // Dropdown 1-6, where 6 means "6+".
@@ -128,9 +132,15 @@ propertiesRouter.post(
     const body = parse(createBodySchema, req.body);
     const scope = resolveBranchScope(req, req.query.branch_id as string | undefined);
     const { customer_id, ...input } = body;
+    if (!req.user) throw unauthorized();
+
+    // A branch's own sign-in files every property in its branch's city.
+    const city = (await forcedCity(req.user)) ?? input.city;
+    if (!city) throw badRequest('Request validation failed', [{ path: 'city', message: 'Required' }]);
 
     const property = await createProperty(customer_id, scope, {
       ...input,
+      city,
       address_line2: input.address_line2 ?? null,
     });
 
