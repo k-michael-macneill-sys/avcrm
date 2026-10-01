@@ -8,6 +8,7 @@ import {
   resolveWriteBranch,
 } from '../middleware/auth';
 import { cleanAgreement, dealFromAgreement } from '../services/agreement';
+import { forcedCity } from '../services/branchSignIn';
 import { updateCustomer } from '../services/customers';
 import { openDeal, settleCollectedPayment } from '../services/sales';
 import { requestSignature } from '../services/signing';
@@ -25,7 +26,7 @@ import { parse } from '../utils/validate';
 export const salesRouter = Router();
 
 // Selling only: an operator's job is the route, not the doorstep.
-salesRouter.use(requireAuth, requireRole('corporate', 'sales'));
+salesRouter.use(requireAuth, requireRole('corporate', 'sales', 'branch'));
 
 const money = z
   .number()
@@ -185,7 +186,12 @@ salesRouter.post(
     const body = parse(agreementDealSchema, req.body);
     if (!req.user) throw unauthorized();
 
-    const deal = dealFromAgreement(cleanAgreement(body.agreement));
+    // A branch's own sign-in writes its branch's city onto the agreement —
+    // the property and the signed contract both — whatever was sent.
+    const agreement = cleanAgreement(body.agreement);
+    const city = await forcedCity(req.user);
+    if (city) agreement.customer_city = city;
+    const deal = dealFromAgreement(agreement);
     const scope = resolveBranchScope(req, body.branch_id);
     const branchId = body.customer_id ? null : resolveWriteBranch(req, body.branch_id);
 

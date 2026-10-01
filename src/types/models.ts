@@ -12,9 +12,18 @@
  * corporate: every branch, all of the office work.
  * sales: knocks doors and signs customers up, in one branch.
  * operator: drives the route and clears driveways, in one branch.
+ * branch: a branch's own shared sign-in — selling and dispatch alike, in
+ *   that branch only, and none of corporate's screens.
  */
-export const USER_ROLES = ['corporate', 'operator', 'sales'] as const;
+export const USER_ROLES = ['corporate', 'operator', 'sales', 'branch'] as const;
 export type UserRole = (typeof USER_ROLES)[number];
+
+/**
+ * What the sign-in screen's dropdown offers: each branch's own sign-in, and
+ * ADMIN for the corporate accounts. See services/branchSignIn.ts.
+ */
+export const SIGN_IN_CHOICES = ['Cranbrook', 'Kingston', 'Alberta', 'Regina', 'ADMIN'] as const;
+export type SignInChoice = (typeof SIGN_IN_CHOICES)[number];
 
 export const ONBOARDING_STATUSES = [
   'pending',
@@ -243,6 +252,11 @@ export interface Branch {
   name: string;
   province: string;
   timezone: string;
+  /**
+   * The city a branch's customers are in, filled onto every agreement its
+   * own sign-in writes. Null for a branch that covers several towns.
+   */
+  default_city: string | null;
   manager_user_id: string | null;
   status: BranchStatus;
   created_at: Date;

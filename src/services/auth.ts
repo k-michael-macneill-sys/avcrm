@@ -79,7 +79,8 @@ export async function createUser(
   }
 
   if (input.role !== 'corporate' && !input.branch_id) {
-    throw badRequest(`${input.role === 'sales' ? 'A sales rep' : 'An operator'} must belong to a branch`);
+    const who = { sales: 'A sales rep', operator: 'An operator', branch: 'A branch sign-in' } as const;
+    throw badRequest(`${who[input.role]} must belong to a branch`);
   }
 
   if (input.branch_id) {

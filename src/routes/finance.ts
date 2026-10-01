@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth, requireCorporate } from '../middleware/auth';
-import { financialSummary } from '../services/finance';
+import { financialProjection, financialSummary } from '../services/finance';
 import { asyncHandler } from '../utils/async';
 import { badRequest } from '../utils/errors';
 import { parse } from '../utils/validate';
@@ -33,5 +33,13 @@ financeRouter.get(
       data: await financialSummary(window),
       meta: { from: window.from ?? null, to: window.to ?? null, branch_id: window.branch_id ?? null },
     });
+  }),
+);
+
+financeRouter.get(
+  '/projection',
+  asyncHandler(async (req, res) => {
+    const { branch_id } = parse(windowSchema.pick({ branch_id: true }), req.query);
+    res.json({ data: await financialProjection({ branch_id }), meta: { branch_id: branch_id ?? null } });
   }),
 );

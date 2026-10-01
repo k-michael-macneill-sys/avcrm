@@ -27,12 +27,13 @@ import { Settings } from '@/routes/Settings';
 import { Weather } from '@/routes/Weather';
 import { Financials } from '@/routes/Financials';
 import { Bookkeeping } from '@/routes/Bookkeeping';
+import { Projections } from '@/routes/Projections';
 import { ColdEmail } from '@/routes/ColdEmail';
 import { MetaAds } from '@/routes/MetaAds';
 import { CorporateOnly, RoleOnly } from '@/components/CorporateOnly';
 
-const SELLERS: UserRole[] = ['corporate', 'sales'];
-const CREW: UserRole[] = ['corporate', 'operator'];
+const SELLERS: UserRole[] = ['corporate', 'sales', 'branch'];
+const CREW: UserRole[] = ['corporate', 'operator', 'branch'];
 
 export default function App(): JSX.Element {
   return (
@@ -129,6 +130,14 @@ export default function App(): JSX.Element {
                     element={
                       <CorporateOnly message="The company's finances are corporate work.">
                         <Financials />
+                      </CorporateOnly>
+                    }
+                  />
+                  <Route
+                    path="projections"
+                    element={
+                      <CorporateOnly message="The company's finances are corporate work.">
+                        <Projections />
                       </CorporateOnly>
                     }
                   />

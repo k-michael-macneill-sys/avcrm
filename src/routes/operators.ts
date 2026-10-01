@@ -53,10 +53,18 @@ const reviewSchema = z.object({
   rejection_reason: z.string().trim().min(1).max(1000).nullable().default(null),
 });
 
-/** An operator may see and act on their own record; corporate on anyone's. */
+/**
+ * An operator may see and act on their own record; a branch's own sign-in
+ * on its branch's crew; corporate on anyone's.
+ */
 async function assertCanSeeOperator(req: Request, operatorId: string): Promise<void> {
   if (!req.user) throw unauthorized();
   if (req.user.role === 'corporate') return;
+  if (req.user.role === 'branch') {
+    const operator = await db('users').where({ id: operatorId }).first('branch_id');
+    if (operator && operator.branch_id === req.user.branch_id) return;
+    throw forbidden('That operator belongs to another branch');
+  }
   if (req.user.id !== operatorId) {
     throw forbidden('You may only access your own operator record');
   }

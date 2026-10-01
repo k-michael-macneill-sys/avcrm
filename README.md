@@ -158,19 +158,22 @@ evening. See [The weather bot](#the-weather-bot).
 
 ## Seed accounts
 
-The seed installs no sample business data — no demo branches, crew or
-customers. All of that is the operator's own, added through the app itself
-(Company admin → Add a branch / Add someone, and Add customer on the
-Customers screen) once they have signed in. The one thing a fresh database
+The seed installs no sample business data — no demo crew or customers, and
+no branches beyond the four the sign-in screen offers (Cranbrook, Kingston,
+Alberta and Regina, installed as configuration). Everything else is the
+operator's own, added through the app itself (Company admin → Add a branch /
+Add someone, and Add customer on the Customers screen) once they have signed
+in. The one thing a fresh database
 cannot bootstrap through its own UI is the first login, so the seed creates
 exactly one account for that:
 
 | Email | Role | Branch | Notes |
 | --- | --- | --- | --- |
-| `corporate@avcrm.test` | corporate | — | Sees every branch; add the first one from here |
+| `corporate@avcrm.test` | corporate | — | Sees every branch; sign in as **ADMIN** |
 
-It shares the password in `SEED_PASSWORD` (default `Password123!`). Sign in,
-change the password, then add branches, crew and customers as they come in.
+It shares the password in `SEED_PASSWORD` (default `Password123!`). On the
+sign-in screen choose **ADMIN** and enter that password; choose a branch and
+enter `BRANCH_SIGN_IN_PASSWORD` (default `1234`) to sign in as the branch.
 
 ## Auth and permissions
 
@@ -216,6 +219,42 @@ instead of whenever the token expires. That is one indexed primary-key lookup
 per request.
 
 ### Signing in
+
+**The sign-in screen asks for a branch and a password — no email.** The
+dropdown offers **Cranbrook**, **Kingston**, **Alberta**, **Regina** and
+**ADMIN** (`POST /auth/sign-in` with `{ choice, password }`).
+
+- **A branch** signs in to that branch's own shared account with the branch
+  password, `BRANCH_SIGN_IN_PASSWORD` — **`1234` unless you set it**. The
+  account has the `branch` role: customers, quotes, contracts, the leads map,
+  dispatch and crew, in that branch only; none of corporate's screens (Reports,
+  Company, Settings, Weather Alerts, the Business Console). It is created the
+  first time somebody signs in to it — as `cranbrook@branch.avcrm.local` and so
+  on, with a random password the email route can never match — and so is the
+  branch itself if it is missing.
+- **ADMIN** keeps the corporate accounts' own passwords: the password is
+  checked against each active corporate account in turn, oldest first, and
+  signs in as the one it matches.
+
+The response carries the branch as well as the user (`{ token, user, branch }`,
+`branch` null for ADMIN), and the client keeps it with the session.
+
+**Each branch's city.** `branches.default_city` is the city a branch's
+customers live in: Cranbrook, Kingston and Regina have their own; Alberta has
+none, because it covers several towns across Southern Alberta. When a branch
+sign-in writes an agreement or adds a property, the server fills the branch
+and that city in, whatever was sent — so the property, and the city printed on
+the signed contract, always match the branch. On screen, Add customer shows no
+branch picker for a branch sign-in, and the agreement's city is filled in and
+not tappable; on an Alberta agreement the city box starts blank for the rep to
+type. ADMIN's form is unchanged: branch picker, and the city as typed.
+
+**A shared four-digit password is weak, on purpose.** Anyone who knows it can
+sign in as any branch. The rate limits below apply to it — by address, and per
+branch choice, so guessing at one branch from many addresses runs out too —
+but set `BRANCH_SIGN_IN_PASSWORD` to something longer before the app faces the
+internet. `POST /auth/login` (email and password) is still there for staff
+accounts and scripts.
 
 `/auth/login` is a password oracle open to the internet: without a limit, a
 list of common passwords against one known address is free, and nothing in the
@@ -302,6 +341,8 @@ A suspension is only lifted by corporate, never by the automatic refresh.
 | GET | `/ready` | public | Readiness — database, queue and storage; 503 when degraded |
 | POST | `/auth/register` | public | Always creates a pending operator |
 | POST | `/auth/login` | public | Returns `{ token, user }` |
+| POST | `/auth/sign-in` | public | `{ choice, password }`: a branch or `ADMIN`; returns `{ token, user, branch }` |
+| GET | `/auth/sign-in/choices` | public | The dropdown's options |
 | GET | `/auth/me` | any | |
 | GET | `/branches` | any | Operators see only their own |
 | POST | `/branches` | corporate | |
@@ -808,6 +849,7 @@ link carries the real `/app/…` href so middle-click, "open in new tab" and
 | Reports | The branch comparison, revenue by month, operator scorecards |
 | *Business Console* | |
 | Financials | Collected against expenses, net cash, by month and by category |
+| Projections | The season (Nov 1 – Mar 31) on signed contracts against operator pay, and a What-If report |
 | Bookkeeping | Receipts and deductions: **Add +**, and the list sorted four ways |
 | Cold Email | Who opted in, where each is in the sequence, the landing page form |
 | Meta Ads | The slot for Meta ads performance |
@@ -1492,6 +1534,37 @@ actually kept. Revenue is bucketed by the billing period it pays for, exactly
 as on Reports, so the two pages never disagree about a month; expenses by the
 date on the receipt. Narrowing to a branch drops company-wide expenses — a
 branch's figures should not carry head office's insurance.
+
+### Financial projections
+
+The snow season is always exactly five months, 1 November to 31 March: the
+one under way, or from April on the next one. `GET /finance/projection`
+counts active customers (as the Customers list does) and bills every active
+contract of an active customer the way its invoices will. A seasonal
+contract pays once, in November. A monthly one pays its discounted first
+month and then its recurring price, for as many months as it runs, up to
+five. The average contract value is that revenue divided by the customers
+with a contract.
+
+The page adds operator salaries, one line per position (or the whole crew on
+one line), which it remembers on that device. It draws cumulative revenue,
+labour and net month by month, and redraws as the salaries change:
+
+- **Labour** = monthly salaries × 5
+- **Base net** = projected revenue − labour
+
+Below that is the **What-If** generator. It is prefilled with today's
+customer count and average contract value, uses the salaries from above,
+and runs these formulas when you press **Generate Report**:
+
+- **Effective customers** = target × (1 − churn% / 100)
+- **Service revenue** = effective customers × ACV
+- **Cancellation fees** = (target − effective customers) × fee
+- **Expenses** = (salaries + other monthly expenses) × 5
+- **Net** = service revenue + cancellation fees − expenses
+
+The formulas live in `src/services/projectionModel.ts`, shared by the server
+and the page.
 
 ### Bookkeeping
 

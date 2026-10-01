@@ -1,15 +1,22 @@
 import * as React from 'react';
-import type { PublicUser } from '../../../src/types/models';
+import type { PublicUser, SignInChoice } from '../../../src/types/models';
 import * as api from '@/lib/api';
 
 interface AuthContextValue {
   user: PublicUser | null;
+  /**
+   * The branch this session signed in to from the dropdown. Null for ADMIN,
+   * which works across every branch.
+   */
+  branch: api.SessionBranch | null;
   isCorporate: boolean;
   /** Knocks doors and signs customers up. */
   isSales: boolean;
   /** Drives the route and clears driveways. */
   isOperator: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
+  /** A branch's own shared sign-in: selling and dispatch, in that branch. */
+  isBranch: boolean;
+  signIn: (choice: SignInChoice, password: string) => Promise<void>;
   signOut: () => void;
   /** Called from anywhere a 401 surfaces, to bounce back to the login screen. */
   handleUnauthenticated: () => void;
@@ -19,15 +26,18 @@ const AuthContext = React.createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }): JSX.Element {
   const [user, setUser] = React.useState<PublicUser | null>(() => api.currentUser());
+  const [branch, setBranch] = React.useState<api.SessionBranch | null>(() => api.currentBranch());
 
-  const signIn = React.useCallback(async (email: string, password: string) => {
-    const session = await api.signIn(email, password);
+  const signIn = React.useCallback(async (choice: SignInChoice, password: string) => {
+    const session = await api.signInAs(choice, password);
+    setBranch(session.branch);
     setUser(session.user);
   }, []);
 
   const signOut = React.useCallback(() => {
     api.signOut();
     setUser(null);
+    setBranch(null);
   }, []);
 
   // Same effect as signOut, but named for where it is triggered from: a 401
@@ -37,14 +47,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }): JSX.E
   const value = React.useMemo(
     () => ({
       user,
+      branch,
       isCorporate: user?.role === 'corporate',
       isSales: user?.role === 'sales',
       isOperator: user?.role === 'operator',
+      isBranch: user?.role === 'branch',
       signIn,
       signOut,
       handleUnauthenticated,
     }),
-    [user, signIn, signOut, handleUnauthenticated],
+    [user, branch, signIn, signOut, handleUnauthenticated],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -4,6 +4,7 @@ import { config } from '../config';
 import { optionalAuth, requireAuth } from '../middleware/auth';
 import { rateLimit, type RateLimitRule } from '../middleware/rateLimit';
 import { createUser, findUserById, login } from '../services/auth';
+import { SIGN_IN_CHOICES, signInByChoice } from '../services/branchSignIn';
 import { asyncHandler } from '../utils/async';
 import { forbidden, unauthorized } from '../utils/errors';
 import { parse } from '../utils/validate';
@@ -66,6 +67,33 @@ if (maxPerEmail > 0) rules.push(byEmail);
 
 const loginLimiter = rateLimit(...rules);
 
+/**
+ * The sign-in screen's own route. The per-address rule applies as it does to
+ * the email route, and each choice has its own budget too: every branch
+ * shares one short password, so guessing at one branch from many addresses
+ * has to run out somewhere.
+ */
+const byChoice: RateLimitRule = {
+  name: 'sign-in-choice',
+  windowMs,
+  max: maxPerEmail,
+  key: (req) => {
+    const choice = (req.body as { choice?: unknown } | undefined)?.choice;
+    return typeof choice === 'string' && choice !== '' ? choice : null;
+  },
+  message: 'Too many failed sign-in attempts for that branch. Try again shortly.',
+};
+const signInRules = rules.filter((r) => r !== byEmail);
+if (maxPerEmail > 0) signInRules.push(byChoice);
+const signInLimiter = rateLimit(...signInRules);
+
+const signInSchema = z.object({
+  choice: z.enum(SIGN_IN_CHOICES, {
+    errorMap: () => ({ message: `Choose one of ${SIGN_IN_CHOICES.join(', ')}` }),
+  }),
+  password: z.string().min(1).max(200),
+});
+
 // Registration is open so a branch can onboard operators, which also means
 // anyone can fill the users table from a script.
 const registerLimiter =
@@ -123,6 +151,21 @@ authRouter.post(
     res.json({ data: result });
   }),
 );
+
+/** Branch (or ADMIN) and a password: what the sign-in screen sends. */
+authRouter.post(
+  '/sign-in',
+  signInLimiter,
+  asyncHandler(async (req, res) => {
+    const body = parse(signInSchema, req.body);
+    res.json({ data: await signInByChoice(body.choice, body.password) });
+  }),
+);
+
+/** Which choices the screen offers, so the list lives in one place. */
+authRouter.get('/sign-in/choices', (_req, res) => {
+  res.json({ data: SIGN_IN_CHOICES });
+});
 
 authRouter.get(
   '/me',
