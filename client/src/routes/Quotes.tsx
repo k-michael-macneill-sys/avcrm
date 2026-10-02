@@ -1,10 +1,12 @@
 import { Link, useSearchParams } from 'react-router-dom';
+import { Plus } from 'lucide-react';
 import { QUOTE_STATUSES } from '../../../src/types/models';
 import type { Quote } from '../../../src/types/models';
 import { PageHeader } from '@/components/PageHeader';
 import { DataTable } from '@/components/DataTable';
 import { StatusPill } from '@/components/StatusPill';
 import { Loading, ErrorNotice } from '@/components/Misc';
+import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useQuery } from '@/lib/useQuery';
@@ -26,7 +28,18 @@ export function Quotes(): JSX.Element {
 
   return (
     <>
-      <PageHeader title="Quotes" subtitle={`${quotes.meta.total} written`} />
+      <PageHeader
+        title="Quotes"
+        subtitle={`${quotes.meta.total} written`}
+        actions={
+          // A quote is written on the agreement: the same form that signs a customer up.
+          <Button asChild>
+            <Link to="/customers/new?for=quote">
+              <Plus className="size-4" /> Create new quote
+            </Link>
+          </Button>
+        }
+      />
 
       <div className="mb-4 flex flex-col gap-1">
         <Label htmlFor="status">Status</Label>

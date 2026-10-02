@@ -210,6 +210,10 @@ export async function authorizeRead(
   if (upload.purpose === 'operator_document') {
     throw forbidden('Those documents are between that operator and corporate');
   }
+  // The books are the branch's own sign-in's and corporate's, not the crew's.
+  if (upload.purpose === 'receipt' && user.role !== 'branch') {
+    throw forbidden('Receipts are kept in the Business Console');
+  }
   if (upload.branch_id && upload.branch_id === user.branch_id) return upload;
 
   throw forbidden('That file belongs to another branch');

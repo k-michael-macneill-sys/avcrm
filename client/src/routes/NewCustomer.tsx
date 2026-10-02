@@ -117,6 +117,8 @@ function AgreementSignup({
   lead: Customer | null;
   prefill: URLSearchParams;
 }): JSX.Element {
+  // Opened from Quotes' "Create new quote": the same agreement, named for the job.
+  const forQuote = prefill.get('for') === 'quote';
   const { isCorporate, isBranch, branch: sessionBranch } = useAuth();
   const [branchId, setBranchId] = React.useState(lead?.branch_id ?? branches[0]?.id ?? '');
   // A branch sign-in's own city, when the branch has one. Alberta's is null:
@@ -238,7 +240,7 @@ function AgreementSignup({
   return (
     <>
       <PageHeader
-        title={lead ? `Sign up ${lead.first_name} ${lead.last_name}` : 'Add customer'}
+        title={lead ? `Sign up ${lead.first_name} ${lead.last_name}` : forQuote ? 'New quote' : 'Add customer'}
         subtitle="Tap any field on the agreement to fill it in. The customer signs on the line at the bottom."
       />
 

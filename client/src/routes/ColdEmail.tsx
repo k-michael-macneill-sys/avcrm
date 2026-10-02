@@ -370,21 +370,24 @@ function AddOptIn({
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="optin-branch">Branch</Label>
-              <Select value={branch} onValueChange={setBranch}>
-                <SelectTrigger id="optin-branch">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {branches.map((b) => (
-                    <SelectItem key={b.id} value={b.id}>
-                      {b.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {/* One branch to choose from is no choice: a branch adds to its own list. */}
+            {branches.length > 1 ? (
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="optin-branch">Branch</Label>
+                <Select value={branch} onValueChange={setBranch}>
+                  <SelectTrigger id="optin-branch">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {branches.map((b) => (
+                      <SelectItem key={b.id} value={b.id}>
+                        {b.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
           </div>
           {source === 'google_ads' ? text('campaign', 'Campaign') : null}
           <label className="flex items-start gap-2 text-sm">

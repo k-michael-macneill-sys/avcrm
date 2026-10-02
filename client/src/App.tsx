@@ -34,6 +34,7 @@ import { CorporateOnly, RoleOnly } from '@/components/CorporateOnly';
 
 const SELLERS: UserRole[] = ['corporate', 'sales', 'branch'];
 const CREW: UserRole[] = ['corporate', 'operator', 'branch'];
+const BUSINESS: UserRole[] = ['corporate', 'branch'];
 
 export default function App(): JSX.Element {
   return (
@@ -123,46 +124,46 @@ export default function App(): JSX.Element {
                   }
                 />
 
-                {/* The Business Console: the owner's side of the company. */}
+                {/* The Business Console: corporate's for the company, each branch's for itself. */}
                 <Route path="business">
                   <Route
                     index
                     element={
-                      <CorporateOnly message="The company's finances are corporate work.">
+                      <RoleOnly roles={BUSINESS} title="Business Console" message="The Business Console belongs to corporate and each branch's own sign-in.">
                         <Financials />
-                      </CorporateOnly>
+                      </RoleOnly>
                     }
                   />
                   <Route
                     path="projections"
                     element={
-                      <CorporateOnly message="The company's finances are corporate work.">
+                      <RoleOnly roles={BUSINESS} title="Business Console" message="The Business Console belongs to corporate and each branch's own sign-in.">
                         <Projections />
-                      </CorporateOnly>
+                      </RoleOnly>
                     }
                   />
                   <Route
                     path="bookkeeping"
                     element={
-                      <CorporateOnly message="The books are corporate work.">
+                      <RoleOnly roles={BUSINESS} title="Business Console" message="The Business Console belongs to corporate and each branch's own sign-in.">
                         <Bookkeeping />
-                      </CorporateOnly>
+                      </RoleOnly>
                     }
                   />
                   <Route
                     path="cold-email"
                     element={
-                      <CorporateOnly message="Email marketing is run from the office. Door-to-door opt-ins go in from the leads map.">
+                      <RoleOnly roles={BUSINESS} title="Business Console" message="The Business Console belongs to corporate and each branch's own sign-in.">
                         <ColdEmail />
-                      </CorporateOnly>
+                      </RoleOnly>
                     }
                   />
                   <Route
                     path="meta-ads"
                     element={
-                      <CorporateOnly message="Ad performance is corporate work.">
+                      <RoleOnly roles={BUSINESS} title="Business Console" message="The Business Console belongs to corporate and each branch's own sign-in.">
                         <MetaAds />
-                      </CorporateOnly>
+                      </RoleOnly>
                     }
                   />
                 </Route>
