@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth, requireCorporate, resolveActor } from '../middleware/auth';
+import { requireAuth, requireRole, resolveActor, resolveBranchScope } from '../middleware/auth';
 import {
   createExpense,
   deleteExpense,
@@ -14,12 +14,13 @@ import { badRequest, unauthorized } from '../utils/errors';
 import { parse } from '../utils/validate';
 
 /**
- * Bookkeeping, in the Business Console. The company's books are corporate's
- * business, so every route here is behind the corporate role.
+ * Bookkeeping, in the Business Console. Corporate keeps the whole company's
+ * books, including costs that belong to no branch; a branch's own sign-in
+ * keeps that branch's, and sees nothing else.
  */
 export const expensesRouter = Router();
 
-expensesRouter.use(requireAuth, requireCorporate);
+expensesRouter.use(requireAuth, requireRole('corporate', 'branch'));
 
 const isoDate = z
   .string()
@@ -74,7 +75,10 @@ expensesRouter.get(
     if (filters.from && filters.to && filters.to < filters.from) {
       throw badRequest('`to` must fall on or after `from`');
     }
-    res.json({ data: await listExpenses(filters) });
+    const scope = resolveBranchScope(req, filters.branch_id);
+    res.json({
+      data: await listExpenses({ ...filters, branch_id: scope.kind === 'branch' ? scope.branchId : undefined }),
+    });
   }),
 );
 
@@ -83,6 +87,11 @@ expensesRouter.post(
   asyncHandler(async (req, res) => {
     const body = parse(createSchema, req.body);
     if (!req.user) throw unauthorized();
+    // A branch files against itself; only corporate has company-wide costs.
+    if (req.user.role !== 'corporate') {
+      const scope = resolveBranchScope(req, body.branch_id);
+      if (scope.kind === 'branch') body.branch_id = scope.branchId;
+    }
     res.status(201).json({ data: await createExpense(req.user, resolveActor(req), body) });
   }),
 );
@@ -91,7 +100,7 @@ expensesRouter.delete(
   '/:id',
   asyncHandler(async (req, res) => {
     const { id } = parse(idParamSchema, req.params);
-    await deleteExpense(id, resolveActor(req));
+    await deleteExpense(id, resolveActor(req), resolveBranchScope(req));
     res.status(204).end();
   }),
 );

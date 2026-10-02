@@ -227,8 +227,9 @@ dropdown offers **Cranbrook**, **Kingston**, **Alberta**, **Regina** and
 - **A branch** signs in to that branch's own shared account with the branch
   password, `BRANCH_SIGN_IN_PASSWORD` — **`1234` unless you set it**. The
   account has the `branch` role: customers, quotes, contracts, the leads map,
-  dispatch and crew, in that branch only; none of corporate's screens (Reports,
-  Company, Settings, Weather Alerts, the Business Console). It is created the
+  dispatch and crew, plus its own Business Console, all in that branch only;
+  none of corporate's screens (Reports, Company, Settings, Weather Alerts). It
+  is created the
   first time somebody signs in to it — as `cranbrook@branch.avcrm.local` and so
   on, with a random password the email route can never match — and so is the
   branch itself if it is missing.
@@ -854,14 +855,15 @@ link carries the real `/app/…` href so middle-click, "open in new tab" and
 | Cold Email | Who opted in, where each is in the sequence, the landing page form |
 | Meta Ads | The slot for Meta ads performance |
 
-**Two consoles.** Corporate's menu has a **Switch Consoles** button at the
-foot of the sidebar (and of the phone menu). The *Operations Console* is
+**Two consoles.** Corporate's menu, and each branch sign-in's, has a
+**Switch Consoles** button at the foot of the sidebar (and of the phone menu). The *Operations Console* is
 everything above the line — the day-to-day of selling, clearing and billing —
 and is where everybody starts. The *Business Console* is the owner's side:
 the money, the books and the marketing. Its pages all live under
 `/app/business`, so a link says which console it belongs to, and switching
-back lands on the page you left. Sales reps and operators never see the
-button: nothing in the Business Console is theirs.
+back lands on the page you left. A branch sign-in gets the same console for
+its own branch only. Sales reps and operators never see the button: nothing in
+the Business Console is theirs.
 
 **The two roles get genuinely different apps.** An operator's nav has no
 Invoices or Reports, their dashboard is their run sheet rather than a company
@@ -1522,8 +1524,19 @@ records it.
 ## The Business Console
 
 The owner's side of the company, behind **Switch Consoles** — see
-[What it shows](#what-it-shows). Everything in it is corporate only, in the
-API as well as on screen.
+[What it shows](#what-it-shows). Corporate sees the whole company. A branch's
+own sign-in (see [Signing in](#signing-in)) gets the same pages for that
+branch alone:
+
+- **Financials and projections** are always narrowed to the branch, and asking
+  for another branch is refused.
+- **Bookkeeping:** expenses are filed against the branch, whatever the form
+  says. The branch sees only its own expenses, not another branch's or head
+  office's company-wide costs.
+- **Cold email:** the list and counts are the branch's leads.
+
+Sales reps and operators get none of it, and receipts are not readable by
+them either. All of this holds in the API as well as on screen.
 
 ### Financial dashboard
 

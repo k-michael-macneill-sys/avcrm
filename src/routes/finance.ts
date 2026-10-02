@@ -1,15 +1,24 @@
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { z } from 'zod';
-import { requireAuth, requireCorporate } from '../middleware/auth';
+import { requireAuth, requireRole, resolveBranchScope } from '../middleware/auth';
 import { financialProjection, financialSummary } from '../services/finance';
 import { asyncHandler } from '../utils/async';
 import { badRequest } from '../utils/errors';
 import { parse } from '../utils/validate';
 
-/** The Business Console's financial dashboard. Corporate only, like Reports. */
+/**
+ * The Business Console's financial dashboard and projections. Corporate sees
+ * every branch; a branch's own sign-in sees only that branch.
+ */
 export const financeRouter = Router();
 
-financeRouter.use(requireAuth, requireCorporate);
+financeRouter.use(requireAuth, requireRole('corporate', 'branch'));
+
+/** The branch to report on: whichever corporate asked for, a branch's own always. */
+function scopedBranch(req: Request, requested: string | undefined): string | undefined {
+  const scope = resolveBranchScope(req, requested);
+  return scope.kind === 'branch' ? scope.branchId : undefined;
+}
 
 const isoDate = z
   .string()
@@ -26,6 +35,7 @@ financeRouter.get(
   '/summary',
   asyncHandler(async (req, res) => {
     const window = parse(windowSchema, req.query);
+    window.branch_id = scopedBranch(req, window.branch_id);
     if (window.from && window.to && window.to < window.from) {
       throw badRequest('`to` must fall on or after `from`');
     }
@@ -39,7 +49,8 @@ financeRouter.get(
 financeRouter.get(
   '/projection',
   asyncHandler(async (req, res) => {
-    const { branch_id } = parse(windowSchema.pick({ branch_id: true }), req.query);
+    const { branch_id: requested } = parse(windowSchema.pick({ branch_id: true }), req.query);
+    const branch_id = scopedBranch(req, requested);
     res.json({ data: await financialProjection({ branch_id }), meta: { branch_id: branch_id ?? null } });
   }),
 );

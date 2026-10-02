@@ -44,6 +44,12 @@ const ALL: UserRole[] = ['corporate', 'sales', 'operator', 'branch'];
 const SELLERS: UserRole[] = ['corporate', 'sales', 'branch'];
 const CREW: UserRole[] = ['corporate', 'operator', 'branch'];
 const CORPORATE: UserRole[] = ['corporate'];
+/** Who has a Business Console: corporate for the company, each branch for itself. */
+const BUSINESS: UserRole[] = ['corporate', 'branch'];
+
+export function hasBusinessConsole(role: UserRole): boolean {
+  return BUSINESS.includes(role);
+}
 
 /**
  * Two consoles. Operations is the day-to-day running of the routes — selling,
@@ -83,11 +89,11 @@ const OPERATIONS_NAV: NavItem[] = [
 ];
 
 const BUSINESS_NAV: NavItem[] = [
-  { to: '/business', label: 'Financials', icon: TrendingUp, roles: CORPORATE, end: true },
-  { to: '/business/projections', label: 'Projections', icon: LineChartIcon, roles: CORPORATE },
-  { to: '/business/bookkeeping', label: 'Bookkeeping', icon: BookOpenCheck, roles: CORPORATE },
-  { to: '/business/cold-email', label: 'Cold Email', icon: Mail, roles: CORPORATE },
-  { to: '/business/meta-ads', label: 'Meta Ads', icon: Megaphone, roles: CORPORATE },
+  { to: '/business', label: 'Financials', icon: TrendingUp, roles: BUSINESS, end: true },
+  { to: '/business/projections', label: 'Projections', icon: LineChartIcon, roles: BUSINESS },
+  { to: '/business/bookkeeping', label: 'Bookkeeping', icon: BookOpenCheck, roles: BUSINESS },
+  { to: '/business/cold-email', label: 'Cold Email', icon: Mail, roles: BUSINESS },
+  { to: '/business/meta-ads', label: 'Meta Ads', icon: Megaphone, roles: BUSINESS },
 ];
 
 const NAV: Record<ConsoleName, NavItem[]> = {
@@ -210,8 +216,8 @@ function Account({ console: current }: { console: ConsoleName }): JSX.Element | 
 
   return (
     <div className="mt-auto flex flex-col gap-3 border-t border-border pt-4">
-      {/* The Business Console is the owner's side, so only corporate can switch. */}
-      {user.role === 'corporate' ? <SwitchConsoles current={current} /> : null}
+      {/* The Business Console is the owner's side: corporate's, and each branch's own. */}
+      {hasBusinessConsole(user.role) ? <SwitchConsoles current={current} /> : null}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <Avatar>
@@ -245,7 +251,7 @@ export function Shell(): JSX.Element {
 
   if (!user) return <Outlet />;
 
-  const activeConsole: ConsoleName = user.role === 'corporate' ? consoleOf(pathname) : 'operations';
+  const activeConsole: ConsoleName = hasBusinessConsole(user.role) ? consoleOf(pathname) : 'operations';
   const items = NAV[activeConsole].filter((item) => item.roles.includes(user.role));
   const current = sectionFor(pathname, items);
   const tabs = PHONE_TABS.map((to) => items.find((item) => item.to === to))
@@ -258,7 +264,7 @@ export function Shell(): JSX.Element {
       <aside className="flex flex-col gap-6 border-r border-border bg-background/70 p-3.5 backdrop-blur-xl max-[720px]:hidden">
         <div className="px-2">
           <img src={logo} alt="Drift Property Services" className="h-9 w-auto rounded-md" />
-          {user.role === 'corporate' ? (
+          {hasBusinessConsole(user.role) ? (
             <p className="mt-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               {CONSOLE_LABEL[activeConsole]}
             </p>
@@ -292,7 +298,7 @@ export function Shell(): JSX.Element {
             <img src={logo} alt="" className="h-9 w-auto rounded-md" />
             <SheetTitle className="sr-only">Menu</SheetTitle>
             <SheetDescription className="sr-only">Every section you can open</SheetDescription>
-            {user.role === 'corporate' ? (
+            {hasBusinessConsole(user.role) ? (
               <p className="mt-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                 {CONSOLE_LABEL[activeConsole]}
               </p>
