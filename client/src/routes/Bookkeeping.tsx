@@ -19,6 +19,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { useAuth } from '@/auth/AuthContext';
 import * as api from '@/lib/api';
 import { count, date, isoDate, money } from '@/lib/format';
 import { formatBytes, openFile, uploadBlob } from '@/lib/upload';
@@ -261,6 +262,7 @@ function AddExpense({
   const [spentOn, setSpentOn] = React.useState(isoDate());
   const [vendor, setVendor] = React.useState('');
   const [description, setDescription] = React.useState('');
+  const { isCorporate } = useAuth();
   const [branch, setBranch] = React.useState(COMPANY_WIDE);
   const fileInput = React.useRef<HTMLInputElement>(null);
 
@@ -376,22 +378,25 @@ function AddExpense({
               <Label htmlFor="expense-vendor">Vendor</Label>
               <Input id="expense-vendor" value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="Optional" />
             </div>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="expense-branch">Branch</Label>
-              <Select value={branch} onValueChange={setBranch}>
-                <SelectTrigger id="expense-branch">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={COMPANY_WIDE}>Company-wide</SelectItem>
-                  {branches.map((b) => (
-                    <SelectItem key={b.id} value={b.id}>
-                      {b.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {/* A branch's own books: the server files the expense against that branch. */}
+            {isCorporate ? (
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="expense-branch">Branch</Label>
+                <Select value={branch} onValueChange={setBranch}>
+                  <SelectTrigger id="expense-branch">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={COMPANY_WIDE}>Company-wide</SelectItem>
+                    {branches.map((b) => (
+                      <SelectItem key={b.id} value={b.id}>
+                        {b.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
           </div>
 
           <div className="flex flex-col gap-1">

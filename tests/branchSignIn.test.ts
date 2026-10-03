@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { db } from './helpers/database';
 import { harness } from './helpers/harness';
-import { makeCustomer, PASSWORD } from './helpers/fixtures';
-import { call } from './helpers/server';
+import { makeContract, makeCustomer, PASSWORD } from './helpers/fixtures';
+import { call, login } from './helpers/server';
 
 let n = 0;
 /** The agreement as a rep fills it in, with a fresh address each time. */
@@ -91,14 +91,24 @@ describe('signing in by branch', () => {
     assert.equal(withBranchPassword.status, 401);
   });
 
-  it('opens the branch’s selling and dispatch, and none of corporate’s screens', async () => {
+  it('opens the branch’s selling, dispatch and Business Console, and none of corporate’s screens', async () => {
     const token = await branchToken('Kingston');
 
-    for (const path of ['/customers', '/quotes', '/contracts', '/work-orders', '/operators']) {
+    for (const path of [
+      '/customers',
+      '/quotes',
+      '/contracts',
+      '/work-orders',
+      '/operators',
+      '/expenses',
+      '/finance/summary',
+      '/finance/projection',
+      '/cold-email/leads',
+    ]) {
       const reply = await call(h.server(), 'GET', path, { token });
       assert.equal(reply.status, 200, `${path}: ${JSON.stringify(reply.body)}`);
     }
-    for (const path of ['/reports/branch-summary', '/expenses', '/finance/summary', '/weather/runs']) {
+    for (const path of ['/reports/branch-summary', '/weather/runs']) {
       const reply = await call(h.server(), 'GET', path, { token });
       assert.equal(reply.status, 403, path);
     }
@@ -195,5 +205,136 @@ describe('signing in by branch', () => {
     await db('users').where({ role: 'branch' }).update({ is_active: false });
     const reply = await signIn('Kingston', '1234');
     assert.equal(reply.status, 403);
+  });
+});
+
+describe('a branch’s own Business Console', () => {
+  const h = harness();
+
+  async function kingston(): Promise<string> {
+    const reply = await call(h.server(), 'POST', '/auth/sign-in', { body: { choice: 'Kingston', password: '1234' } });
+    assert.equal(reply.status, 200, JSON.stringify(reply.body));
+    return reply.body.data.token as string;
+  }
+
+  it('keeps the branch’s own books, filed against itself', async () => {
+    const world = h.world();
+    const corporate = await login(h.server(), world.emails.corporate);
+    const token = await kingston();
+
+    // Whatever the form says, a branch's expense is the branch's.
+    const own = await call(h.server(), 'POST', '/expenses', {
+      token,
+      body: { category: 'fuel', amount: 40, spent_on: '2027-01-05', branch_id: null },
+    });
+    assert.equal(own.status, 201, JSON.stringify(own.body));
+    assert.equal(own.body.data.branch_id, world.branches.kingston);
+
+    const elsewhere = await call(h.server(), 'POST', '/expenses', {
+      token,
+      body: { category: 'fuel', amount: 40, branch_id: world.branches.halifax },
+    });
+    assert.equal(elsewhere.status, 403);
+
+    // Halifax's costs and head office's are not Kingston's to see or remove.
+    const halifax = await call(h.server(), 'POST', '/expenses', {
+      token: corporate,
+      body: { category: 'fuel', amount: 75, spent_on: '2027-01-06', branch_id: world.branches.halifax },
+    });
+    await call(h.server(), 'POST', '/expenses', {
+      token: corporate,
+      body: { category: 'professional_fees', amount: 300, spent_on: '2027-01-07' },
+    });
+
+    const list = await call(h.server(), 'GET', '/expenses', { token });
+    assert.deepEqual(
+      list.body.data.map((e: { amount: string }) => Number(e.amount)),
+      [40],
+    );
+    assert.equal(
+      (await call(h.server(), 'GET', `/expenses?branch_id=${world.branches.halifax}`, { token })).status,
+      403,
+    );
+    const remove = await call(h.server(), 'DELETE', `/expenses/${halifax.body.data.id}`, { token });
+    assert.equal(remove.status, 404);
+
+    // Corporate still sees the whole company.
+    const all = await call(h.server(), 'GET', '/expenses', { token: corporate });
+    assert.equal(all.body.data.length, 3);
+  });
+
+  it('reports the branch’s own money and season, never another’s', async () => {
+    const world = h.world();
+    const token = await kingston();
+    await makeContract(world.branches.kingston, world.users.corporate, { address_line1: '1 King St' });
+    await makeContract(world.branches.halifax, world.users.corporate, { address_line1: '1 Barrington St' });
+
+    const projection = await call(h.server(), 'GET', '/finance/projection', { token });
+    assert.equal(projection.status, 200);
+    assert.equal(projection.body.data.active_customers, 1, 'Kingston’s customer, not Halifax’s');
+    assert.equal(projection.body.meta.branch_id, world.branches.kingston);
+
+    const summary = await call(h.server(), 'GET', '/finance/summary', { token });
+    assert.equal(summary.body.meta.branch_id, world.branches.kingston);
+
+    const peek = await call(h.server(), 'GET', `/finance/summary?branch_id=${world.branches.halifax}`, { token });
+    assert.equal(peek.status, 403);
+  });
+
+  it('runs the branch’s own cold email list', async () => {
+    const world = h.world();
+    const token = await kingston();
+    const corporate = await login(h.server(), world.emails.corporate);
+    const lead = (first_name: string, email: string, branch_id: string) => ({
+      first_name,
+      email,
+      source: 'door_to_door',
+      consent: true,
+      branch_id,
+    });
+
+    const own = await call(h.server(), 'POST', '/cold-email/leads', {
+      token,
+      body: { first_name: 'Ada', email: 'ada@example.test', source: 'door_to_door', consent: true },
+    });
+    assert.equal(own.status, 201, JSON.stringify(own.body));
+    await call(h.server(), 'POST', '/cold-email/leads', {
+      token: corporate,
+      body: lead('Bo', 'bo@example.test', world.branches.halifax),
+    });
+
+    const list = await call(h.server(), 'GET', '/cold-email/leads', { token });
+    assert.deepEqual(list.body.data.map((l: { first_name: string }) => l.first_name), ['Ada']);
+    const stats = await call(h.server(), 'GET', '/cold-email/stats', { token });
+    assert.equal(stats.body.data.active, 1);
+  });
+
+  it('keeps receipts out of the crew’s hands', async () => {
+    const world = h.world();
+    const token = await kingston();
+    const target = await call(h.server(), 'POST', '/uploads', {
+      token,
+      body: { purpose: 'receipt', content_type: 'image/png', file_name: 'esso.png' },
+    });
+    assert.equal(target.status, 201, JSON.stringify(target.body));
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64',
+    );
+    await fetch(`${h.server().url}${target.body.data.upload_url}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'image/png' },
+      body: png,
+    });
+    const key = target.body.data.key as string;
+    const filed = await call(h.server(), 'POST', '/expenses', {
+      token,
+      body: { category: 'fuel', amount: 20, receipt_key: key },
+    });
+    assert.equal(filed.status, 201, JSON.stringify(filed.body));
+
+    const operator = await login(h.server(), world.emails.operator);
+    const peek = await call(h.server(), 'GET', `/files/${key}`, { token: operator });
+    assert.equal(peek.status, 403);
   });
 });

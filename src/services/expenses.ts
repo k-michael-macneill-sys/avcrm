@@ -1,6 +1,6 @@
 import type { Knex } from 'knex';
 import { db as defaultDb } from '../db/client';
-import type { AuthenticatedUser } from '../types/auth';
+import type { AuthenticatedUser, BranchScope } from '../types/auth';
 import type { Expense, ExpenseCategory } from '../types/models';
 import { badRequest, notFound } from '../utils/errors';
 import { recordAudit, type AuditActor } from './audit';
@@ -300,11 +300,15 @@ export async function createExpense(
 export async function deleteExpense(
   id: string,
   actor: AuditActor,
+  scope: BranchScope = { kind: 'all' },
   db: Knex = defaultDb,
 ): Promise<void> {
   await db.transaction(async (trx) => {
     const row = await trx('expenses').where({ id }).first();
-    if (!row) throw notFound('No such expense');
+    // Another branch's expense is as good as missing.
+    if (!row || (scope.kind === 'branch' && row.branch_id !== scope.branchId)) {
+      throw notFound('No such expense');
+    }
 
     await trx('expenses').where({ id }).delete();
     await recordAudit(actor, {

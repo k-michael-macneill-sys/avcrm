@@ -28,6 +28,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useAuth } from '@/auth/AuthContext';
 import * as api from '@/lib/api';
 import { compactMoney, count, money, percent } from '@/lib/format';
 import { useQuery } from '@/lib/useQuery';
@@ -50,7 +51,8 @@ interface Position {
 }
 
 const ALL = 'all';
-const POSITIONS_KEY = 'avcrm.projection.operators';
+/** Per account, so a shared tablet keeps ADMIN's crew and a branch's apart. */
+const positionsKey = (userId: string | undefined): string => `avcrm.projection.operators.${userId ?? 'anon'}`;
 
 /** A typed figure as a number; blank or nonsense counts as nothing. */
 function amount(value: string): number {
@@ -58,9 +60,9 @@ function amount(value: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function savedPositions(): Position[] | null {
+function savedPositions(key: string): Position[] | null {
   try {
-    const raw = localStorage.getItem(POSITIONS_KEY);
+    const raw = localStorage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Position[];
     return Array.isArray(parsed) && parsed.length > 0 ? parsed : null;
@@ -89,6 +91,8 @@ const axisMoney = (v: number): string => {
  * for trying other numbers.
  */
 export function Projections(): JSX.Element {
+  const { isCorporate, user } = useAuth();
+  const storageKey = positionsKey(user?.id);
   const [branch, setBranch] = React.useState('');
   const { data, loading, error } = useQuery(
     () =>
@@ -99,18 +103,18 @@ export function Projections(): JSX.Element {
     [branch],
   );
 
-  const [positions, setPositions] = React.useState<Position[] | null>(savedPositions);
+  const [positions, setPositions] = React.useState<Position[] | null>(() => savedPositions(storageKey));
   React.useEffect(() => {
     if (!positions && data) setPositions(freshPositions(data[0].active_operators));
   }, [positions, data]);
   React.useEffect(() => {
     if (!positions) return;
     try {
-      localStorage.setItem(POSITIONS_KEY, JSON.stringify(positions));
+      localStorage.setItem(storageKey, JSON.stringify(positions));
     } catch {
       // Remembering the figures is a convenience; the page works without it.
     }
-  }, [positions]);
+  }, [positions, storageKey]);
 
   const monthlySalaries = (positions ?? []).reduce((sum, p) => sum + Math.max(0, amount(p.monthly)), 0);
   const monthlyRevenue = React.useMemo(() => (data?.[0].monthly_revenue ?? []).map(Number), [data]);
@@ -124,7 +128,8 @@ export function Projections(): JSX.Element {
   if (!data) return <Loading />;
 
   const [projection, branches] = data;
-  const branchName = branches.find((b) => b.id === branch)?.name;
+  // A branch's own sign-in only ever sees its own branch.
+  const branchName = isCorporate ? branches.find((b) => b.id === branch)?.name : branches[0]?.name;
 
   const updatePosition = (id: number, patch: Partial<Position>): void =>
     setPositions((current) => (current ?? []).map((p) => (p.id === id ? { ...p, ...patch } : p)));
@@ -144,24 +149,26 @@ export function Projections(): JSX.Element {
         subtitle={`${projection.season.label} season · Nov 1 – Mar 31${branchName ? ` · ${branchName}` : ' · every branch'}`}
       />
 
-      <div className="mb-4 flex flex-wrap items-end gap-3">
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="proj-branch">Branch</Label>
-          <Select value={branch || ALL} onValueChange={(v) => setBranch(v === ALL ? '' : v)}>
-            <SelectTrigger id="proj-branch" className="w-44">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>Every branch</SelectItem>
-              {branches.map((b) => (
-                <SelectItem key={b.id} value={b.id}>
-                  {b.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      {isCorporate ? (
+        <div className="mb-4 flex flex-wrap items-end gap-3">
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="proj-branch">Branch</Label>
+            <Select value={branch || ALL} onValueChange={(v) => setBranch(v === ALL ? '' : v)}>
+              <SelectTrigger id="proj-branch" className="w-44">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>Every branch</SelectItem>
+                {branches.map((b) => (
+                  <SelectItem key={b.id} value={b.id}>
+                    {b.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       <Hero
         label="Base net profit by March 31"

@@ -10,6 +10,7 @@ import { Hero, StatRow, StatTile } from '@/components/Stat';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useAuth } from '@/auth/AuthContext';
 import * as api from '@/lib/api';
 import { compactMoney, count, money, percent } from '@/lib/format';
 import { useQuery } from '@/lib/useQuery';
@@ -38,6 +39,7 @@ const ALL = 'all';
  * left — over a window that is always on the screen.
  */
 export function Financials(): JSX.Element {
+  const { isCorporate } = useAuth();
   const [params, setParams] = useSearchParams();
   const from = params.get('from') ?? '';
   const to = params.get('to') ?? '';
@@ -79,7 +81,8 @@ export function Financials(): JSX.Element {
 
   const [summary, branches] = data;
   const { totals } = summary;
-  const branchName = branches.find((b) => b.id === branch)?.name;
+  // A branch's own sign-in only ever sees its own branch.
+  const branchName = isCorporate ? branches.find((b) => b.id === branch)?.name : branches[0]?.name;
   const window = from || to ? `${from || 'the beginning'} to ${to || 'today'}` : 'Everything to date';
 
   return (
@@ -95,22 +98,24 @@ export function Financials(): JSX.Element {
           <Label htmlFor="fin-to">To</Label>
           <Input id="fin-to" type="date" value={to} onChange={(e) => setParam('to', e.target.value)} />
         </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="fin-branch">Branch</Label>
-          <Select value={branch || ALL} onValueChange={(v) => setParam('branch_id', v === ALL ? '' : v)}>
-            <SelectTrigger id="fin-branch" className="w-44">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>Every branch</SelectItem>
-              {branches.map((b) => (
-                <SelectItem key={b.id} value={b.id}>
-                  {b.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        {isCorporate ? (
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="fin-branch">Branch</Label>
+            <Select value={branch || ALL} onValueChange={(v) => setParam('branch_id', v === ALL ? '' : v)}>
+              <SelectTrigger id="fin-branch" className="w-44">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>Every branch</SelectItem>
+                {branches.map((b) => (
+                  <SelectItem key={b.id} value={b.id}>
+                    {b.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : null}
       </div>
 
       <Hero

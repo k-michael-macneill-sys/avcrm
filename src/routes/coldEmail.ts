@@ -2,7 +2,6 @@ import { Router } from 'express';
 import { z } from 'zod';
 import {
   requireAuth,
-  requireCorporate,
   requireRole,
   resolveBranchScope,
   resolveWriteBranch,
@@ -21,13 +20,16 @@ import { unauthorized } from '../utils/errors';
 import { parse } from '../utils/validate';
 
 /**
- * The cold email pipeline. Corporate runs it from the Business Console;
- * sales reps may add a door-to-door opt-in, since they are the ones at the
- * door, but the list and its history are corporate's.
+ * The cold email pipeline, run from the Business Console: corporate across
+ * every branch, a branch's own sign-in for that branch. Sales reps may add a
+ * door-to-door opt-in, since they are the ones at the door, but the list and
+ * its history are not theirs.
  *
  * Google Ads opt-ins arrive without a session, through POST /public/opt-in.
  */
 export const coldEmailRouter = Router();
+
+const runsCampaigns = requireRole('corporate', 'branch');
 
 coldEmailRouter.use(requireAuth);
 
@@ -63,13 +65,13 @@ const createSchema = z.object({
 const stopSchema = z.object({ status: z.enum(['unsubscribed', 'converted']) });
 const idParamSchema = z.object({ id: z.string().uuid('id must be a UUID') });
 
-coldEmailRouter.get('/sequence', requireCorporate, (_req, res) => {
+coldEmailRouter.get('/sequence', runsCampaigns, (_req, res) => {
   res.json({ data: DRIP_SEQUENCE });
 });
 
 coldEmailRouter.get(
   '/stats',
-  requireCorporate,
+  runsCampaigns,
   asyncHandler(async (req, res) => {
     const { branch_id } = parse(listSchema, req.query);
     res.json({ data: await coldEmailStats(resolveBranchScope(req, branch_id)) });
@@ -78,7 +80,7 @@ coldEmailRouter.get(
 
 coldEmailRouter.get(
   '/leads',
-  requireCorporate,
+  runsCampaigns,
   asyncHandler(async (req, res) => {
     const { branch_id, ...filters } = parse(listSchema, req.query);
     res.json({ data: await listEmailLeads(resolveBranchScope(req, branch_id), filters) });
@@ -87,7 +89,7 @@ coldEmailRouter.get(
 
 coldEmailRouter.get(
   '/leads/:id',
-  requireCorporate,
+  runsCampaigns,
   asyncHandler(async (req, res) => {
     const { id } = parse(idParamSchema, req.params);
     res.json({ data: await getEmailLead(id, resolveBranchScope(req)) });
@@ -112,7 +114,7 @@ coldEmailRouter.post(
 
 coldEmailRouter.post(
   '/leads/:id/stop',
-  requireCorporate,
+  runsCampaigns,
   asyncHandler(async (req, res) => {
     const { id } = parse(idParamSchema, req.params);
     const { status } = parse(stopSchema, req.body);
