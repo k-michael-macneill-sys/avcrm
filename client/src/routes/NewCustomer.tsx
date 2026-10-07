@@ -104,6 +104,7 @@ function startingValues(
     customer_city: city,
     customer_province: prefill.get('province') ?? branch?.province ?? '',
     customer_postal: prefill.get('postal_code') ?? '',
+    term_type: 'Seasonal',
     ...defaultAgreementYears(),
   };
 }

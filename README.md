@@ -1556,7 +1556,8 @@ counts active customers (as the Customers list does) and bills every active
 contract of an active customer the way its invoices will. A seasonal
 contract pays once, in November. A monthly one pays its discounted first
 month and then its recurring price, for as many months as it runs, up to
-five. The average contract value is that revenue divided by the customers
+five, starting in the month its billing starts: an exact-dates contract from
+December to January counts in December and January. The average contract value is that revenue divided by the customers
 with a contract.
 
 The page adds operator salaries, one line per position (or the whole crew on

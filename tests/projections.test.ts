@@ -37,6 +37,11 @@ describe('the projection arithmetic', () => {
       contractRevenueByMonth({ billing_type: 'seasonal_upfront', discounted_price: 650, recurring_price: null, periods: 5 }),
       [650, 0, 0, 0, 0],
     );
+    assert.deepEqual(
+      contractRevenueByMonth({ billing_type: 'monthly', discounted_price: 99, recurring_price: 129, periods: 2, first_month: 1 }),
+      [0, 99, 129, 0, 0],
+      'an exact-dates contract from December bills December and January',
+    );
   });
 
   it('nets the baseline against five months of operator pay', () => {
