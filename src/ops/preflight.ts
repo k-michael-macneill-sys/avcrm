@@ -150,7 +150,9 @@ export function inspect(env: Record<string, string | undefined>): Finding[] {
   }
 
   // --- what actually reaches a customer -----------------------------------
-  if (get('MAIL_DRIVER') !== 'smtp') {
+  const sendgrid = get('SENDGRID_API_KEY') !== '';
+  const mailDriver = get('MAIL_DRIVER') || (sendgrid ? 'smtp' : 'log');
+  if (mailDriver !== 'smtp') {
     error(
       'MAIL_DRIVER',
       'is not smtp, so invoices, review requests and expiry warnings are written ' +
@@ -162,7 +164,8 @@ export function inspect(env: Record<string, string | undefined>): Finding[] {
   // The app refuses to boot without SMTP_HOST, but it starts happily without
   // credentials and then fails on the first invoice, which is a worse place
   // to find out.
-  if (get('MAIL_DRIVER') === 'smtp') {
+  // SENDGRID_API_KEY stands in for all three.
+  if (mailDriver === 'smtp' && !(sendgrid && get('SMTP_HOST') === '')) {
     for (const name of ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASSWORD']) {
       if (get(name) === '') error(name, 'is empty, but MAIL_DRIVER is smtp');
     }

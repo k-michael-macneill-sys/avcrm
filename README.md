@@ -1034,6 +1034,20 @@ Both are checked at startup: `MAIL_DRIVER=smtp` without `SMTP_HOST` or
 `MAIL_FROM` refuses to boot, rather than failing when the first invoice goes
 out.
 
+**Twilio SendGrid** has a shortcut. An API key with Mail Send permission is
+all it needs:
+
+```bash
+SENDGRID_API_KEY=SG.…
+MAIL_FROM="Drift <billing@example.ca>"   # a sender verified in SendGrid
+```
+
+That stands in for `SMTP_HOST`/`SMTP_USER`/`SMTP_PASSWORD`
+(`smtp.sendgrid.net`, user `apikey`, the key as the password) and switches
+`MAIL_DRIVER` to `smtp` unless `MAIL_DRIVER` is set — so a leftover
+`MAIL_DRIVER=log` still keeps every email in the log. An explicit `SMTP_HOST`
+wins over the key.
+
 ### The staging valve
 
 ```bash
@@ -1362,6 +1376,37 @@ one, and gets revisited, it is a setting instead.
 the credentials it asks for, send a test, switch it on. No redeploy, no .env
 edit, and a manager can do it.
 
+**Or Twilio comes from the environment**, the way `SQUARE_*` gives a payment
+processor:
+
+```bash
+TWILIO_ACCOUNT_SID=AC…
+TWILIO_AUTH_TOKEN=…
+TWILIO_FROM_NUMBER=+16135550123     # or a Messaging Service SID, MG…
+```
+
+All three or none — a partial set refuses to boot. Texts then go out with
+nothing switched on under Settings, which shows which of the three the server
+can see. A provider switched on in Settings takes over from the environment.
+
+### What is texted automatically
+
+The queue worker (`job:message-queue`, every minute under the scheduler)
+sends each queued message on its channel. A customer is texted rather than
+emailed when `preferred_contact` is `sms` and there is a phone on file, or
+when there is a phone and no email:
+
+| Message | When |
+| --- | --- |
+| Visit complete (`service_complete`) | A work order is marked completed |
+| Invoice (`invoice_sent`) and past-due notice (`invoice_overdue`) | Billing raises or chases an invoice |
+| Review request | After a completed visit |
+| Card setup link | The office asks for a card |
+| Snowfall notice | The forecast passes the threshold (`both` gets text and email) |
+
+Office copies, operator document reminders, signing links and cold email are
+email only.
+
 ### The catalogue
 
 `src/services/smsProviders.ts` describes each provider as data — the fields an
@@ -1370,7 +1415,7 @@ message id turns up in the reply:
 
 | Provider | Needs |
 | --- | --- |
-| Twilio | Account SID, auth token, sending number |
+| Twilio | Account SID, auth token, sending number or Messaging Service SID |
 | Telnyx | API key, sending number |
 | MessageBird (Bird) | Access key, originator |
 | Vonage (Nexmo) | API key, API secret, sending number |

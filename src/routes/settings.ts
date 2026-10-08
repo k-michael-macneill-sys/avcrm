@@ -64,7 +64,18 @@ settingsRouter.get(
 settingsRouter.get(
   '/sms',
   asyncHandler(async (_req, res) => {
-    res.json({ data: publicView(SMS_KEY, await readIntegration(SMS_KEY)) });
+    res.json({
+      data: {
+        ...publicView(SMS_KEY, await readIntegration(SMS_KEY)),
+        // Which TWILIO_* variables the server can see — never their values.
+        env_twilio: {
+          account_sid: Boolean(process.env.TWILIO_ACCOUNT_SID?.trim()),
+          auth_token: Boolean(process.env.TWILIO_AUTH_TOKEN?.trim()),
+          from_number: Boolean(process.env.TWILIO_FROM_NUMBER?.trim()),
+          live: Boolean(config.sms.twilio),
+        },
+      },
+    });
   }),
 );
 
