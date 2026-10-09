@@ -19,6 +19,7 @@ import {
   BookOpenCheck,
   Mail,
   Megaphone,
+  Radar,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
@@ -83,6 +84,7 @@ const OPERATIONS_NAV: NavItem[] = [
   { to: '/work-orders', label: 'Dispatch', icon: Truck, roles: CREW },
   { to: '/invoices', label: 'Invoices', icon: Receipt, roles: CORPORATE },
   { to: '/operators', label: 'Crew', icon: HardHat, roles: CREW },
+  { to: '/snow-map', label: 'Snow Map', icon: Radar, roles: ALL },
   { to: '/weather', label: 'Weather Alerts', icon: CloudSnow, roles: CORPORATE },
   { to: '/reports', label: 'Reports', icon: BarChart3, roles: CORPORATE },
   { to: '/admin', label: 'Company', icon: Building2, roles: CORPORATE },

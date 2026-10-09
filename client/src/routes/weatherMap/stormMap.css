@@ -1,0 +1,95 @@
+/*
+ * MapLibre's own chrome — popups, zoom buttons, attribution — in the app's
+ * tokens, so it follows the theme like everything else. Only colours, radii
+ * and the font are touched; MapLibre's layout is left alone.
+ */
+
+.storm-map {
+  font-family: var(--font-sans);
+}
+
+.storm-map .maplibregl-popup-content {
+  background: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  padding: 0.875rem 1rem;
+  box-shadow: 0 12px 32px hsl(var(--background) / 0.45);
+}
+
+.storm-map .maplibregl-popup-close-button {
+  color: hsl(var(--muted-foreground));
+  font-size: 1.125rem;
+  padding: 0 0.4rem;
+  border-radius: calc(var(--radius) - 4px);
+}
+
+.storm-map .maplibregl-popup-close-button:hover {
+  background: hsl(var(--accent));
+  color: hsl(var(--foreground));
+}
+
+.storm-map .maplibregl-popup-anchor-top .maplibregl-popup-tip,
+.storm-map .maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+.storm-map .maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
+  border-bottom-color: hsl(var(--border));
+}
+
+.storm-map .maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+.storm-map .maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+.storm-map .maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
+  border-top-color: hsl(var(--border));
+}
+
+.storm-map .maplibregl-popup-anchor-left .maplibregl-popup-tip {
+  border-right-color: hsl(var(--border));
+}
+
+.storm-map .maplibregl-popup-anchor-right .maplibregl-popup-tip {
+  border-left-color: hsl(var(--border));
+}
+
+.storm-map .maplibregl-ctrl-group {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) - 2px);
+  box-shadow: none;
+}
+
+.storm-map .maplibregl-ctrl-group button + button {
+  border-top-color: hsl(var(--border));
+}
+
+.storm-map .maplibregl-ctrl-group button:hover {
+  background: hsl(var(--accent));
+}
+
+/* The +/- glyphs are dark SVGs; light them up on the dark theme. */
+:root:not([data-theme='light']) .storm-map .maplibregl-ctrl-icon {
+  filter: invert(1);
+}
+
+.storm-map .maplibregl-ctrl-attrib {
+  background: hsl(var(--card) / 0.85);
+  color: hsl(var(--muted-foreground));
+}
+
+.storm-map .maplibregl-ctrl-attrib a {
+  color: hsl(var(--muted-foreground));
+}
+
+.storm-map .maplibregl-ctrl-attrib.maplibregl-compact-show,
+.storm-map .maplibregl-ctrl-attrib.maplibregl-compact {
+  border-radius: calc(var(--radius) - 2px);
+}
+
+:root:not([data-theme='light']) .storm-map .maplibregl-ctrl-attrib-button {
+  filter: invert(1);
+}
+
+/* The bottom-right controls sit above the radar timeline on a phone. */
+@media (max-width: 720px) {
+  .storm-map .maplibregl-ctrl-bottom-right {
+    bottom: 5.5rem;
+  }
+}

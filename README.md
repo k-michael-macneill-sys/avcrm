@@ -1807,6 +1807,85 @@ the window, one alert per region per morning, per-region forecasts, the
 geocoder fallback, preferred channels, the evening-only schedule and a
 forecast that is down.
 
+## The snow map
+
+*Operations Console → Snow Map* (`/app/snow-map`), for everyone signed in. One
+screen with the radar, the snow forecast, and today's routes. **Nothing in it
+needs an API key, an account or a setting.**
+
+- **Regions.** Tabs (a dropdown on a phone) fly the map between the four
+  territories. Their exact forecast points are in
+  `src/config/weatherRegions.ts`: Kingston (44.2312, −76.4860), Regina
+  (50.4547, −104.6067), Lethbridge & Southern Alberta (49.6936, −112.8419) and
+  Cranbrook (49.5097, −115.7688). A branch's own sign-in opens on its own
+  territory.
+- **Weather panel.** `GET /weather/snow-summary?region=kingston` asks
+  Open-Meteo for Environment Canada's GEM models: `gem_seamless`, which is
+  HRDPS (2.5 km) for the first two days, then RDPS and GDPS. The panel shows
+  temperature, wind and gusts, snowfall over the next 6, 24 and 48 hours
+  against the clearing trigger, snow on the ground, a freezing-rain warning
+  (freezing drizzle or rain in the forecast) or watch (rain at or near 0 °C),
+  and a 48-hour snowfall strip. GEM does not report snow depth, so depth comes
+  from Open-Meteo's default blend. Each region's answer is cached for 10
+  minutes. If Open-Meteo is down, the last answer is shown, marked as not
+  refreshed.
+- **Radar.** `GET /weather/radar` relays RainViewer's frame index (cached two
+  minutes). Tile URLs are built from a validated frame path and the one host
+  in `WEATHER_RADAR_TILE_HOST`, never from a host the index names. The map
+  loads every frame at once and shows them in turn, with play/pause, a
+  scrubber and an opacity slider. Forecast ("nowcast") frames appear after the
+  latest past frame when RainViewer publishes them. Tiles are requested up to
+  zoom 7 and stretched beyond, which is as far as RainViewer's public tiles go.
+- **Properties and crews.** `GET /weather/dispatch-map` returns every active
+  customer's geocoded property in the caller's branch scope. Each is coloured
+  by today's visit in the branch's own timezone:
+  - *Active route*: en route or on site
+  - *Pending*: booked, not started
+  - *Serviced*: completed
+  - *Skipped*
+  - *No visit today*
+
+  Properties cluster when zoomed out, and a cluster's ring shows the most
+  urgent status inside it. A popup shows the client, lot size (driveway, in
+  cars), the snow trigger, the assigned crew and the visit. There is no live
+  GPS, so a crew with a visit under way is drawn at that property.
+- **Sample data.** `client/src/routes/weatherMap/sampleData.ts` holds about a
+  hundred made-up properties and crews across the four territories. The layer
+  switches on by itself while the CRM has no geocoded customers. It can be
+  turned on or off by hand, and the map says "Sample data shown — not real
+  customers" whenever it is on.
+- **Theme.** The basemap is OpenFreeMap's OpenStreetMap vector tiles in a
+  style of our own (`basemapStyle.ts`). Every colour is read from the app's
+  CSS tokens (land is `--background`, roads are `--border`, water is
+  `--background` blended toward `--primary`), and the map repaints when the
+  theme changes. The panels are the app's own Card, Badge, Tabs and Checkbox
+  components.
+- **Content-Security-Policy.** `/app` additionally allows
+  `https://tiles.openfreemap.org` and the radar tile host for `connect-src`
+  and `img-src`. MapLibre's worker is built by Vite and served from this
+  origin.
+
+| Variable | Default | What it is |
+| --- | --- | --- |
+| `WEATHER_RADAR_API_BASE` | `https://api.rainviewer.com` | Where the frame index comes from |
+| `WEATHER_RADAR_TILE_HOST` | `https://tilecache.rainviewer.com` | The only host radar tiles are drawn from |
+
+**Before relying on it commercially, check the terms.** Open-Meteo's free API
+is for non-commercial use; a business is expected to take its paid plan,
+which uses the same request with an API key. RainViewer's and OpenFreeMap's
+terms ask for the attribution the map shows. Check each provider's current
+terms.
+
+`tests/weatherMap.test.mts` covers:
+
+- the exact coordinates and model sent to Open-Meteo for each region
+- refusing unknown regions and anonymous callers
+- the depth fallback, caching, stale answers and the 502 when there is nothing
+  to fall back on
+- the ice rules
+- radar tile URLs pinned to the configured host
+- visit colouring by local day, crew placement and branch scoping
+
 ## What is mocked
 
 Nothing is mocked any more. Email goes out over SMTP ([Mail](#mail)), text

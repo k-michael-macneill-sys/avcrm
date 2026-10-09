@@ -3,7 +3,7 @@ import express, { type Express } from 'express';
 import { config } from './config';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { requestLogger } from './middleware/requestLogger';
-import { appPolicy, inlineScriptHashes, PAY_POLICY, securityHeaders } from './middleware/securityHeaders';
+import { appPolicy, BASEMAP_HOST, inlineScriptHashes, PAY_POLICY, securityHeaders } from './middleware/securityHeaders';
 import { apiRouter } from './routes';
 import { AGREEMENT_TEMPLATE } from './services/agreement';
 import { checkReadiness } from './services/health';
@@ -74,7 +74,10 @@ export function createApp(): Express {
   const clientDir = path.resolve(__dirname, '..', 'client', 'dist');
   // Worked out once from the built index.html, so the theme script it
   // carries inline is allowed by hash and nothing else inline ever is.
-  const clientPolicy = appPolicy(inlineScriptHashes(path.join(clientDir, 'index.html')));
+  const clientPolicy = appPolicy(inlineScriptHashes(path.join(clientDir, 'index.html')), [
+    BASEMAP_HOST,
+    config.weather.radarTileHost,
+  ]);
   app.use('/app', (_req, res, next) => {
     res.setHeader('Content-Security-Policy', clientPolicy);
     next();

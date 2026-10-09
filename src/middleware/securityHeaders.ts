@@ -13,7 +13,8 @@ import type { NextFunction, Request, Response } from 'express';
  * The session token lives in localStorage, so script injected into the app is
  * the one bug that turns straight into somebody else's account. The policy on
  * /app is what stands in its way: only this origin's own scripts, the one
- * inline script index.html carries (by hash), and Google Maps.
+ * inline script index.html carries (by hash), Google Maps, and the weather
+ * map's two tile hosts.
  */
 
 type Directives = Record<string, string[]>;
@@ -58,16 +59,24 @@ export const FILE_POLICY = serialize({ 'default-src': ["'none'"], sandbox: [], .
  */
 const GOOGLE = ['https://*.googleapis.com', 'https://*.gstatic.com', '*.google.com', 'https://*.ggpht.com', '*.googleusercontent.com'];
 
-export function appPolicy(inlineScriptHashes: string[]): string {
+/**
+ * The weather map's keyless tile hosts: OpenFreeMap for the basemap's vector
+ * tiles and label fonts. The radar's tile host comes from configuration and
+ * is passed in beside it. MapLibre fetches tiles and fonts, so they are
+ * connect-src, and img-src for the radar's PNGs.
+ */
+export const BASEMAP_HOST = 'https://tiles.openfreemap.org';
+
+export function appPolicy(inlineScriptHashes: string[], mapHosts: string[] = []): string {
   return serialize({
     'default-src': ["'self'"],
     'script-src': ["'self'", ...inlineScriptHashes.map((h) => `'${h}'`), ...GOOGLE, 'blob:', "'unsafe-eval'"],
     // Radix, Recharts and the theme set inline styles; Maps loads its own.
     'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-    'img-src': ["'self'", 'data:', 'blob:', ...GOOGLE],
+    'img-src': ["'self'", 'data:', 'blob:', ...GOOGLE, ...mapHosts],
     'font-src': ["'self'", 'data:', 'https://fonts.gstatic.com'],
-    'connect-src': ["'self'", ...GOOGLE, 'data:', 'blob:'],
-    // pdf.js runs its worker from this origin.
+    'connect-src': ["'self'", ...GOOGLE, ...mapHosts, 'data:', 'blob:'],
+    // pdf.js and the weather map run their workers from this origin.
     'worker-src': ["'self'", 'blob:'],
     'frame-src': ['*.google.com'],
     'form-action': ["'self'"],
