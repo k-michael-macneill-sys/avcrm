@@ -3,7 +3,8 @@ import { config } from '../config';
 import { db as defaultDb } from '../db/client';
 import { badRequest } from '../utils/errors';
 import { logger } from '../utils/logger';
-import { PAYMENTS_KEY, readIntegration, resolveValues } from './integrations';
+import { PAYMENTS_KEY, readIntegration, secretsIfReadable } from './integrations';
+import type { IntegrationSetting } from '../types/models';
 import { SquareGateway } from './squareGateway';
 
 /**
@@ -240,12 +241,23 @@ export const envGateway: PaymentGateway = gatewayFromEnvironment();
  */
 export async function squareGateway(db: Knex = defaultDb): Promise<SquareGateway | null> {
   const row = await readIntegration(PAYMENTS_KEY, db);
-  const saved = row && row.provider === 'square' ? row : null;
+  const saved = row && row.provider === 'square' ? savedSquare(row) : null;
   // The one taking payments comes first, so a half-filled draft saved under
   // Settings never shadows working credentials from the environment.
-  if (saved?.is_enabled) return new SquareGateway(resolveValues(saved));
+  if (saved && row?.is_enabled) return saved;
   if (envGateway instanceof SquareGateway) return envGateway;
-  return saved ? new SquareGateway(resolveValues(saved)) : null;
+  return saved;
+}
+
+/**
+ * The Settings row's Square, or null when its credentials cannot be
+ * decrypted (the key changed since they were saved). Treated as not
+ * connected rather than as an error, so the app keeps working — taking no
+ * cards — and Settings stays open to put the credentials back.
+ */
+function savedSquare(row: IntegrationSetting): SquareGateway | null {
+  const secrets = secretsIfReadable(row);
+  return secrets ? new SquareGateway({ ...(row.settings ?? {}), ...secrets }) : null;
 }
 
 /**
@@ -256,7 +268,8 @@ export async function squareGateway(db: Knex = defaultDb): Promise<SquareGateway
 export async function activeGateway(db: Knex = defaultDb): Promise<PaymentGateway> {
   const row = await readIntegration(PAYMENTS_KEY, db);
   if (row?.is_enabled && row.provider === 'square') {
-    return new SquareGateway(resolveValues(row));
+    const saved = savedSquare(row);
+    if (saved) return saved;
   }
   return envGateway;
 }
