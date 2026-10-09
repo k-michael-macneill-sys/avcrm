@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import type { Knex } from 'knex';
 import { config } from '../config';
 import { db as defaultDb } from '../db/client';
-import type { AuthenticatedUser } from '../types/auth';
+import type { AuthenticatedUser, BranchScope } from '../types/auth';
 import type { Upload, UploadPurpose } from '../types/models';
 import { badRequest, forbidden, notFound } from '../utils/errors';
 import { logger } from '../utils/logger';
@@ -117,7 +117,7 @@ export async function acceptBytes(
 ): Promise<Upload> {
   let payload: UploadTokenPayload;
   try {
-    payload = jwt.verify(token, config.auth.jwtSecret) as UploadTokenPayload;
+    payload = jwt.verify(token, config.auth.jwtSecret, { algorithms: ['HS256'] }) as UploadTokenPayload;
   } catch {
     throw forbidden('That upload link has expired or is not valid');
   }
@@ -217,6 +217,41 @@ export async function authorizeRead(
   if (upload.branch_id && upload.branch_id === user.branch_id) return upload;
 
   throw forbidden('That file belongs to another branch');
+}
+
+/**
+ * A key a client hands back to be filed against a record — a signature on a
+ * contract, a photo on a visit.
+ *
+ * Reading through /files checks the upload itself, but the server also reads
+ * these keys on its own account, to draw a signature into the agreement or a
+ * photo into a service report, and hands back the document it made. Without
+ * this, any key someone had seen — another branch's photo, a crew member's
+ * licence — could be filed as "their" signature and read back inside a PDF.
+ *
+ * A key with no upload row has nothing behind it to read, and is let through:
+ * older rows and the suite's fixtures point at keys never uploaded.
+ */
+export async function assertAttachable(
+  key: string | null | undefined,
+  purpose: UploadPurpose,
+  who: { user_id: string | null; scope: BranchScope },
+  db: Knex = defaultDb,
+): Promise<void> {
+  if (!key) return;
+  assertValidKey(key);
+
+  const upload = (await db('uploads').where({ key }).first()) as Upload | undefined;
+  if (!upload) return;
+
+  if (upload.purpose !== purpose) {
+    throw badRequest(`That file was not uploaded as a ${purpose.replace(/_/g, ' ')}`);
+  }
+  const theirs = who.user_id !== null && upload.uploaded_by_user_id === who.user_id;
+  const inScope = who.scope.kind === 'all' || upload.branch_id === who.scope.branchId;
+  if (!theirs && !inScope) {
+    throw forbidden('That file belongs to another branch');
+  }
 }
 
 export function readStream(key: string): Readable {

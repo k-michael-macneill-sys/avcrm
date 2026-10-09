@@ -1,6 +1,9 @@
 import path from 'node:path';
 import dotenv from 'dotenv';
 import { z } from 'zod';
+import { DEFAULT_SEED_PASSWORD, PUBLISHED_SECRETS } from './published';
+
+export { DEFAULT_SEED_PASSWORD };
 
 // Resolved from this file, not process.cwd(): the knex CLI chdirs to the
 // knexfile's directory, so a cwd-relative lookup would miss the root .env.
@@ -79,7 +82,8 @@ const envSchema = z.object({
   // and the test suite never need a mail server; `smtp` is a real transport,
   // and every provider worth using (Postmark, SES, Mailgun, SendGrid) speaks
   // it, so one driver covers all of them.
-  MAIL_DRIVER: z.enum(['log', 'smtp']).default('log'),
+  // Unset means `log`, or `smtp` when SENDGRID_API_KEY is set.
+  MAIL_DRIVER: blankIsUnset(z.enum(['log', 'smtp'])),
   MAIL_FROM: z.string().trim().min(3).optional(),
   MAIL_REPLY_TO: z.string().trim().min(3).optional(),
   /**
@@ -101,6 +105,24 @@ const envSchema = z.object({
    * unset anywhere a real message matters.
    */
   SMS_API_BASE: z.string().trim().url().optional(),
+
+  /**
+   * Twilio SendGrid, the shortcut: an API key with Mail Send permission is
+   * all it takes. It stands in for SMTP_HOST/USER/PASSWORD (smtp.sendgrid.net,
+   * user "apikey") and switches MAIL_DRIVER to smtp unless that is set.
+   */
+  SENDGRID_API_KEY: blankIsUnset(z.string().trim().min(1)),
+
+  /**
+   * Texting through Twilio from the environment, the way SQUARE_* gives a
+   * processor: no admin needed to click through Settings first. An SMS
+   * provider switched on at Settings -> SMS takes over from these.
+   * TWILIO_FROM_NUMBER is a number on the account (+16135550123) or a
+   * Messaging Service SID (MG…).
+   */
+  TWILIO_ACCOUNT_SID: blankIsUnset(z.string().trim().min(1)),
+  TWILIO_AUTH_TOKEN: blankIsUnset(z.string().trim().min(1)),
+  TWILIO_FROM_NUMBER: blankIsUnset(z.string().trim().min(1)),
 
   SMTP_HOST: z.string().trim().min(1).optional(),
   SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
@@ -139,7 +161,7 @@ const envSchema = z.object({
   // How long an issued upload target stays usable.
   UPLOAD_URL_TTL_SECONDS: z.coerce.number().int().min(30).max(3600).default(900),
 
-  SEED_PASSWORD: z.string().min(8).default('Password123!'),
+  SEED_PASSWORD: z.string().min(8).default(DEFAULT_SEED_PASSWORD),
 
   /**
    * The browser key for the leads map. Public by design — it ships to every
@@ -161,8 +183,20 @@ const envSchema = z.object({
    * Regina) from the sign-in screen. One password, shared by every branch
    * sign-in — change it here to change it everywhere. The ADMIN choice keeps
    * the corporate accounts' own passwords.
+   *
+   * Development falls back to `1234`. Production has no fallback: unset means
+   * branch sign-in is off, and on a public address one shorter than
+   * MIN_BRANCH_SIGN_IN_PASSWORD (config/published.ts) is refused.
    */
   BRANCH_SIGN_IN_PASSWORD: blankIsUnset(z.string().min(1)),
+
+  /**
+   * The code that lets "Reset password" on the sign-in screen set a branch's
+   * own password. Anyone holding it can take over any branch from a page the
+   * whole internet can open, so treat it like the admin password: long,
+   * random, and only in the server's environment. Unset switches reset off.
+   */
+  BRANCH_RESET_CODE: blankIsUnset(z.string().min(1)),
 
   /**
    * Facebook Page and Instagram direct messages. The Page access token sends
@@ -201,19 +235,63 @@ const envSchema = z.object({
   WEATHER_SERVICE_HOUR: z.coerce.number().int().min(1).max(12).default(5),
 });
 
+const LOCAL_URL = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/i;
+
+/**
+ * Production on an address other people can reach. The local compose stack
+ * runs the production image on localhost, and it should still start with the
+ * example file's values; a real deploy has a public APP_BASE_URL (or Render's
+ * RENDER_EXTERNAL_URL) and must not.
+ */
+function isPublicProduction(env: { NODE_ENV: string; APP_BASE_URL?: string; RENDER_EXTERNAL_URL?: string }): boolean {
+  const base = env.APP_BASE_URL ?? env.RENDER_EXTERNAL_URL;
+  return env.NODE_ENV === 'production' && Boolean(base) && !LOCAL_URL.test(base ?? '');
+}
+
+function mailDriverOf(env: { MAIL_DRIVER?: 'log' | 'smtp'; SENDGRID_API_KEY?: string }): 'log' | 'smtp' {
+  return env.MAIL_DRIVER ?? (env.SENDGRID_API_KEY ? 'smtp' : 'log');
+}
+
 /**
  * A real transport needs somewhere to send from and somewhere to send
  * through. Failing at startup beats discovering it when the first invoice
  * goes out.
  */
 const checkedSchema = envSchema.superRefine((env, ctx) => {
-  if (env.MAIL_DRIVER !== 'smtp') return;
+  if (isPublicProduction(env)) {
+    for (const name of ['JWT_SECRET', 'SECRETS_KEY'] as const) {
+      const value = env[name];
+      if (value && PUBLISHED_SECRETS.has(value)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [name],
+          message:
+            'is a value published in this repository, so anyone can use it. ' +
+            'Generate a new one with `npm run secrets`.',
+        });
+      }
+    }
+  }
 
-  if (!env.SMTP_HOST) {
+  // Half a Twilio account sends nothing and says nothing; better to hear now.
+  const twilio = ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM_NUMBER'] as const;
+  if (twilio.some((name) => env[name])) {
+    for (const name of twilio.filter((n) => !env[n])) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [name],
+        message: `is required with the other TWILIO_* settings (${twilio.join(', ')})`,
+      });
+    }
+  }
+
+  if (mailDriverOf(env) !== 'smtp') return;
+
+  if (!env.SMTP_HOST && !env.SENDGRID_API_KEY) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['SMTP_HOST'],
-      message: 'is required when MAIL_DRIVER=smtp',
+      message: 'is required when MAIL_DRIVER=smtp, unless SENDGRID_API_KEY is set',
     });
   }
   if (!env.MAIL_FROM) {
@@ -247,6 +325,8 @@ function parseTrustProxy(value: string): boolean | number | string {
 export const config = {
   env: env.NODE_ENV,
   isProduction: env.NODE_ENV === 'production',
+  /** Production somewhere other than localhost: where defaults stop being safe. */
+  isPublicProduction: isPublicProduction(env),
   port: env.PORT,
   logLevel: env.LOG_LEVEL,
   trustProxy: parseTrustProxy(env.TRUST_PROXY),
@@ -285,19 +365,38 @@ export const config = {
     },
   },
   mail: {
-    driver: env.MAIL_DRIVER,
+    driver: mailDriverOf(env),
     from: env.MAIL_FROM ?? 'avcrm@localhost',
     replyTo: env.MAIL_REPLY_TO ?? null,
     redirectTo: env.MAIL_REDIRECT_TO ?? null,
-    smtp: {
-      host: env.SMTP_HOST ?? 'localhost',
-      port: env.SMTP_PORT,
-      secure: env.SMTP_SECURE,
-      user: env.SMTP_USER ?? null,
-      password: env.SMTP_PASSWORD ?? null,
-    },
+    // SendGrid's SMTP relay takes the literal user "apikey" and the key as
+    // the password. An explicit SMTP_HOST still wins.
+    smtp:
+      env.SENDGRID_API_KEY && !env.SMTP_HOST
+        ? {
+            host: 'smtp.sendgrid.net',
+            port: env.SMTP_PORT,
+            secure: env.SMTP_SECURE,
+            user: 'apikey',
+            password: env.SENDGRID_API_KEY,
+          }
+        : {
+            host: env.SMTP_HOST ?? 'localhost',
+            port: env.SMTP_PORT,
+            secure: env.SMTP_SECURE,
+            user: env.SMTP_USER ?? null,
+            password: env.SMTP_PASSWORD ?? null,
+          },
   },
   sms: {
+    twilio:
+      env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_FROM_NUMBER
+        ? {
+            account_sid: env.TWILIO_ACCOUNT_SID,
+            auth_token: env.TWILIO_AUTH_TOKEN,
+            from: env.TWILIO_FROM_NUMBER,
+          }
+        : null,
     redirectTo: env.SMS_REDIRECT_TO ?? null,
     apiBase: env.SMS_API_BASE ?? null,
   },
@@ -313,7 +412,8 @@ export const config = {
     googleApiKey: env.GOOGLE_MAPS_API_KEY ?? null,
   },
   branchPassword: env.BRANCH_PASSWORD ?? null,
-  branchSignInPassword: env.BRANCH_SIGN_IN_PASSWORD ?? '1234',
+  branchSignInPassword: env.BRANCH_SIGN_IN_PASSWORD ?? (env.NODE_ENV === 'production' ? null : '1234'),
+  branchResetCode: env.BRANCH_RESET_CODE ?? null,
   meta: {
     pageAccessToken: env.META_PAGE_ACCESS_TOKEN ?? null,
     appSecret: env.META_APP_SECRET ?? null,

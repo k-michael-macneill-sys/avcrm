@@ -128,7 +128,8 @@ export function InvoiceDetail(): JSX.Element {
             },
           ]}
         />
-        {payable ? (
+        {/* Booking money by hand is corporate's, like refunds: the API refuses anyone else. */}
+        {payable && isCorporate ? (
           <Disclosure label="Record payment">
             <InlineForm
               submitLabel="Record it"
@@ -165,7 +166,7 @@ export function InvoiceDetail(): JSX.Element {
               onDone={reload}
             />
           </Disclosure>
-        ) : (
+        ) : payable ? null : (
           <p className="mt-3 text-sm text-muted-foreground">A {invoice.status} invoice takes no payment.</p>
         )}
       </Section>

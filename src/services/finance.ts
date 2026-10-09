@@ -200,6 +200,17 @@ export interface FinanceProjection {
   average_contract_value: string;
 }
 
+/**
+ * The season month a contract's billing starts in, November being 0: an
+ * exact-dates contract from January lands in January. One starting before
+ * November is counted from the season's start, as it always was.
+ */
+function seasonMonthOf(start: string): number {
+  const month = Number(start.slice(5, 7));
+  const index = (month + 1) % 12;
+  return index < SEASON_LENGTH ? index : 0;
+}
+
 interface ProjectedContract {
   customer_id: string;
   billing_type: 'monthly' | 'seasonal_upfront';
@@ -257,6 +268,7 @@ export async function financialProjection(
       discounted_price: Number(row.discounted_price),
       recurring_price: row.recurring_price === null ? null : Number(row.recurring_price),
       periods: billingPeriods(row.season_start, row.season_end).length,
+      first_month: seasonMonthOf(row.season_start),
     });
     revenue.forEach((amount, i) => {
       months[i] = roundCents((months[i] ?? 0) + amount);

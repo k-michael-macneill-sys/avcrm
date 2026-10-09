@@ -53,10 +53,11 @@ interface CustomerPin {
 type Layer = PinStatus | 'customer';
 
 const LAYERS: { key: Layer; label: string; color: string }[] = [
-  { key: 'not_home', label: 'Not home', color: '#f59e0b' },
-  { key: 'not_interested', label: 'Not interested', color: '#ef4444' },
-  { key: 'lead', label: 'Lead', color: '#3b82f6' },
-  { key: 'customer', label: 'Customer', color: '#22c55e' },
+  { key: 'not_home', label: 'Not home', color: '#3b82f6' },
+  { key: 'not_interested', label: 'Not interested', color: '#374151' },
+  { key: 'lead', label: 'Lead', color: '#22c55e' },
+  // Purple, so a signed customer never reads as a lead.
+  { key: 'customer', label: 'Customer', color: '#a855f7' },
 ];
 const colorOf = (layer: Layer): string => LAYERS.find((l) => l.key === layer)?.color ?? '#94a3b8';
 const labelOf = (layer: Layer): string => LAYERS.find((l) => l.key === layer)?.label ?? layer;
@@ -364,19 +365,20 @@ function LeadsMap({ apiKey, branches }: { apiKey: string; branches: Branch[] }):
         </Button>
 
         {selection ? (
+          // Covers the map, so a tap outside the box closes it rather than
+          // dropping another pin.
           <div
-            role="region"
-            aria-label="Pin details"
-            className="absolute inset-x-2 bottom-2 max-h-[70%] overflow-y-auto rounded-xl border border-border bg-card p-4 shadow-2xl sm:inset-x-auto sm:right-3 sm:w-96"
+            className="absolute inset-0 z-10 flex items-center justify-center bg-black/40 p-3"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setSelection(null);
+            }}
           >
-            <button
-              type="button"
-              className="absolute right-3 top-3 text-muted-foreground hover:text-foreground"
-              onClick={() => setSelection(null)}
-              aria-label="Close"
+           <div className="flex max-h-full w-full max-w-sm flex-col gap-2">
+            <div
+              role="region"
+              aria-label="Pin details"
+              className="overflow-y-auto rounded-xl border border-border bg-card p-4 shadow-2xl"
             >
-              <X className="size-4" />
-            </button>
             {selection.kind === 'new' ? (
               <NewKnock
                 key={`${selection.position.lat},${selection.position.lng}`}
@@ -395,6 +397,16 @@ function LeadsMap({ apiKey, branches }: { apiKey: string; branches: Branch[] }):
             ) : (
               <CustomerCard customer={selection.customer} />
             )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelection(null)}
+              aria-label="Close"
+              className="flex h-11 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground shadow-2xl hover:text-foreground"
+            >
+              <X className="size-5" />
+            </button>
+           </div>
           </div>
         ) : null}
       </div>
@@ -478,25 +490,14 @@ function NewKnock({
     });
 
   return (
-    <div className="pr-6">
-      <p className="text-xs text-muted-foreground">New knock</p>
-      <p className="mt-0.5 text-sm font-medium text-foreground">
+    <div>
+      <p className="text-center text-base font-semibold text-foreground">
         {address === null ? 'Finding the address…' : address.formatted ?? 'No address found here — the pin still saves.'}
       </p>
-
-      <Textarea
-        className="mt-3"
-        rows={2}
-        placeholder="Notes (optional)"
-        value={notes}
-        onChange={(e) => setNotes(e.target.value)}
-      />
 
       {asLead ? (
         <ContactFields value={contact} onChange={setContact} />
       ) : null}
-
-      {error ? <div className="mt-3"><ErrorNotice message={error} /></div> : null}
 
       {asLead ? (
         <div className="mt-3 flex gap-2">
@@ -513,7 +514,7 @@ function NewKnock({
           </Button>
         </div>
       ) : (
-        <div className="mt-3 grid grid-cols-2 gap-2">
+        <div className="mt-3 flex flex-col gap-2">
           <OutcomeButton layer="not_home" disabled={pending} onClick={() => run(async () => { await drop('not_home', false); onDone(); })} />
           <OutcomeButton layer="not_interested" disabled={pending} onClick={() => run(async () => { await drop('not_interested', false); onDone(); })} />
           <OutcomeButton layer="lead" disabled={pending} onClick={() => setAsLead(true)} />
@@ -533,6 +534,16 @@ function NewKnock({
           </Button>
         </div>
       )}
+
+      <Textarea
+        className="mt-3"
+        rows={2}
+        placeholder="Notes (monitor)"
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+      />
+
+      {error ? <div className="mt-3"><ErrorNotice message={error} /></div> : null}
     </div>
   );
 }
@@ -563,26 +574,23 @@ function ExistingPin({
     });
 
   return (
-    <div className="pr-6">
-      <p className="flex items-center gap-2 text-xs text-muted-foreground">
+    <div>
+      <p className="text-center text-base font-semibold text-foreground">
+        {pin.address_line1 ? `${pin.address_line1}${pin.city ? `, ${pin.city}` : ''}` : 'No address on this pin'}
+      </p>
+      <p className="mt-1 flex items-center justify-center gap-2 text-xs text-muted-foreground">
         <span className="size-2.5 rounded-full" style={{ background: colorOf(pin.status) }} />
         {labelOf(pin.status)} · {pin.knock_count} {pin.knock_count === 1 ? 'knock' : 'knocks'} · last{' '}
         {relative(pin.last_knocked_at)}
         {pin.created_by_name ? ` · ${pin.created_by_name}` : ''}
       </p>
-      <p className="mt-0.5 text-sm font-medium text-foreground">
-        {pin.address_line1 ? `${pin.address_line1}${pin.city ? `, ${pin.city}` : ''}` : 'No address on this pin'}
-      </p>
       {pin.customer_id ? (
-        <Link className="mt-1 inline-block text-xs text-primary hover:underline" to={`/customers/${pin.customer_id}`}>
+        <Link className="mt-1 block text-center text-xs text-primary hover:underline" to={`/customers/${pin.customer_id}`}>
           Open their lead
         </Link>
       ) : null}
 
-      <Textarea className="mt-3" rows={2} placeholder="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
-
       {asLead ? <ContactFields value={contact} onChange={setContact} /> : null}
-      {error ? <div className="mt-3"><ErrorNotice message={error} /></div> : null}
 
       {asLead ? (
         <div className="mt-3 flex gap-2">
@@ -596,7 +604,7 @@ function ExistingPin({
       ) : (
         <>
           <p className="mt-3 text-xs text-muted-foreground">Knocked again?</p>
-          <div className="mt-1.5 grid grid-cols-2 gap-2">
+          <div className="mt-1.5 flex flex-col gap-2">
             <OutcomeButton layer="not_home" disabled={pending} onClick={() => change('not_home')} />
             <OutcomeButton layer="not_interested" disabled={pending} onClick={() => change('not_interested')} />
             <OutcomeButton
@@ -620,6 +628,13 @@ function ExistingPin({
               Add customer
             </Button>
           </div>
+          <Textarea
+            className="mt-3"
+            rows={2}
+            placeholder="Notes (monitor)"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+          />
           <div className="mt-2 flex justify-between gap-2">
             <Button
               type="button"
@@ -646,6 +661,7 @@ function ExistingPin({
           </div>
         </>
       )}
+      {error ? <div className="mt-3"><ErrorNotice message={error} /></div> : null}
     </div>
   );
 }
@@ -657,7 +673,7 @@ function CustomerCard({ customer }: { customer: CustomerPin }): JSX.Element {
     ...ADDONS.filter((a) => customer[a.key]).map((a) => a.label),
   ];
   return (
-    <div className="pr-6 text-sm">
+    <div className="text-sm">
       <p className="flex items-center gap-2 text-xs text-muted-foreground">
         <span className="size-2.5 rounded-full" style={{ background: colorOf('customer') }} />
         Customer
@@ -733,10 +749,7 @@ function ContactFields({
           disabled={value.email.trim() === ''}
           onCheckedChange={(v) => onChange({ ...value, email_opt_in: v === true })}
         />
-        <span>
-          They agreed to get follow-up emails about snow clearing. Only tick this if they said yes — they can
-          unsubscribe from any email.
-        </span>
+        <span>Receive email follow-ups</span>
       </label>
     </div>
   );

@@ -379,7 +379,7 @@ function decodeSignature(dataUrl: string): Buffer {
 async function verified(token: string, db: Knex): Promise<SigningRequest> {
   let payload: SigningTokenPayload;
   try {
-    payload = jwt.verify(token, config.auth.jwtSecret) as SigningTokenPayload;
+    payload = jwt.verify(token, config.auth.jwtSecret, { algorithms: ['HS256'] }) as SigningTokenPayload;
   } catch {
     throw unauthorized('That signing link is not valid or has expired');
   }

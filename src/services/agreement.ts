@@ -2,11 +2,16 @@ import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import { Readable } from 'node:stream';
 import type { Knex } from 'knex';
-import { PDFDocument, PDFCheckBox, PDFName, PDFRadioGroup, PDFTextField } from 'pdf-lib';
+import { PDFDocument, PDFCheckBox, PDFName, PDFRadioGroup, PDFTextField, StandardFonts, rgb } from 'pdf-lib';
 import {
   AGREEMENT_FIELDS,
   EDITABLE_AGREEMENT_FIELDS,
+  MAX_TERM_MONTHS,
   agreementDate,
+  agreementRewrites,
+  isIsoDay,
+  termTypeOf,
+  termWithinLimit,
   type AgreementValues,
 } from '../types/agreement';
 import type { Customer, Property, Quote } from '../types/models';
@@ -81,10 +86,23 @@ export function assertAgreementComplete(values: AgreementValues): void {
   if (v('customer_email') && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v('customer_email'))) {
     need('customer_email', 'That email address does not look right');
   }
-  if (!yearOk(v('start_year'))) need('start_year', 'Enter the start year as two digits, e.g. 26');
-  if (!yearOk(v('end_year'))) need('end_year', 'Enter the end year as two digits, e.g. 27');
-  if (yearOk(v('start_year')) && yearOk(v('end_year')) && Number(v('end_year')) <= Number(v('start_year'))) {
-    need('end_year', 'The season has to end after it starts');
+  if (termTypeOf(values) === 'Exact dates') {
+    const start = v('term_start');
+    const end = v('term_end');
+    if (!isIsoDay(start)) need('term_start', 'Enter the day service starts');
+    if (!isIsoDay(end)) need('term_end', 'Enter the day service ends');
+    if (isIsoDay(start) && isIsoDay(end)) {
+      if (end <= start) need('term_end', 'Service has to end after it starts');
+      else if (!termWithinLimit(start, end)) {
+        need('term_end', `An exact-dates term can run at most ${MAX_TERM_MONTHS} months`);
+      }
+    }
+  } else {
+    if (!yearOk(v('start_year'))) need('start_year', 'Enter the start year as two digits, e.g. 26');
+    if (!yearOk(v('end_year'))) need('end_year', 'Enter the end year as two digits, e.g. 27');
+    if (yearOk(v('start_year')) && yearOk(v('end_year')) && Number(v('end_year')) <= Number(v('start_year'))) {
+      need('end_year', 'The season has to end after it starts');
+    }
   }
   const pkg = v('package');
   if (pkg !== 'Basic' && pkg !== 'Premium') need('package', 'Choose the Basic or Premium package');
@@ -125,10 +143,14 @@ export interface AgreementDeal {
   };
 }
 
-/** What the CRM keeps from a completed agreement. The agreement is monthly, November to March. */
+/**
+ * What the CRM keeps from a completed agreement. The agreement is monthly,
+ * November to March for a seasonal term, or between the exact dates given.
+ */
 export function dealFromAgreement(values: AgreementValues): AgreementDeal {
   assertAgreementComplete(values);
   const v = (name: string) => text(values[name]);
+  const exact = termTypeOf(values) === 'Exact dates';
   const names = v('customer_name').split(/\s+/);
   const premium = v('package') === 'Premium';
   const price = priceOf(v(premium ? 'price_premium' : 'price_basic'))!;
@@ -154,8 +176,8 @@ export function dealFromAgreement(values: AgreementValues): AgreementDeal {
       initial_price: price,
       discounted_price: price,
       recurring_price: price,
-      season_start: `20${v('start_year')}-11-01`,
-      season_end: `20${v('end_year')}-03-31`,
+      season_start: exact ? v('term_start') : `20${v('start_year')}-11-01`,
+      season_end: exact ? v('term_end') : `20${v('end_year')}-03-31`,
       package: premium ? 'premium' : 'basic',
       addons: AGREEMENT_FIELDS.filter((f) => f.name.startsWith('addon_') && values[f.name] === true).map((f) =>
         f.name.slice('addon_'.length),
@@ -178,6 +200,8 @@ export function agreementFromDeal(
 ): AgreementValues {
   if (quote.agreement_fields) return quote.agreement_fields;
   const year = (d: unknown) => String(new Date(String(d)).getUTCFullYear() % 100).padStart(2, '0');
+  const day = (d: unknown) => new Date(String(d)).toISOString().slice(0, 10);
+  const seasonal = day(quote.season_start).endsWith('-11-01') && day(quote.season_end).endsWith('-03-31');
   return cleanAgreement({
     customer_name: `${customer.first_name} ${customer.last_name}`,
     customer_street: property.address_line1,
@@ -186,8 +210,9 @@ export function agreementFromDeal(
     customer_postal: property.postal_code,
     customer_phone: customer.phone ?? '',
     customer_email: customer.email ?? '',
-    start_year: year(quote.season_start),
-    end_year: year(quote.season_end),
+    ...(seasonal
+      ? { term_type: 'Seasonal', start_year: year(quote.season_start), end_year: year(quote.season_end) }
+      : { term_type: 'Exact dates', term_start: day(quote.season_start), term_end: day(quote.season_end) }),
     package: 'Basic',
     price_basic: String(quote.recurring_price ?? quote.discounted_price),
     customer_notes: property.access_notes ?? '',
@@ -228,7 +253,10 @@ export async function renderAgreement(values: AgreementValues, signatures: Agree
     lines.set(name, { page, box: widget.getRectangle() });
   }
 
+  const rewrites = agreementRewrites(values);
+
   for (const spec of AGREEMENT_FIELDS) {
+    if (spec.offPdf) continue;
     const field = form.getFieldMaybe(spec.name);
     if (!field) {
       logger.warn({ field: spec.name }, 'The agreement PDF has no field by that name');
@@ -245,6 +273,9 @@ export async function renderAgreement(values: AgreementValues, signatures: Agree
       if (spec.kind === 'date') {
         const signer = spec.name.startsWith('customer') ? signatures.customer : signatures.provider;
         value = signer ? when : '';
+      } else if (spec.kind === 'year' && rewrites.length) {
+        // Exact dates: the season's years are not what was agreed.
+        value = '';
       } else if (spec.kind !== 'signature') {
         value = text(values[spec.name]);
         if (spec.kind === 'money' && value) value = value.replace(/^\$/, '');
@@ -255,6 +286,26 @@ export async function renderAgreement(values: AgreementValues, signatures: Agree
   }
 
   form.flatten();
+
+  // The lines that say November to March, reworded for an exact-dates term.
+  if (rewrites.length) {
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    for (const line of rewrites) {
+      const page = doc.getPage(line.page);
+      const height = page.getHeight();
+      const words = printable(line.text);
+      const room = line.right - line.left - 2;
+      const size = Math.min(line.size, (line.size * room) / font.widthOfTextAtSize(words, line.size));
+      page.drawRectangle({
+        x: line.left,
+        y: height - line.bottom,
+        width: line.right - line.left,
+        height: line.bottom - line.top,
+        color: rgb(1, 1, 1),
+      });
+      page.drawText(words, { x: line.left + 0.8, y: height - line.baseline, size, font, color: rgb(0, 0, 0) });
+    }
+  }
 
   // After flattening, so nothing the form draws can cover the ink.
   for (const [name, png] of [

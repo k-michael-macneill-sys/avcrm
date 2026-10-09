@@ -77,6 +77,45 @@ describe('signing up on the PDF agreement', () => {
     assert.equal(String(quote.season_end).slice(0, 10), '2027-03-31');
   });
 
+  it('runs an exact-dates agreement between the dates given, rather than the season', async () => {
+    const token = await login(h.server(), h.world().emails.sales);
+    const reply = await call(h.server(), 'POST', '/sales/agreement-deals', {
+      token,
+      body: {
+        agreement: agreement({
+          term_type: 'Exact dates',
+          term_start: '2026-12-01',
+          term_end: '2027-01-31',
+          start_year: '',
+          end_year: '',
+        }),
+      },
+    });
+
+    assert.equal(reply.status, 201, JSON.stringify(reply.body));
+    const { quote } = reply.body.data;
+    assert.equal(String(quote.season_start).slice(0, 10), '2026-12-01');
+    assert.equal(String(quote.season_end).slice(0, 10), '2027-01-31');
+    assert.equal(quote.agreement_fields.term_type, 'Exact dates');
+  });
+
+  it('refuses exact dates that end before they start, or run past a year', async () => {
+    const token = await login(h.server(), h.world().emails.sales);
+    for (const [start, end] of [
+      ['2027-01-31', '2026-12-01'],
+      ['2026-12-01', '2028-01-01'],
+      ['2026-12-01', ''],
+    ]) {
+      const reply = await call(h.server(), 'POST', '/sales/agreement-deals', {
+        token,
+        body: { agreement: agreement({ term_type: 'Exact dates', term_start: start!, term_end: end! }) },
+      });
+      assert.equal(reply.status, 400);
+      const paths = reply.body.error.details.map((d: { path: string }) => d.path);
+      assert.deepEqual(paths, ['agreement.term_end']);
+    }
+  });
+
   it('names everything missing from the agreement at once, and writes nothing', async () => {
     const token = await login(h.server(), h.world().emails.sales);
     const reply = await call(h.server(), 'POST', '/sales/agreement-deals', {

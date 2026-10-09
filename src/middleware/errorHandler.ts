@@ -1,11 +1,12 @@
 import type { NextFunction, Request, Response } from 'express';
 import { ApiError } from '../utils/errors';
 import { logger } from '../utils/logger';
+import { redactPath } from './requestLogger';
 
 /** 404 for anything no route matched. Mounted after all routes. */
 export function notFoundHandler(req: Request, res: Response): void {
   res.status(404).json({
-    error: { code: 'not_found', message: `No route for ${req.method} ${req.path}` },
+    error: { code: 'not_found', message: `No route for ${req.method} ${redactPath(req.path)}` },
   });
 }
 
@@ -21,7 +22,7 @@ export function errorHandler(
 ): void {
   if (err instanceof ApiError) {
     logger.warn(
-      { status: err.status, code: err.code, path: req.path, method: req.method },
+      { status: err.status, code: err.code, path: redactPath(req.originalUrl), method: req.method },
       err.message,
     );
     res.status(err.status).json({
@@ -38,7 +39,7 @@ export function errorHandler(
     return;
   }
 
-  logger.error({ err, path: req.path, method: req.method }, 'Unhandled error');
+  logger.error({ err, path: redactPath(req.originalUrl), method: req.method }, 'Unhandled error');
   res.status(500).json({
     error: { code: 'internal_error', message: 'Internal server error' },
   });

@@ -274,6 +274,8 @@ export interface User {
   role: UserRole;
   onboarding_status: OnboardingStatus;
   is_active: boolean;
+  /** Tokens issued before this are refused. Null until the first change. */
+  password_changed_at: Date | null;
   created_at: Date;
   updated_at: Date;
 }

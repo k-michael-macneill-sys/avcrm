@@ -157,6 +157,18 @@
         font-weight: 600;
         font-size: 16px;
       }
+      /* Apple's own button, drawn by Safari; only shown where Apple Pay works. */
+      #apple-pay-button {
+        -webkit-appearance: -apple-pay-button;
+        -apple-pay-button-type: pay;
+        -apple-pay-button-style: black;
+        display: block;
+        width: 100%;
+        height: 48px;
+        margin: 8px 0 4px;
+        border: 0;
+        cursor: pointer;
+      }
       button.primary:disabled {
         opacity: 0.6;
         cursor: progress;
@@ -277,6 +289,23 @@
               });
             });
           });
+        }
+
+        // Apple Pay, where the device and browser support it. Resolves to
+        // null anywhere it does not, and the card form carries on alone.
+        function loadApplePay(form, invoice) {
+          try {
+            var request = form.payments.paymentRequest({
+              countryCode: 'CA',
+              currencyCode: invoice.currency || 'CAD',
+              total: { amount: Number(invoice.amount_outstanding).toFixed(2), label: invoice.branch_name },
+            });
+            return form.payments.applePay(request).catch(function () {
+              return null;
+            });
+          } catch (e) {
+            return Promise.resolve(null);
+          }
         }
 
         // The nonce, plus the bank's verification where Square asks for it.
@@ -425,9 +454,12 @@
 
           var status = el('p', { className: 'message' });
           var button = el('button', { type: 'button', className: 'primary', text: 'Pay ' + money(invoice.amount_outstanding, invoice.currency), disabled: 'disabled' });
+          var appleButton = el('button', { type: 'button', id: 'apple-pay-button', 'aria-label': 'Pay with Apple Pay' });
+          var appleWrap = el('div', { hidden: 'hidden' }, [appleButton, el('p', { className: 'muted', text: 'or pay by card' })]);
           show('Pay your invoice', [
             greeting,
             facts,
+            appleWrap,
             el('h2', { text: 'Card' }),
             el('div', { id: 'card-container' }),
             button,
@@ -435,8 +467,45 @@
             el('p', { className: 'muted', text: 'Your card is entered on Square’s secure form. ' + invoice.branch_name + ' never sees the card number.' }),
           ]);
 
+          function pay(source) {
+            return api('POST', '/portal/invoices/' + token + '/pay', source).then(
+              function (result) {
+                renderInvoice(token, result.invoice, result.receipt);
+              },
+              function (err) {
+                message(status, err.message, 'critical');
+                button.removeAttribute('disabled');
+                appleButton.removeAttribute('disabled');
+              },
+            );
+          }
+
           loadSquare(invoice.payment).then(
             function (form) {
+              loadApplePay(form, invoice).then(function (applePay) {
+                if (!applePay) return;
+                appleWrap.hidden = false;
+                appleButton.addEventListener('click', function () {
+                  appleButton.setAttribute('disabled', 'disabled');
+                  message(status, '');
+                  applePay.tokenize().then(
+                    function (result) {
+                      if (result.status !== 'OK') {
+                        // Closing the Apple Pay sheet lands here too: not an error.
+                        appleButton.removeAttribute('disabled');
+                        return;
+                      }
+                      message(status, 'Processing…');
+                      button.setAttribute('disabled', 'disabled');
+                      return pay({ source_id: result.token, verification_token: null });
+                    },
+                    function (err) {
+                      message(status, (err && err.message) || 'Apple Pay did not go through.', 'critical');
+                      appleButton.removeAttribute('disabled');
+                    },
+                  );
+                });
+              });
               button.removeAttribute('disabled');
               button.addEventListener('click', function () {
                 button.setAttribute('disabled', 'disabled');

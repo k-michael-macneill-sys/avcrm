@@ -75,11 +75,12 @@ const TWILIO: ProviderDefinition = {
   id: 'twilio',
   label: 'Twilio',
   help: 'Account SID and Auth Token are on the Twilio console dashboard. The '
-    + 'sending number must be one you have bought or verified there.',
+    + 'sending number must be one you have bought or verified there; a '
+    + 'Messaging Service SID (MG…) works in its place.',
   fields: [
     { name: 'account_sid', label: 'Account SID', required: true, placeholder: 'AC…' },
     { name: 'auth_token', label: 'Auth token', required: true, secret: true },
-    { name: 'from', label: 'Send from', required: true, placeholder: '+19025550123' },
+    { name: 'from', label: 'Send from', required: true, placeholder: '+19025550123 or MG…' },
   ],
   build: (v, m) => ({
     url: `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(v.account_sid ?? '')}/Messages.json`,
@@ -87,7 +88,13 @@ const TWILIO: ProviderDefinition = {
       Authorization: basic(v.account_sid ?? '', v.auth_token ?? ''),
       'Content-Type': FORM,
     },
-    body: form({ To: m.to, From: m.from, Body: m.body }),
+    // A Messaging Service picks the number itself (and handles A2P 10DLC
+    // registration), so it goes in its own parameter rather than From.
+    body: form(
+      /^MG[0-9a-f]{32}$/i.test(m.from)
+        ? { To: m.to, MessagingServiceSid: m.from, Body: m.body }
+        : { To: m.to, From: m.from, Body: m.body },
+    ),
   }),
   messageId: (payload) => at(payload, 'sid'),
 };

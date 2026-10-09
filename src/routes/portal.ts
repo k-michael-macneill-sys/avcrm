@@ -38,13 +38,25 @@ const signedCardSchema = cardSchema.extend({
  * failures are counted per address. Success is forgiven: a customer who pays
  * is not the problem.
  */
-const payLimiter = rateLimit({
-  name: 'portal-pay-ip',
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  key: (req) => req.ip ?? null,
-  message: 'Too many attempts from here. Please wait a few minutes and try again.',
-});
+const payLimiter = rateLimit(
+  {
+    name: 'portal-pay-ip',
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    key: (req) => req.ip ?? null,
+    message: 'Too many attempts from here. Please wait a few minutes and try again.',
+  },
+  // Per link as well. The address can be forged behind a proxy that passes
+  // X-Forwarded-For through, and a tester with one link would then be free
+  // to run a list of cards against it; the link itself cannot be faked.
+  {
+    name: 'portal-pay-link',
+    windowMs: 60 * 60 * 1000,
+    max: 10,
+    key: (req) => (typeof req.params.token === 'string' ? req.params.token : null),
+    message: 'Too many attempts on this bill. Please wait an hour, or contact the office.',
+  },
+);
 
 portalRouter.use((_req, res, next) => {
   res.set('Cache-Control', 'private, no-store');

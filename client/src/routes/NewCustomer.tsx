@@ -9,7 +9,11 @@ import {
   type Property,
   type Quote,
 } from '../../../src/types/models';
-import { defaultAgreementYears, type AgreementValues } from '../../../src/types/agreement';
+import {
+  defaultAgreementYears,
+  termTypeOf,
+  type AgreementValues,
+} from '../../../src/types/agreement';
 import { useAuth } from '@/auth/AuthContext';
 import { AgreementPdf, type SignatureField } from '@/components/AgreementPdf';
 import { ErrorNotice, Loading } from '@/components/Misc';
@@ -17,6 +21,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { Section } from '@/components/Section';
 import { SignDialog, type Signature } from '@/components/SignDialog';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import * as api from '@/lib/api';
@@ -104,6 +109,7 @@ function startingValues(
     customer_city: city,
     customer_province: prefill.get('province') ?? branch?.province ?? '',
     customer_postal: prefill.get('postal_code') ?? '',
+    term_type: 'Seasonal',
     ...defaultAgreementYears(),
   };
 }
@@ -262,6 +268,12 @@ function AgreementSignup({
         </div>
       ) : null}
 
+      <ContractPeriod
+        values={values}
+        onChange={edit}
+        invalid={invalid.some((f) => f === 'term_start' || f === 'term_end')}
+      />
+
       <div className="mx-auto w-full max-w-3xl">
         <AgreementPdf
           values={values}
@@ -276,7 +288,7 @@ function AgreementSignup({
         />
       </div>
 
-      <div className="sticky bottom-0 z-10 mx-auto mt-4 w-full max-w-3xl rounded-xl border border-border bg-background/95 p-3 backdrop-blur max-[720px]:bottom-[calc(4.5rem+env(safe-area-inset-bottom))]">
+      <div className="sticky bottom-0 z-10 mx-auto mt-4 w-full max-w-3xl rounded-xl border border-border bg-background/95 p-3 backdrop-blur-sm max-[720px]:bottom-[calc(4.5rem+env(safe-area-inset-bottom))]">
         {problem ? (
           <div className="mb-3">
             <ErrorNotice message={problem} />
@@ -308,6 +320,74 @@ function AgreementSignup({
         hasSignature={!!(signing && signatures[signing])}
       />
     </>
+  );
+}
+
+/**
+ * The contract period as two buttons: the full season, or exact dates. Exact
+ * dates shows its start and end inputs right here, no pop-up.
+ */
+function ContractPeriod({
+  values,
+  onChange,
+  invalid,
+}: {
+  values: AgreementValues;
+  onChange: (next: AgreementValues) => void;
+  invalid: boolean;
+}): JSX.Element {
+  const exact = termTypeOf(values) === 'Exact dates';
+  const day = (name: 'term_start' | 'term_end'): string =>
+    typeof values[name] === 'string' ? (values[name] as string) : '';
+  const bad = invalid ? 'ring-2 ring-red-500' : undefined;
+
+  return (
+    <div id="contract-period" className="mx-auto mb-4 flex w-full max-w-3xl flex-col gap-2">
+      <Label>Contract period</Label>
+      <div className="grid grid-cols-2 gap-2">
+        <Button
+          type="button"
+          variant={exact ? 'secondary' : 'default'}
+          aria-pressed={!exact}
+          onClick={() => onChange({ ...values, term_type: 'Seasonal' })}
+        >
+          Full season (Nov 1 – Mar 31)
+        </Button>
+        <Button
+          type="button"
+          variant={exact ? 'default' : 'secondary'}
+          aria-pressed={exact}
+          onClick={() => onChange({ ...values, term_type: 'Exact dates' })}
+        >
+          Exact dates
+        </Button>
+      </div>
+      {exact ? (
+        <div className="grid grid-cols-2 gap-2">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="term-start">Service starts on</Label>
+            <Input
+              id="term-start"
+              type="date"
+              value={day('term_start')}
+              className={bad}
+              onChange={(e) => onChange({ ...values, term_type: 'Exact dates', term_start: e.target.value })}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="term-end">Service ends on</Label>
+            <Input
+              id="term-end"
+              type="date"
+              min={day('term_start') || undefined}
+              value={day('term_end')}
+              className={bad}
+              onChange={(e) => onChange({ ...values, term_type: 'Exact dates', term_end: e.target.value })}
+            />
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

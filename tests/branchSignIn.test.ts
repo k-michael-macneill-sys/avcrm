@@ -80,6 +80,38 @@ describe('signing in by branch', () => {
     assert.equal(unknown.status, 400);
   });
 
+  it('resets a branch password only with the reset code', async () => {
+    const reset = (body: Record<string, string>) =>
+      call(h.server(), 'POST', '/auth/sign-in/reset', { body });
+
+    const refused = await reset({ choice: 'Kingston', new_password: 'snowday', reset_code: 'guess' });
+    assert.equal(refused.status, 401);
+    assert.equal((await signIn('Kingston', 'snowday')).status, 401);
+
+    const admin = await reset({ choice: 'ADMIN', new_password: 'snowday', reset_code: 'test-branch-reset-code' });
+    assert.equal(admin.status, 403);
+
+    const before = await signIn('Kingston', '1234');
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    const ok = await reset({ choice: 'Kingston', new_password: 'snowday', reset_code: 'test-branch-reset-code' });
+    assert.equal(ok.status, 200, JSON.stringify(ok.body));
+    assert.equal((await signIn('Kingston', 'snowday')).status, 200);
+    assert.equal((await signIn('Kingston', '1234')).status, 401);
+    // Only that branch changed.
+    assert.equal((await signIn('Regina', '1234')).status, 200);
+    // Whoever was already signed in as Kingston is out: the reset is usually why.
+    const stale = await call(h.server(), 'GET', '/auth/me', { token: before.body.data.token });
+    assert.equal(stale.status, 401);
+    assert.ok(await db('audit_log').where({ action: 'branch.sign_in_password_reset' }).first());
+  });
+
+  it('will not reset with the code that was once written into the code, which is public', async () => {
+    const reply = await call(h.server(), 'POST', '/auth/sign-in/reset', {
+      body: { choice: 'Kingston', new_password: 'snowday', reset_code: 'B3NJ3wman50%' },
+    });
+    assert.equal(reply.status, 401);
+  });
+
   it('signs ADMIN in with a corporate account’s own password, and not the branch one', async () => {
     const admin = await signIn('ADMIN', PASSWORD);
     assert.equal(admin.status, 200, JSON.stringify(admin.body));

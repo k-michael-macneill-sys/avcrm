@@ -30,6 +30,8 @@ function goodEnv(): Record<string, string> {
     SQUARE_LOCATION_ID: 'L_REAL',
     SQUARE_ACCESS_TOKEN: 'EAAAl_realtoken',
     BACKUP_OFFSITE_CMD: 'rclone copy "$1" remote:backups',
+    SEED_PASSWORD: 'a-first-admin-password-of-our-own',
+    BRANCH_SIGN_IN_PASSWORD: 'plough-the-north-lot',
   };
 }
 
@@ -71,6 +73,23 @@ describe('the deploy preflight', () => {
     ]) {
       assert.ok(found.includes(setting), `${setting} should have been flagged`);
     }
+  });
+
+  it('refuses secrets that have been published, however long they are', () => {
+    assert.ok(errors({ ...goodEnv(), JWT_SECRET: 'change-me-in-every-environment-at-least-32-chars' }).includes('JWT_SECRET'));
+    assert.ok(errors({ ...goodEnv(), JWT_SECRET: 'Awk8clQl5efZ00FW9OSwOgcki1Z4WjxT' }).includes('JWT_SECRET'));
+    assert.ok(errors({ ...goodEnv(), SECRETS_KEY: '6FNaDXhAOlqrV8ImlRAJG4V9HQmPvcwi' }).includes('SECRETS_KEY'));
+  });
+
+  it('refuses the published seed password and a guessable branch password', () => {
+    assert.ok(errors({ ...goodEnv(), SEED_PASSWORD: 'Password123!' }).includes('SEED_PASSWORD'));
+    assert.ok(errors({ ...goodEnv(), SEED_PASSWORD: '' }).includes('SEED_PASSWORD'));
+    assert.ok(errors({ ...goodEnv(), BRANCH_SIGN_IN_PASSWORD: '1234' }).includes('BRANCH_SIGN_IN_PASSWORD'));
+    // Unset is a decision, not a hole: branch sign-in is simply off.
+    assert.ok(warnings({ ...goodEnv(), BRANCH_SIGN_IN_PASSWORD: '' }).includes('BRANCH_SIGN_IN_PASSWORD'));
+    assert.ok(errors({ ...goodEnv(), BRANCH_RESET_CODE: 'B3NJ3wman50%' }).includes('BRANCH_RESET_CODE'));
+    assert.ok(errors({ ...goodEnv(), BRANCH_RESET_CODE: 'short' }).includes('BRANCH_RESET_CODE'));
+    assert.deepEqual(inspect({ ...goodEnv(), BRANCH_RESET_CODE: 'a-long-random-reset-code-2026' }), []);
   });
 
   it('catches a staging valve left open, which silently writes to nobody', () => {

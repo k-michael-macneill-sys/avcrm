@@ -1,8 +1,8 @@
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import type { AuditActor } from '../services/audit';
 import type { CrewActor } from '../services/workOrders';
-import { loadAuthenticatedUser, verifyToken } from '../services/auth';
-import type { BranchScope } from '../types/auth';
+import { issuedBeforePasswordChange, loadAuthenticatedUser, verifyToken } from '../services/auth';
+import type { BranchScope, JwtPayload } from '../types/auth';
 import type { UserRole } from '../types/models';
 import { badRequest, forbidden, unauthorized } from '../utils/errors';
 
@@ -30,15 +30,15 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction): v
     return;
   }
 
-  let userId: string;
+  let payload: JwtPayload;
   try {
-    userId = verifyToken(token).sub;
+    payload = verifyToken(token);
   } catch {
     next(unauthorized('Invalid or expired token'));
     return;
   }
 
-  loadAuthenticatedUser(userId)
+  loadAuthenticatedUser(payload.sub)
     .then((user) => {
       if (!user) {
         next(unauthorized('User no longer exists'));
@@ -46,6 +46,10 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction): v
       }
       if (!user.is_active) {
         next(forbidden('This account has been deactivated'));
+        return;
+      }
+      if (issuedBeforePasswordChange(payload, user.password_changed_at)) {
+        next(unauthorized('The password on this account has changed. Sign in again.'));
         return;
       }
       req.user = user;
@@ -66,18 +70,18 @@ export function optionalAuth(req: Request, _res: Response, next: NextFunction): 
     return;
   }
 
-  let userId: string;
+  let payload: JwtPayload;
   try {
-    userId = verifyToken(token).sub;
+    payload = verifyToken(token);
   } catch {
     // An unusable token is treated as no token here.
     next();
     return;
   }
 
-  loadAuthenticatedUser(userId)
+  loadAuthenticatedUser(payload.sub)
     .then((user) => {
-      if (user?.is_active) {
+      if (user?.is_active && !issuedBeforePasswordChange(payload, user.password_changed_at)) {
         req.user = user;
       }
       next();
