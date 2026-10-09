@@ -25,6 +25,7 @@ import { OperatorDetail } from '@/routes/OperatorDetail';
 import { Admin } from '@/routes/Admin';
 import { Settings } from '@/routes/Settings';
 import { Weather } from '@/routes/Weather';
+import { WeatherMap } from '@/routes/WeatherMap';
 import { Financials } from '@/routes/Financials';
 import { Bookkeeping } from '@/routes/Bookkeeping';
 import { Projections } from '@/routes/Projections';
@@ -114,6 +115,9 @@ export default function App(): JSX.Element {
                     </CorporateOnly>
                   }
                 />
+
+                {/* Everyone signed in: each sees only their own branch's customers on it. */}
+                <Route path="snow-map" element={<WeatherMap />} />
 
                 <Route
                   path="weather"

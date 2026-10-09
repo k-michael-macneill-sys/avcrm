@@ -233,6 +233,13 @@ const envSchema = z.object({
   WEATHER_CHECK_HOUR: z.coerce.number().int().min(0).max(23).default(18),
   /** The hour the crews start: the forecast window runs up to it. */
   WEATHER_SERVICE_HOUR: z.coerce.number().int().min(1).max(12).default(5),
+  /**
+   * The weather map's radar: RainViewer's frame index, and the one host its
+   * tiles are drawn from (the app's Content-Security-Policy allows exactly
+   * that host). Both keyless; overridable for the suite's stand-in.
+   */
+  WEATHER_RADAR_API_BASE: z.string().trim().url().default('https://api.rainviewer.com'),
+  WEATHER_RADAR_TILE_HOST: z.string().trim().url().default('https://tilecache.rainviewer.com'),
 });
 
 const LOCAL_URL = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/i;
@@ -427,6 +434,8 @@ export const config = {
     thresholdCm: env.WEATHER_SNOWFALL_THRESHOLD_CM,
     checkHour: env.WEATHER_CHECK_HOUR,
     serviceHour: env.WEATHER_SERVICE_HOUR,
+    radarApiBase: env.WEATHER_RADAR_API_BASE.replace(/\/+$/, ''),
+    radarTileHost: env.WEATHER_RADAR_TILE_HOST.replace(/\/+$/, ''),
   },
 } as const;
 
