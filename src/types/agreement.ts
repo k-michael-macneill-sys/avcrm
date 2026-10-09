@@ -57,6 +57,23 @@ export const AGREEMENT_FIELDS: readonly AgreementFieldSpec[] = [
   { name: 'provider_sign_date', label: 'Service provider signature date', kind: 'date' },
 ] as const;
 
+/**
+ * How long the contract runs, chosen with two buttons above the agreement:
+ * the full season (November 1st to March 31st, the years on the PDF) or a
+ * single month (`term_month`, YYYY-MM). Not fields of the PDF itself; a
+ * one-month term is printed into the notes box of the signed copy.
+ */
+export const AGREEMENT_TERMS = ['Full season', 'One month'] as const;
+export type AgreementTerm = (typeof AGREEMENT_TERMS)[number];
+export const ONE_MONTH: AgreementTerm = 'One month';
+
+/** "December 2026" for "2026-12". */
+export function termMonthLabel(month: string): string {
+  const [y, m] = month.split('-').map(Number);
+  if (!y || !m) return month;
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleString('en-CA', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+}
+
 /** Every fillable value: text as a string, a checkbox as a boolean. */
 export type AgreementValues = Record<string, string | boolean>;
 

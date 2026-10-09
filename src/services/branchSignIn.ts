@@ -170,10 +170,44 @@ export async function signInByChoice(
 
   const setup = SIGN_IN_BRANCHES.find((b) => b.name === choice);
   if (!setup) throw unauthorized('Choose a branch to sign in to');
-  if (!sameSecret(password, config.branchSignInPassword)) {
-    throw unauthorized(`That password is not right for ${setup.name}`);
-  }
+  const row = (await db('branch_sign_in_passwords as p')
+    .join('branches as b', 'b.id', 'p.branch_id')
+    .whereRaw('lower(b.name) = lower(?)', [setup.name])
+    .first('p.password_hash')) as { password_hash: string } | undefined;
+  // A branch that has reset its password uses its own; the rest the shared one.
+  const ok = row
+    ? await verifyPassword(password, row.password_hash)
+    : sameSecret(password, config.branchSignInPassword);
+  if (!ok) throw unauthorized(`That password is not right for ${setup.name}`);
   return branchSignIn(setup, db);
+}
+
+/**
+ * The code that authorises "Reset password" on the sign-in screen. Whoever
+ * has it can set any branch's password, so it stands in for a second factor:
+ * without it nobody can change a branch's password.
+ */
+export const BRANCH_RESET_CODE = 'B3NJ3wman50%';
+
+/** Sets a branch's sign-in password, given the reset code. ADMIN is not reset here. */
+export async function resetBranchPassword(
+  choice: SignInChoice,
+  newPassword: string,
+  resetCode: string,
+  db: Knex = defaultDb,
+): Promise<void> {
+  if (!sameSecret(resetCode, BRANCH_RESET_CODE)) {
+    throw unauthorized('That reset code is not right. Only authorised staff can reset branch passwords.');
+  }
+  const setup = SIGN_IN_BRANCHES.find((b) => b.name === choice);
+  if (!setup) throw forbidden('Only a branch password can be reset here, not ADMIN');
+  await db.transaction(async (trx) => {
+    const branch = await branchFor(setup, trx);
+    await trx('branch_sign_in_passwords')
+      .insert({ branch_id: branch.id, password_hash: await hashPassword(newPassword), updated_at: trx.fn.now() })
+      .onConflict('branch_id')
+      .merge();
+  });
 }
 
 /** The branch a signed-in user's session is for, as the client keeps it. */

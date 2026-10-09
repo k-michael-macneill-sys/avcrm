@@ -9,7 +9,12 @@ import {
   type Property,
   type Quote,
 } from '../../../src/types/models';
-import { defaultAgreementYears, type AgreementValues } from '../../../src/types/agreement';
+import {
+  AGREEMENT_TERMS,
+  ONE_MONTH,
+  defaultAgreementYears,
+  type AgreementValues,
+} from '../../../src/types/agreement';
 import { useAuth } from '@/auth/AuthContext';
 import { AgreementPdf, type SignatureField } from '@/components/AgreementPdf';
 import { ErrorNotice, Loading } from '@/components/Misc';
@@ -17,6 +22,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { Section } from '@/components/Section';
 import { SignDialog, type Signature } from '@/components/SignDialog';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import * as api from '@/lib/api';
@@ -262,6 +268,8 @@ function AgreementSignup({
         </div>
       ) : null}
 
+      <ContractPeriod values={values} onChange={edit} invalid={invalid.includes('term_month')} />
+
       <div className="mx-auto w-full max-w-3xl">
         <AgreementPdf
           values={values}
@@ -308,6 +316,65 @@ function AgreementSignup({
         hasSignature={!!(signing && signatures[signing])}
       />
     </>
+  );
+}
+
+/** Next month, as YYYY-MM: the usual one-month sign-up. */
+function nextMonth(today: Date = new Date()): string {
+  const d = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/**
+ * Full season or one month, as two buttons. One month asks which month; the
+ * season keeps the years typed on the agreement itself.
+ */
+function ContractPeriod({
+  values,
+  onChange,
+  invalid,
+}: {
+  values: AgreementValues;
+  onChange: (next: AgreementValues) => void;
+  invalid: boolean;
+}): JSX.Element {
+  const term = values.term === ONE_MONTH ? ONE_MONTH : AGREEMENT_TERMS[0];
+  const month = typeof values.term_month === 'string' ? values.term_month : '';
+  return (
+    <div className="mx-auto mb-4 flex w-full max-w-3xl flex-col gap-2">
+      <Label>Contract period</Label>
+      <div className="grid grid-cols-2 gap-2">
+        {AGREEMENT_TERMS.map((t) => (
+          <Button
+            key={t}
+            type="button"
+            variant={term === t ? 'default' : 'secondary'}
+            aria-pressed={term === t}
+            onClick={() => {
+              if (t === ONE_MONTH) onChange({ ...values, term: ONE_MONTH, term_month: month || nextMonth() });
+              else {
+                const { term: _t, term_month: _m, ...rest } = values;
+                onChange(rest);
+              }
+            }}
+          >
+            {t === ONE_MONTH ? 'One month' : 'Full season (Nov 1 – Mar 31)'}
+          </Button>
+        ))}
+      </div>
+      {term === ONE_MONTH ? (
+        <div className="flex max-w-xs flex-col gap-1.5">
+          <Label htmlFor="term-month">Month of service</Label>
+          <Input
+            id="term-month"
+            type="month"
+            value={month}
+            className={invalid ? 'ring-2 ring-red-500' : undefined}
+            onChange={(e) => onChange({ ...values, term: ONE_MONTH, term_month: e.target.value })}
+          />
+        </div>
+      ) : null}
+    </div>
   );
 }
 

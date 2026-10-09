@@ -4,7 +4,7 @@ import { config } from '../config';
 import { optionalAuth, requireAuth } from '../middleware/auth';
 import { rateLimit, type RateLimitRule } from '../middleware/rateLimit';
 import { createUser, findUserById, login } from '../services/auth';
-import { SIGN_IN_CHOICES, signInByChoice } from '../services/branchSignIn';
+import { resetBranchPassword, SIGN_IN_CHOICES, signInByChoice } from '../services/branchSignIn';
 import { asyncHandler } from '../utils/async';
 import { forbidden, unauthorized } from '../utils/errors';
 import { parse } from '../utils/validate';
@@ -159,6 +159,28 @@ authRouter.post(
   asyncHandler(async (req, res) => {
     const body = parse(signInSchema, req.body);
     res.json({ data: await signInByChoice(body.choice, body.password) });
+  }),
+);
+
+const resetSchema = z.object({
+  choice: z.enum(SIGN_IN_CHOICES, {
+    errorMap: () => ({ message: `Choose one of ${SIGN_IN_CHOICES.join(', ')}` }),
+  }),
+  new_password: z.string().min(4, 'The new password needs at least 4 characters').max(200),
+  reset_code: z.string().min(1, 'Enter the reset code').max(200),
+});
+
+/**
+ * "Reset password" on the sign-in screen: a branch, a new password and the
+ * reset code. Rate-limited like signing in, so the code cannot be guessed.
+ */
+authRouter.post(
+  '/sign-in/reset',
+  signInLimiter,
+  asyncHandler(async (req, res) => {
+    const body = parse(resetSchema, req.body);
+    await resetBranchPassword(body.choice, body.new_password, body.reset_code);
+    res.json({ data: { reset: true } });
   }),
 );
 

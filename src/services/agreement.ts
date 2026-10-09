@@ -7,6 +7,8 @@ import {
   AGREEMENT_FIELDS,
   EDITABLE_AGREEMENT_FIELDS,
   agreementDate,
+  ONE_MONTH,
+  termMonthLabel,
   type AgreementValues,
 } from '../types/agreement';
 import type { Customer, Property, Quote } from '../types/models';
@@ -40,6 +42,16 @@ function templateBytes(): Buffer {
 
 const text = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 const yearOk = (v: string): boolean => /^\d{2}$/.test(v);
+const monthOk = (v: string): boolean => /^\d{4}-(0[1-9]|1[0-2])$/.test(v);
+const oneMonth = (values: AgreementValues): boolean => values.term === ONE_MONTH;
+
+/** The first and last day of a YYYY-MM month. */
+function monthBounds(month: string): { start: string; end: string } {
+  const [y, m] = month.split('-').map(Number) as [number, number];
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return { start: `${month}-01`, end: `${month}-${String(last).padStart(2, '0')}` };
+}
+
 const priceOf = (v: string): number | null => {
   const n = Number(v.replace(/[$,\s]/g, ''));
   return v !== '' && Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null;
@@ -56,6 +68,10 @@ export function cleanAgreement(raw: unknown): AgreementValues {
     const value = input[field.name];
     if (field.kind === 'check') out[field.name] = value === true;
     else out[field.name] = text(value).slice(0, field.kind === 'notes' ? 2000 : 200);
+  }
+  if (input.term === ONE_MONTH) {
+    out.term = ONE_MONTH;
+    out.term_month = text(input.term_month).slice(0, 7);
   }
   return out;
 }
@@ -81,10 +97,14 @@ export function assertAgreementComplete(values: AgreementValues): void {
   if (v('customer_email') && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v('customer_email'))) {
     need('customer_email', 'That email address does not look right');
   }
-  if (!yearOk(v('start_year'))) need('start_year', 'Enter the start year as two digits, e.g. 26');
-  if (!yearOk(v('end_year'))) need('end_year', 'Enter the end year as two digits, e.g. 27');
-  if (yearOk(v('start_year')) && yearOk(v('end_year')) && Number(v('end_year')) <= Number(v('start_year'))) {
-    need('end_year', 'The season has to end after it starts');
+  if (oneMonth(values)) {
+    if (!monthOk(v('term_month'))) need('term_month', 'Choose the month of service');
+  } else {
+    if (!yearOk(v('start_year'))) need('start_year', 'Enter the start year as two digits, e.g. 26');
+    if (!yearOk(v('end_year'))) need('end_year', 'Enter the end year as two digits, e.g. 27');
+    if (yearOk(v('start_year')) && yearOk(v('end_year')) && Number(v('end_year')) <= Number(v('start_year'))) {
+      need('end_year', 'The season has to end after it starts');
+    }
   }
   const pkg = v('package');
   if (pkg !== 'Basic' && pkg !== 'Premium') need('package', 'Choose the Basic or Premium package');
@@ -125,7 +145,10 @@ export interface AgreementDeal {
   };
 }
 
-/** What the CRM keeps from a completed agreement. The agreement is monthly, November to March. */
+/**
+ * What the CRM keeps from a completed agreement. The agreement is monthly,
+ * November to March, or a single month when that term was chosen.
+ */
 export function dealFromAgreement(values: AgreementValues): AgreementDeal {
   assertAgreementComplete(values);
   const v = (name: string) => text(values[name]);
@@ -133,6 +156,9 @@ export function dealFromAgreement(values: AgreementValues): AgreementDeal {
   const premium = v('package') === 'Premium';
   const price = priceOf(v(premium ? 'price_premium' : 'price_basic'))!;
   const email = v('customer_email') || null;
+  const season = oneMonth(values)
+    ? monthBounds(v('term_month'))
+    : { start: `20${v('start_year')}-11-01`, end: `20${v('end_year')}-03-31` };
 
   return {
     customer: {
@@ -154,8 +180,8 @@ export function dealFromAgreement(values: AgreementValues): AgreementDeal {
       initial_price: price,
       discounted_price: price,
       recurring_price: price,
-      season_start: `20${v('start_year')}-11-01`,
-      season_end: `20${v('end_year')}-03-31`,
+      season_start: season.start,
+      season_end: season.end,
       package: premium ? 'premium' : 'basic',
       addons: AGREEMENT_FIELDS.filter((f) => f.name.startsWith('addon_') && values[f.name] === true).map((f) =>
         f.name.slice('addon_'.length),
@@ -206,7 +232,22 @@ export interface AgreementSignatures {
 }
 
 /** The agreement filled in, signatures on their lines, and flattened so it cannot be edited after. */
-export async function renderAgreement(values: AgreementValues, signatures: AgreementSignatures = {}): Promise<Buffer> {
+export async function renderAgreement(given: AgreementValues, signatures: AgreementSignatures = {}): Promise<Buffer> {
+  // A one-month term has no line on the PDF: the season years are left blank
+  // and the term is printed at the top of the notes instead.
+  const values: AgreementValues = oneMonth(given)
+    ? {
+        ...given,
+        start_year: '',
+        end_year: '',
+        customer_notes: [
+          `ONE MONTH OF SERVICE ONLY: ${termMonthLabel(text(given.term_month))}.`,
+          text(given.customer_notes),
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      }
+    : given;
   const doc = await PDFDocument.load(templateBytes());
   const form = doc.getForm();
   const when = agreementDate(signatures.signedAt ?? new Date());
