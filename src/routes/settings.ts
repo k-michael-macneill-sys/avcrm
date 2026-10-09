@@ -4,7 +4,7 @@ import { requireAuth, requireCorporate, resolveActor } from '../middleware/auth'
 import { rateLimit } from '../middleware/rateLimit';
 import { recordAudit } from '../services/audit';
 import { confirmPassword } from '../services/auth';
-import { envGateway, squareGateway } from '../services/gateway';
+import { envGateway, squareFromEnvironment, squareGateway } from '../services/gateway';
 import {
   PAYMENTS_KEY,
   publicView,
@@ -18,7 +18,7 @@ import { SMS_PROVIDERS, type ProviderField } from '../services/smsProviders';
 import { SendFailure } from '../services/transport';
 import { config } from '../config';
 import { asyncHandler } from '../utils/async';
-import { ApiError, badRequest, unauthorized } from '../utils/errors';
+import { ApiError, badRequest, conflict, unauthorized } from '../utils/errors';
 import { parse } from '../utils/validate';
 
 /**
@@ -176,6 +176,8 @@ settingsRouter.get(
         webhook_url: `${config.messaging.appBaseUrl}/webhooks/square`,
         currency: config.payments.currency.toUpperCase(),
         env_gateway: envGateway.name,
+        // Square from Render's environment: the only processor, not editable here.
+        managed_by_environment: squareFromEnvironment(),
         // Which SQUARE_* variables the server process can see — never their
         // values — so a missing one on Render is visible from here.
         env_square: {
@@ -219,6 +221,11 @@ settingsRouter.put(
   asyncHandler(async (req, res) => {
     const { current_password, ...body } = parse(paymentsSaveSchema, req.body);
     if (!req.user) throw unauthorized();
+    if (squareFromEnvironment()) {
+      throw conflict(
+        'Card payments are set in the server environment (SQUARE_* on Render). Change them there.',
+      );
+    }
     await confirmPassword(req.user.id, current_password);
 
     const before = publicView(PAYMENTS_KEY, await readIntegration(PAYMENTS_KEY));

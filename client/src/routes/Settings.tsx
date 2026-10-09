@@ -58,6 +58,8 @@ interface PaymentSettings extends IntegrationSettings {
   webhook_url: string;
   currency: string;
   env_gateway: string;
+  /** Square comes from Render's environment, and cannot be changed here. */
+  managed_by_environment: boolean;
   env_square: {
     environment: string;
     access_token: boolean;
@@ -90,51 +92,88 @@ export function Settings(): JSX.Element {
     <>
       <PageHeader title="Settings" subtitle="Outside services this company uses" />
 
-      <IntegrationSection
-        path="/settings/payments"
-        confirmWithPassword
-        title="Card payments"
-        enableLabel="Take card payments through this processor"
-        statusOn="Taking payments"
-        statusOff="Not taking payments"
-        activeFromServer={
-          payments.env_gateway === 'square'
-            ? 'Taking payments through Square — set in the server environment (Render)'
-            : undefined
-        }
-        noneText={
-          payments.env_gateway === 'square'
-            ? 'Square is configured on the server and handles card payments. Connect it here instead to override that for this company.'
-            : 'No processor connected. Payments can still be recorded by hand, and nothing is charged automatically.'
-        }
-        providers={paymentProviders}
-        current={payments}
-        onSaved={reload}
-      >
-        <FieldList>
-          <Field label="Webhook URL">
-            <code className="break-all text-xs">{payments.webhook_url}</code>
-          </Field>
-          <Field label="Billing currency">{payments.currency}</Field>
-          <Field label="Server (Render) Square settings">
-            <span className="text-xs">
-              SQUARE_ENVIRONMENT: {payments.env_square.environment} ·{' '}
-              {(
-                [
-                  ['SQUARE_ACCESS_TOKEN', payments.env_square.access_token],
-                  ['SQUARE_APPLICATION_ID', payments.env_square.application_id],
-                  ['SQUARE_LOCATION_ID', payments.env_square.location_id],
-                  ['SQUARE_WEBHOOK_SIGNATURE_KEY', payments.env_square.webhook_signature_key],
-                ] as const
-              ).map(([name, set]) => (
-                <span key={name} className={set ? 'text-good' : 'text-critical'}>
-                  {name}: {set ? 'set' : 'missing'}{' '}
+      {payments.managed_by_environment ? (
+        <Section title="Card payments" className="mb-4">
+          <FieldList>
+            <Field label="Status">Taking payments through Square — set in the server environment (Render)</Field>
+          </FieldList>
+          <p className="mt-3 max-w-[60ch] text-sm text-muted-foreground">
+            The Square credentials live only in Render&apos;s environment variables, so they cannot be changed or
+            replaced from this screen. To change them, edit the SQUARE_* variables on the Render service and redeploy.
+          </p>
+          <div className="mt-4">
+            <FieldList>
+              <Field label="Webhook URL">
+                <code className="break-all text-xs">{payments.webhook_url}</code>
+              </Field>
+              <Field label="Billing currency">{payments.currency}</Field>
+              <Field label="Server (Render) Square settings">
+                <span className="text-xs">
+                  SQUARE_ENVIRONMENT: {payments.env_square.environment} ·{' '}
+                  {(
+                    [
+                      ['SQUARE_ACCESS_TOKEN', payments.env_square.access_token],
+                      ['SQUARE_APPLICATION_ID', payments.env_square.application_id],
+                      ['SQUARE_LOCATION_ID', payments.env_square.location_id],
+                      ['SQUARE_WEBHOOK_SIGNATURE_KEY', payments.env_square.webhook_signature_key],
+                    ] as const
+                  ).map(([name, set]) => (
+                    <span key={name} className={set ? 'text-good' : 'text-critical'}>
+                      {name}: {set ? 'set' : 'missing'}{' '}
+                    </span>
+                  ))}
                 </span>
-              ))}
-            </span>
-          </Field>
-        </FieldList>
-      </IntegrationSection>
+              </Field>
+            </FieldList>
+          </div>
+        </Section>
+      ) : (
+        <IntegrationSection
+          path="/settings/payments"
+          confirmWithPassword
+          title="Card payments"
+          enableLabel="Take card payments through this processor"
+          statusOn="Taking payments"
+          statusOff="Not taking payments"
+          activeFromServer={
+            payments.env_gateway === 'square'
+              ? 'Taking payments through Square — set in the server environment (Render)'
+              : undefined
+          }
+          noneText={
+            payments.env_gateway === 'square'
+              ? 'Square is configured on the server and handles card payments. Connect it here instead to override that for this company.'
+              : 'No processor connected. Payments can still be recorded by hand, and nothing is charged automatically.'
+          }
+          providers={paymentProviders}
+          current={payments}
+          onSaved={reload}
+        >
+          <FieldList>
+            <Field label="Webhook URL">
+              <code className="break-all text-xs">{payments.webhook_url}</code>
+            </Field>
+            <Field label="Billing currency">{payments.currency}</Field>
+            <Field label="Server (Render) Square settings">
+              <span className="text-xs">
+                SQUARE_ENVIRONMENT: {payments.env_square.environment} ·{' '}
+                {(
+                  [
+                    ['SQUARE_ACCESS_TOKEN', payments.env_square.access_token],
+                    ['SQUARE_APPLICATION_ID', payments.env_square.application_id],
+                    ['SQUARE_LOCATION_ID', payments.env_square.location_id],
+                    ['SQUARE_WEBHOOK_SIGNATURE_KEY', payments.env_square.webhook_signature_key],
+                  ] as const
+                ).map(([name, set]) => (
+                  <span key={name} className={set ? 'text-good' : 'text-critical'}>
+                    {name}: {set ? 'set' : 'missing'}{' '}
+                  </span>
+                ))}
+              </span>
+            </Field>
+          </FieldList>
+        </IntegrationSection>
+      )}
       <PaymentTestSection />
 
       <IntegrationSection
@@ -288,9 +327,9 @@ function IntegrationSection({
 
         {current.secrets_unreadable ? (
           <div className="mt-4">
-            <ErrorNotice
-              message={`The saved ${current.provider === 'square' ? 'Square' : 'provider'} credentials can no longer be read, because the server's encryption key (JWT_SECRET or SECRETS_KEY) changed after they were saved. Until they are typed in again and saved, this is switched off. Enter every credential below again.`}
-            />
+              <ErrorNotice
+                message={`The saved ${current.provider === 'square' ? 'Square' : 'provider'} credentials can no longer be read, because the server's encryption key (JWT_SECRET or SECRETS_KEY) changed after they were saved. Until they are typed in again and saved, this is switched off. Enter every credential below again.`}
+              />
           </div>
         ) : null}
 
@@ -384,7 +423,7 @@ function PaymentTestSection(): JSX.Element {
     <Section title="Check the connection" className="mb-4">
       <p className="mb-3 max-w-[60ch] text-xs text-muted-foreground">
         Asks Square about the location using the access token payments actually go through —
-        the one switched on here, or else the one set on the server. No money moves.
+        the one set on the server (Render) if there is one, or else the one saved here. No money moves.
       </p>
       <Button type="button" variant="secondary" disabled={pending} onClick={check}>
         Check connection

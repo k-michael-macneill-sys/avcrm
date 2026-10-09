@@ -472,7 +472,7 @@ A suspension is only lifted by corporate, never by the automatic refresh.
 | GET | `/portal/cards/:token` | **public** | The card link, with the autopay agreement to sign |
 | POST | `/portal/cards/:token` | **public** | Signature plus card nonce; saves both or neither |
 | GET | `/settings/payments` | corporate | Current processor; credentials never returned |
-| PUT | `/settings/payments` | corporate | Connects Square, or switches it off |
+| PUT | `/settings/payments` | corporate | Connects Square, or switches it off; 409 while `SQUARE_ACCESS_TOKEN` is set |
 | GET | `/settings/payments/providers` | corporate | The catalogue the screen renders itself from |
 | POST | `/settings/payments/test` | corporate | Checks the token and location with Square; moves no money |
 | POST | `/uploads` | any | Asks for somewhere to put a file |
@@ -1137,11 +1137,14 @@ ways:
 
 - **From the environment** — set `SQUARE_ACCESS_TOKEN` (and the fields below
   it) and this install charges through Square with nothing to click through
-  first. This is what a single-branch install uses by default.
-- **From Settings** — a corporate user connects it at **Settings → Card
-  payments**, the same way an SMS provider is. Once switched on there it
-  takes precedence over the environment, which is how a multi-branch account
-  overrides what one branch's `.env` sets as the default.
+  first. When it is set, it is the only processor: **Settings → Card
+  payments** shows it read-only, `PUT /settings/payments` answers 409, and a
+  row already saved there is ignored. Credentials that live only on Render
+  cannot be swapped from inside the app, by a typo or by a stolen session.
+- **From Settings** — with no `SQUARE_ACCESS_TOKEN`, a corporate user
+  connects it at **Settings → Card payments**, the same way an SMS provider
+  is. The token is stored encrypted with `SECRETS_KEY` (or a key derived from
+  `JWT_SECRET`), so changing those keys means entering it again.
 
 With neither set, `POST /invoices/:id/payments` records what a processor, a
 cheque or an e-transfer says happened, same as it always could — nothing
