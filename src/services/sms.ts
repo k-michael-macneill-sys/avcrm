@@ -19,9 +19,10 @@ import { SendFailure, type SendResult } from './transport';
  * that configuration and makes the call. Changing provider is a form, not a
  * release.
  *
- * Nothing is sent until an administrator switches it on. Until then this logs
- * what it would have sent, which is exactly what the previous mock did — the
- * difference is that the mock can now be replaced without touching code.
+ * Nothing is sent until an administrator switches a provider on, or Twilio
+ * is configured in the environment (TWILIO_*). A provider switched on in
+ * Settings wins over the environment. With neither, this logs what it would
+ * have sent, which is exactly what the previous mock did.
  */
 
 const TIMEOUT_MS = 15_000;
@@ -123,13 +124,23 @@ export async function deliverSms(
   options: DeliverOptions = {},
 ): Promise<SendResult> {
   const row = await readIntegration(SMS_KEY);
-  const provider: ProviderDefinition | null = row ? smsProvider(row.provider) : null;
-  const live = Boolean(row && provider && (row.is_enabled || options.ignoreEnabled));
+  const saved: ProviderDefinition | null = row ? smsProvider(row.provider) : null;
+  const live = Boolean(row && saved && (row.is_enabled || options.ignoreEnabled));
+  const fromEnv = !live && config.sms.twilio ? smsProvider('twilio') : null;
 
-  if (!row || !provider || !live) {
+  let provider: ProviderDefinition;
+  let values: Record<string, string>;
+  if (live && row && saved) {
+    provider = saved;
+    values = resolveValues(row);
+  } else if (fromEnv && config.sms.twilio) {
+    provider = fromEnv;
+    values = { ...config.sms.twilio };
+  } else {
     if (options.ignoreEnabled) {
       throw badRequest(
-        'No SMS provider is configured. Pick one and save it before sending a test.',
+        'No SMS provider is configured. Pick one and save it, or set TWILIO_ACCOUNT_SID, '
+          + 'TWILIO_AUTH_TOKEN and TWILIO_FROM_NUMBER, before sending a test.',
       );
     }
     // The old mock's behaviour, kept deliberately: an install with no SMS
@@ -142,7 +153,6 @@ export async function deliverSms(
     return { provider_message_id: `unsent-sms-${randomUUID()}` };
   }
 
-  const values = resolveValues(row);
   const target = recipientFor(to, body);
   const message = { to: target.to, from: values.from ?? '', body: target.body };
   const request = provider.build(values, message);

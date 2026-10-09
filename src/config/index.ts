@@ -79,7 +79,8 @@ const envSchema = z.object({
   // and the test suite never need a mail server; `smtp` is a real transport,
   // and every provider worth using (Postmark, SES, Mailgun, SendGrid) speaks
   // it, so one driver covers all of them.
-  MAIL_DRIVER: z.enum(['log', 'smtp']).default('log'),
+  // Unset means `log`, or `smtp` when SENDGRID_API_KEY is set.
+  MAIL_DRIVER: blankIsUnset(z.enum(['log', 'smtp'])),
   MAIL_FROM: z.string().trim().min(3).optional(),
   MAIL_REPLY_TO: z.string().trim().min(3).optional(),
   /**
@@ -101,6 +102,24 @@ const envSchema = z.object({
    * unset anywhere a real message matters.
    */
   SMS_API_BASE: z.string().trim().url().optional(),
+
+  /**
+   * Twilio SendGrid, the shortcut: an API key with Mail Send permission is
+   * all it takes. It stands in for SMTP_HOST/USER/PASSWORD (smtp.sendgrid.net,
+   * user "apikey") and switches MAIL_DRIVER to smtp unless that is set.
+   */
+  SENDGRID_API_KEY: blankIsUnset(z.string().trim().min(1)),
+
+  /**
+   * Texting through Twilio from the environment, the way SQUARE_* gives a
+   * processor: no admin needed to click through Settings first. An SMS
+   * provider switched on at Settings -> SMS takes over from these.
+   * TWILIO_FROM_NUMBER is a number on the account (+16135550123) or a
+   * Messaging Service SID (MG…).
+   */
+  TWILIO_ACCOUNT_SID: blankIsUnset(z.string().trim().min(1)),
+  TWILIO_AUTH_TOKEN: blankIsUnset(z.string().trim().min(1)),
+  TWILIO_FROM_NUMBER: blankIsUnset(z.string().trim().min(1)),
 
   SMTP_HOST: z.string().trim().min(1).optional(),
   SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
@@ -201,19 +220,35 @@ const envSchema = z.object({
   WEATHER_SERVICE_HOUR: z.coerce.number().int().min(1).max(12).default(5),
 });
 
+function mailDriverOf(env: { MAIL_DRIVER?: 'log' | 'smtp'; SENDGRID_API_KEY?: string }): 'log' | 'smtp' {
+  return env.MAIL_DRIVER ?? (env.SENDGRID_API_KEY ? 'smtp' : 'log');
+}
+
 /**
  * A real transport needs somewhere to send from and somewhere to send
  * through. Failing at startup beats discovering it when the first invoice
  * goes out.
  */
 const checkedSchema = envSchema.superRefine((env, ctx) => {
-  if (env.MAIL_DRIVER !== 'smtp') return;
+  // Half a Twilio account sends nothing and says nothing; better to hear now.
+  const twilio = ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM_NUMBER'] as const;
+  if (twilio.some((name) => env[name])) {
+    for (const name of twilio.filter((n) => !env[n])) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [name],
+        message: `is required with the other TWILIO_* settings (${twilio.join(', ')})`,
+      });
+    }
+  }
 
-  if (!env.SMTP_HOST) {
+  if (mailDriverOf(env) !== 'smtp') return;
+
+  if (!env.SMTP_HOST && !env.SENDGRID_API_KEY) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['SMTP_HOST'],
-      message: 'is required when MAIL_DRIVER=smtp',
+      message: 'is required when MAIL_DRIVER=smtp, unless SENDGRID_API_KEY is set',
     });
   }
   if (!env.MAIL_FROM) {
@@ -285,19 +320,38 @@ export const config = {
     },
   },
   mail: {
-    driver: env.MAIL_DRIVER,
+    driver: mailDriverOf(env),
     from: env.MAIL_FROM ?? 'avcrm@localhost',
     replyTo: env.MAIL_REPLY_TO ?? null,
     redirectTo: env.MAIL_REDIRECT_TO ?? null,
-    smtp: {
-      host: env.SMTP_HOST ?? 'localhost',
-      port: env.SMTP_PORT,
-      secure: env.SMTP_SECURE,
-      user: env.SMTP_USER ?? null,
-      password: env.SMTP_PASSWORD ?? null,
-    },
+    // SendGrid's SMTP relay takes the literal user "apikey" and the key as
+    // the password. An explicit SMTP_HOST still wins.
+    smtp:
+      env.SENDGRID_API_KEY && !env.SMTP_HOST
+        ? {
+            host: 'smtp.sendgrid.net',
+            port: env.SMTP_PORT,
+            secure: env.SMTP_SECURE,
+            user: 'apikey',
+            password: env.SENDGRID_API_KEY,
+          }
+        : {
+            host: env.SMTP_HOST ?? 'localhost',
+            port: env.SMTP_PORT,
+            secure: env.SMTP_SECURE,
+            user: env.SMTP_USER ?? null,
+            password: env.SMTP_PASSWORD ?? null,
+          },
   },
   sms: {
+    twilio:
+      env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_FROM_NUMBER
+        ? {
+            account_sid: env.TWILIO_ACCOUNT_SID,
+            auth_token: env.TWILIO_AUTH_TOKEN,
+            from: env.TWILIO_FROM_NUMBER,
+          }
+        : null,
     redirectTo: env.SMS_REDIRECT_TO ?? null,
     apiBase: env.SMS_API_BASE ?? null,
   },

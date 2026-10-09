@@ -13,7 +13,7 @@ import { offsetOf, paginated, type Paginated, type Pagination } from '../utils/p
 import { isPgError, PG_UNIQUE_VIOLATION } from '../utils/pg';
 import { applyBranchScope } from '../utils/scope';
 import { logger } from '../utils/logger';
-import { enqueueMessage } from './messages';
+import { contactFor, enqueueMessage } from './messages';
 import { assertOperatorAssignable } from './operators';
 
 /**
@@ -493,6 +493,8 @@ interface CompletionRow {
   city: string;
   customer_first_name: string;
   customer_email: string | null;
+  customer_phone: string | null;
+  preferred_contact: string | null;
   branch_name: string;
   manager_email: string | null;
   operator_first_name: string | null;
@@ -528,6 +530,8 @@ export async function notifyServiceComplete(
       'properties.city',
       'customers.first_name as customer_first_name',
       'customers.email as customer_email',
+      'customers.phone as customer_phone',
+      'customers.preferred_contact',
       'branches.name as branch_name',
       'manager.email as manager_email',
       'operator.first_name as operator_first_name',
@@ -563,20 +567,17 @@ export async function notifyServiceComplete(
     context,
   };
 
-  if (row.customer_email) {
-    await enqueueMessage(
-      {
-        ...addressed,
-        template_code: 'service_complete',
-        channel: 'email',
-        recipient: row.customer_email,
-      },
-      db,
-    );
+  const contact = contactFor({
+    preferred_contact: row.preferred_contact,
+    email: row.customer_email,
+    phone: row.customer_phone,
+  });
+  if (contact) {
+    await enqueueMessage({ ...addressed, template_code: 'service_complete', ...contact }, db);
   } else {
     logger.info(
       { work_order_id: workOrderId },
-      'No customer email on file; completion notice not queued for the customer',
+      'No customer email or phone on file; completion notice not queued for the customer',
     );
   }
 

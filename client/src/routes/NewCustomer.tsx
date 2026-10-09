@@ -10,9 +10,8 @@ import {
   type Quote,
 } from '../../../src/types/models';
 import {
-  AGREEMENT_TERMS,
-  ONE_MONTH,
   defaultAgreementYears,
+  termTypeOf,
   type AgreementValues,
 } from '../../../src/types/agreement';
 import { useAuth } from '@/auth/AuthContext';
@@ -110,6 +109,7 @@ function startingValues(
     customer_city: city,
     customer_province: prefill.get('province') ?? branch?.province ?? '',
     customer_postal: prefill.get('postal_code') ?? '',
+    term_type: 'Seasonal',
     ...defaultAgreementYears(),
   };
 }
@@ -268,7 +268,11 @@ function AgreementSignup({
         </div>
       ) : null}
 
-      <ContractPeriod values={values} onChange={edit} invalid={invalid.includes('term_month')} />
+      <ContractPeriod
+        values={values}
+        onChange={edit}
+        invalid={invalid.some((f) => f === 'term_start' || f === 'term_end')}
+      />
 
       <div className="mx-auto w-full max-w-3xl">
         <AgreementPdf
@@ -325,9 +329,18 @@ function nextMonth(today: Date = new Date()): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
+/** The first and last day of a YYYY-MM month, as the exact-dates term wants them. */
+function monthTerm(month: string): { term_start: string; term_end: string } {
+  const [y, m] = month.split('-').map(Number) as [number, number];
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return { term_start: `${month}-01`, term_end: `${month}-${String(last).padStart(2, '0')}` };
+}
+
 /**
- * Full season or one month, as two buttons. One month asks which month; the
- * season keeps the years typed on the agreement itself.
+ * The contract period as two buttons: the full season, or one month. One
+ * month is an exact-dates term from the 1st to the last day of the month
+ * picked, so the agreement prints those dates; other dates can still be set
+ * by tapping the term on the agreement.
  */
 function ContractPeriod({
   values,
@@ -338,31 +351,33 @@ function ContractPeriod({
   onChange: (next: AgreementValues) => void;
   invalid: boolean;
 }): JSX.Element {
-  const term = values.term === ONE_MONTH ? ONE_MONTH : AGREEMENT_TERMS[0];
-  const month = typeof values.term_month === 'string' ? values.term_month : '';
+  const exact = termTypeOf(values) === 'Exact dates';
+  const start = typeof values.term_start === 'string' ? values.term_start : '';
+  const month = /^\d{4}-\d{2}-01$/.test(start) ? start.slice(0, 7) : '';
+  const pick = (m: string): void => onChange({ ...values, term_type: 'Exact dates', ...monthTerm(m) });
+
   return (
     <div className="mx-auto mb-4 flex w-full max-w-3xl flex-col gap-2">
       <Label>Contract period</Label>
       <div className="grid grid-cols-2 gap-2">
-        {AGREEMENT_TERMS.map((t) => (
-          <Button
-            key={t}
-            type="button"
-            variant={term === t ? 'default' : 'secondary'}
-            aria-pressed={term === t}
-            onClick={() => {
-              if (t === ONE_MONTH) onChange({ ...values, term: ONE_MONTH, term_month: month || nextMonth() });
-              else {
-                const { term: _t, term_month: _m, ...rest } = values;
-                onChange(rest);
-              }
-            }}
-          >
-            {t === ONE_MONTH ? 'One month' : 'Full season (Nov 1 – Mar 31)'}
-          </Button>
-        ))}
+        <Button
+          type="button"
+          variant={exact ? 'secondary' : 'default'}
+          aria-pressed={!exact}
+          onClick={() => onChange({ ...values, term_type: 'Seasonal' })}
+        >
+          Full season (Nov 1 – Mar 31)
+        </Button>
+        <Button
+          type="button"
+          variant={exact ? 'default' : 'secondary'}
+          aria-pressed={exact}
+          onClick={() => pick(month || nextMonth())}
+        >
+          One month
+        </Button>
       </div>
-      {term === ONE_MONTH ? (
+      {exact ? (
         <div className="flex max-w-xs flex-col gap-1.5">
           <Label htmlFor="term-month">Month of service</Label>
           <Input
@@ -370,7 +385,7 @@ function ContractPeriod({
             type="month"
             value={month}
             className={invalid ? 'ring-2 ring-red-500' : undefined}
-            onChange={(e) => onChange({ ...values, term: ONE_MONTH, term_month: e.target.value })}
+            onChange={(e) => e.target.value && pick(e.target.value)}
           />
         </div>
       ) : null}

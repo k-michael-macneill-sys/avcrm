@@ -2,8 +2,12 @@ import * as React from 'react';
 import { PenLine } from 'lucide-react';
 import {
   AGREEMENT_FIELDS,
+  TERM_LINE,
   agreementDate,
+  agreementRewrites,
+  termTypeOf,
   type AgreementFieldSpec,
+  type AgreementRewrite,
   type AgreementValues,
 } from '../../../src/types/agreement';
 import { Loading, ErrorNotice } from '@/components/Misc';
@@ -60,6 +64,7 @@ type Step = { kind: 'field'; name: string } | { kind: 'group'; title: string; na
 const STEPS: Step[] = (() => {
   const steps: Step[] = [];
   for (const f of TYPED) {
+    if (f.name === 'term_start') steps.push({ kind: 'group', title: 'Term of service', names: ['term_type'], single: true });
     steps.push({ kind: 'field', name: f.name });
     if (f.name === 'customer_phone') {
       steps.push({ kind: 'group', title: 'Phone type', names: ['phone_type_cell', 'phone_type_home'] });
@@ -76,6 +81,19 @@ const STEPS: Step[] = (() => {
   return steps;
 })();
 const NONE: string[] = [];
+
+/** How each single choice reads in the walk-through. */
+const CHOICE_LABELS: Record<string, string> = {
+  Basic: 'Basic package',
+  Premium: 'Premium package',
+  Seasonal: 'Seasonal — November 1st to March 31st',
+  'Exact dates': 'Exact dates — a month or two, or any start and end',
+};
+
+/** The fields that only apply to the other kind of term, which Next skips. */
+const SEASON_ONLY = ['start_year', 'end_year'];
+const EXACT_ONLY = ['term_start', 'term_end'];
+const TERM_FIELDS = ['term_type', ...EXACT_ONLY];
 
 async function renderTemplate(): Promise<Rendered> {
   const pdfjs = await import('pdfjs-dist');
@@ -174,6 +192,8 @@ export function AgreementPdf({
 
   const set = (name: string, value: string | boolean): void => onChange?.({ ...values, [name]: value });
   const date = agreementDate(signedAt ?? new Date());
+  const rewrites = agreementRewrites(values);
+  const termBad = invalid.some((name) => TERM_FIELDS.includes(name));
 
   return (
     <div className="flex flex-col gap-4">
@@ -184,6 +204,16 @@ export function AgreementPdf({
           style={{ aspectRatio: `${page.width} / ${page.height}` }}
         >
           <img src={page.image} alt={`Agreement page ${index + 1}`} className="absolute inset-0 size-full select-none" draggable={false} />
+          {/* Seasonal: the term sentence, under its two year boxes, opens the choice of term. */}
+          {onChange && index === TERM_LINE.page && rewrites.length === 0 ? (
+            <button
+              type="button"
+              aria-label="Term of service"
+              onClick={() => setEditing('term_type')}
+              className="absolute rounded-sm hover:bg-sky-200/30"
+              style={lineBox(TERM_LINE, page)}
+            />
+          ) : null}
           {rendered.widgets
             .filter((w) => w.page === index)
             .map((w) => (
@@ -214,6 +244,18 @@ export function AgreementPdf({
                 onSign={() => onSign?.(w.name as SignatureField)}
               />
             ))}
+          {rewrites
+            .filter((line) => line.page === index)
+            .map((line) => (
+              <Rewrite
+                key={line.top}
+                line={line}
+                page={page}
+                editable={!!onChange && !!line.term}
+                bad={!!line.term && termBad}
+                onEdit={() => setEditing('term_type')}
+              />
+            ))}
         </div>
       ))}
 
@@ -227,6 +269,60 @@ export function AgreementPdf({
         />
       ) : null}
     </div>
+  );
+}
+
+function lineBox(
+  line: Pick<AgreementRewrite, 'left' | 'top' | 'right' | 'bottom'>,
+  page: { width: number; height: number },
+): React.CSSProperties {
+  return {
+    left: `${(line.left / page.width) * 100}%`,
+    top: `${(line.top / page.height) * 100}%`,
+    width: `${((line.right - line.left) / page.width) * 100}%`,
+    height: `${((line.bottom - line.top) / page.height) * 100}%`,
+  };
+}
+
+/**
+ * A printed line reworded for an exact-dates term, drawn over the original
+ * the way the signed copy prints it. The dates line opens its editor.
+ */
+function Rewrite({
+  line,
+  page,
+  editable,
+  bad,
+  onEdit,
+}: {
+  line: AgreementRewrite;
+  page: { width: number; height: number };
+  editable: boolean;
+  bad: boolean;
+  onEdit: () => void;
+}): JSX.Element {
+  const type = (pt: number): string => `${(pt / page.width) * 100}cqw`;
+  return (
+    <button
+      type="button"
+      aria-label={line.term ? 'Term of service' : undefined}
+      disabled={!editable}
+      onClick={onEdit}
+      className={cn(
+        'absolute flex items-end overflow-hidden whitespace-nowrap bg-white text-left leading-none text-black',
+        editable && 'ring-1 ring-sky-400/60 hover:ring-sky-500',
+        bad && 'ring-2 ring-red-500',
+      )}
+      style={{
+        ...lineBox(line, page),
+        fontFamily: 'Helvetica, Arial, sans-serif',
+        fontSize: type(line.size),
+        paddingLeft: type(0.8),
+        paddingBottom: type(Math.max(0, line.bottom - line.baseline - line.size * 0.21)),
+      }}
+    >
+      {line.text}
+    </button>
   );
 }
 
@@ -376,10 +472,11 @@ function FieldEditor({
   onMove: (name: string | null) => void;
   locked: string[];
 }): JSX.Element {
-  const steps = React.useMemo(
-    () => STEPS.filter((s) => !(s.kind === 'field' && locked.includes(s.name))),
-    [locked],
-  );
+  const exact = termTypeOf(values) === 'Exact dates';
+  const steps = React.useMemo(() => {
+    const skipped = [...locked, ...(exact ? SEASON_ONLY : EXACT_ONLY)];
+    return STEPS.filter((s) => !(s.kind === 'field' && skipped.includes(s.name)));
+  }, [locked, exact]);
   const index = name ? steps.findIndex((s) => (s.kind === 'field' ? s.name === name : s.names.includes(name))) : -1;
   const step = index >= 0 ? steps[index] : undefined;
   const nextStep = index >= 0 ? steps[index + 1] : undefined;
@@ -396,6 +493,10 @@ function FieldEditor({
   if (spec?.kind === 'tel') Object.assign(inputProps, { type: 'tel', inputMode: 'tel', autoComplete: 'tel' });
   if (spec?.kind === 'money') Object.assign(inputProps, { inputMode: 'decimal', placeholder: '0.00' });
   if (spec?.kind === 'year') Object.assign(inputProps, { inputMode: 'numeric', maxLength: '2', placeholder: 'e.g. 26' });
+  if (spec?.kind === 'day') inputProps.type = 'date';
+  if (spec?.name === 'term_end' && typeof values.term_start === 'string' && values.term_start) {
+    inputProps.min = values.term_start;
+  }
   if (spec?.name === 'customer_name') inputProps.autoComplete = 'name';
   if (spec?.name === 'customer_postal') inputProps.autoComplete = 'postal-code';
 
@@ -420,7 +521,7 @@ function FieldEditor({
                 ? (SPEC.get(step.names[0]!)?.options ?? []).map((option) => (
                     <Choice
                       key={option}
-                      label={`${option} package`}
+                      label={CHOICE_LABELS[option] ?? option}
                       on={values[step.names[0]!] === option}
                       onClick={() => onChange({ ...values, [step.names[0]!]: option })}
                     />
