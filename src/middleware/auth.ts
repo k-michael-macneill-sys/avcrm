@@ -204,6 +204,14 @@ export function resolveWriteBranch(
 }
 
 /** Who is deleting, and whether they may take paperwork down with it. */
-export function resolveDeleter(req: Request): { actor: AuditActor; isCorporate: boolean } {
-  return { actor: resolveActor(req), isCorporate: req.user?.role === 'corporate' };
+export function resolveDeleter(req: Request): {
+  actor: AuditActor;
+  isCorporate: boolean;
+  isBranchLogin: boolean;
+} {
+  return {
+    actor: resolveActor(req),
+    isCorporate: req.user?.role === 'corporate',
+    isBranchLogin: req.user?.role === 'branch',
+  };
 }

@@ -57,7 +57,8 @@ export function CustomerDetail(): JSX.Element {
                   ? 'Their addresses, quotes, contracts, invoices, payments and visits are deleted with them.'
                   : 'Their addresses and quotes are deleted with them.'
               }
-              onConfirm={() => api.del(`/customers/${customer.id}`)}
+              typeToConfirm="DELETE"
+              onConfirm={() => api.del(`/customers/${customer.id}?confirm=DELETE`)}
               onDeleted={() => navigate('/customers')}
             />
           </>
@@ -103,6 +104,10 @@ export function CustomerDetail(): JSX.Element {
               cell: (row) => (row.priority_flag ? <StatusPill status="priority" /> : '—'),
             },
             {
+              header: 'Notes for the crew',
+              cell: (row) => <span className="whitespace-pre-wrap text-xs">{row.access_notes || '—'}</span>,
+            },
+            {
               header: '',
               cell: (row) => (
                 <ConfirmDelete
@@ -131,7 +136,7 @@ export function CustomerDetail(): JSX.Element {
                 options: ['1', '2', '3', '4', '5', '6'].map((n) => ({ value: n, label: n === '6' ? '6+' : n })),
                 value: '2',
               },
-              { name: 'access_notes', label: 'Access notes', type: 'textarea' },
+              { name: 'access_notes', label: 'Notes for the crew', type: 'textarea' },
             ]}
             onSubmit={(values) =>
               api.post<Property>('/properties', {

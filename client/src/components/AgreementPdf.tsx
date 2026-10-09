@@ -45,13 +45,14 @@ interface Rendered {
   widgets: Widget[];
 }
 
-const SPEC = new Map(AGREEMENT_FIELDS.map((f) => [f.name, f]));
-const TYPED = AGREEMENT_FIELDS.filter((f) => !['check', 'choice', 'signature', 'date'].includes(f.kind));
+// The boxes the contract no longer uses (phone type, the crew's notes) are not drawn at all.
+const SPEC = new Map(AGREEMENT_FIELDS.filter((f) => !f.offContract).map((f) => [f.name, f]));
+const TYPED = AGREEMENT_FIELDS.filter(
+  (f) => !f.offContract && !['check', 'choice', 'signature', 'date'].includes(f.kind),
+);
 
 /** How far past its box each checkbox's label runs, in PDF points, so the label is tappable too. */
 const LABEL_REACH: Record<string, number> = {
-  phone_type_cell: 24,
-  phone_type_home: 30,
   package: 150,
 };
 
@@ -75,13 +76,11 @@ function showTermInputs(): void {
 type Step = { kind: 'field'; name: string } | { kind: 'group'; title: string; names: string[]; single?: boolean };
 const STEPS: Step[] = (() => {
   const steps: Step[] = [];
-  // The term is chosen above the agreement, not in the walk-through.
-  for (const f of TYPED.filter((t) => !TERM_FIELDS.includes(t.name))) {
+  // The term is chosen above the agreement, not in the walk-through, and a
+  // seasonal term's dates fill themselves in: no years to type.
+  for (const f of TYPED.filter((t) => !TERM_FIELDS.includes(t.name) && !SEASON_ONLY.includes(t.name))) {
     steps.push({ kind: 'field', name: f.name });
-    if (f.name === 'customer_phone') {
-      steps.push({ kind: 'group', title: 'Phone type', names: ['phone_type_cell', 'phone_type_home'] });
-    }
-    if (f.name === 'end_year') steps.push({ kind: 'group', title: 'Package', names: ['package'], single: true });
+    if (f.name === 'customer_email') steps.push({ kind: 'group', title: 'Package', names: ['package'], single: true });
     if (f.name === 'price_premium') {
       steps.push({
         kind: 'group',
@@ -98,7 +97,7 @@ const NONE: string[] = [];
 const CHOICE_LABELS: Record<string, string> = {
   Basic: 'Basic package',
   Premium: 'Premium package',
-  Seasonal: 'Seasonal — November 1st to March 31st',
+  Seasonal: 'Seasonal — to March 31st',
   'Exact dates': 'Exact dates — a month or two, or any start and end',
 };
 
@@ -212,8 +211,14 @@ export function AgreementPdf({
           style={{ aspectRatio: `${page.width} / ${page.height}` }}
         >
           <img src={page.image} alt={`Agreement page ${index + 1}`} className="absolute inset-0 size-full select-none" draggable={false} />
+          {/* Printed bits the contract no longer has, covered under the input boxes. */}
+          {rewrites
+            .filter((line) => line.page === index && !line.text)
+            .map((line) => (
+              <div key={`blank-${line.top}`} aria-hidden className="absolute bg-white" style={lineBox(line, page)} />
+            ))}
           {/* Seasonal: the term sentence, under its two year boxes, opens the choice of term. */}
-          {onChange && index === TERM_LINE.page && rewrites.length === 0 ? (
+          {onChange && index === TERM_LINE.page && !rewrites.some((r) => r.term) ? (
             <button
               type="button"
               aria-label="Term of service"
@@ -253,7 +258,7 @@ export function AgreementPdf({
               />
             ))}
           {rewrites
-            .filter((line) => line.page === index)
+            .filter((line) => line.page === index && line.text)
             .map((line) => (
               <Rewrite
                 key={line.top}

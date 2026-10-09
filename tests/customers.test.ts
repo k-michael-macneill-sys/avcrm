@@ -76,13 +76,13 @@ describe('customers and the addresses they own', () => {
     const made = await makeCustomer(world.branches.kingston, world.users.sales);
 
     const token = await login(h.server(), world.emails.sales);
-    const reply = await call(h.server(), 'DELETE', `/customers/${made.customer_id}`, { token });
+    const reply = await call(h.server(), 'DELETE', `/customers/${made.customer_id}?confirm=DELETE`, { token });
 
     assert.equal(reply.status, 204);
     assert.equal(await db('customers').where({ id: made.customer_id }).first(), undefined);
   });
 
-  it('leaves deleting a signed customer to the office, since it takes their paperwork too', async () => {
+  it('leaves deleting a signed customer to the office or the branch sign-in, since it takes their paperwork too', async () => {
     const world = h.world();
     const made = await makeCustomer(world.branches.kingston, world.users.sales);
     const quote = await makeQuote(made.property_id, world.users.sales, { status: 'accepted' });
@@ -97,10 +97,10 @@ describe('customers and the addresses they own', () => {
     });
 
     const token = await login(h.server(), world.emails.sales);
-    const reply = await call(h.server(), 'DELETE', `/customers/${made.customer_id}`, { token });
+    const reply = await call(h.server(), 'DELETE', `/customers/${made.customer_id}?confirm=DELETE`, { token });
 
     assert.equal(reply.status, 403);
-    assert.match(reply.body.error.message, /corporate/);
+    assert.match(reply.body.error.message, /office or the branch/);
     assert.ok(await db('customers').where({ id: made.customer_id }).first(), 'nothing was deleted');
   });
   it('tells a rep an address is taken without saying whose it is', async () => {

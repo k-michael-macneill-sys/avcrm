@@ -15,7 +15,7 @@ import { Textarea } from '@/components/ui/textarea';
 import * as api from '@/lib/api';
 import { relative } from '@/lib/format';
 import { addressAt, loadGoogleMaps, type GeocodedAddress } from '@/lib/googleMaps';
-import { usePublicConfig } from '@/lib/publicApi';
+import { usePublicConfigState } from '@/lib/publicApi';
 import { AGREEMENT_ADDONS } from '../../../src/types/agreement';
 import { ADDONS } from '@/lib/sales';
 import { useQuery } from '@/lib/useQuery';
@@ -71,10 +71,11 @@ type Selection =
 const FALLBACK_CENTER = { lat: 45.0, lng: -64.0 };
 
 export function Leads(): JSX.Element {
-  const config = usePublicConfig();
+  const { config, error: configError } = usePublicConfigState();
   const { data: branches, error } = useQuery(() => api.get<Branch[]>('/branches'), []);
 
   if (error) return <ErrorNotice message={error} />;
+  if (configError) return <ErrorNotice message={configError} />;
   if (!config || !branches) return <Loading />;
 
   if (!config.maps_api_key) {
