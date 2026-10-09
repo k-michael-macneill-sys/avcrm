@@ -31,12 +31,51 @@ services:
         scope: build
       - key: SECRETS_KEY
         scope: build
+      # Email through Twilio SendGrid: set SENDGRID_API_KEY and MAIL_FROM (a
+      # sender verified in SendGrid) and leave MAIL_DRIVER unset — the key
+      # switches it to smtp. MAIL_DRIVER=log keeps every email in the log.
       - key: MAIL_DRIVER
-        value: log
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: SENDGRID_API_KEY
+        sync: false
+      # Texts through Twilio, with nothing to switch on under Settings.
+      # TWILIO_FROM_NUMBER is a number on the account or a Messaging Service
+      # SID (MG…).
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER
+        sync: false
       - key: ALLOW_SELF_REGISTRATION
         value: 'false'
+      # Render's proxy is reported to pass a client's own X-Forwarded-For
+      # through, in which case `true` lets anyone choose the IP recorded on a
+      # contract. Sign-in, card and pay-link limits also key on things that
+      # cannot be forged (the account, the branch, the link), so they hold
+      # either way. To pin it: send a request with a made-up X-Forwarded-For
+      # and set this to the hop count that still records your real address.
       - key: TRUST_PROXY
         value: 'true'
+      # The first admin's password, used once on an empty database and to
+      # replace the published default on an install that still has it.
+      - key: SEED_PASSWORD
+        sync: false
+      # The shared branch sign-in password. Unset turns branch sign-in off;
+      # under 10 characters is refused.
+      - key: BRANCH_SIGN_IN_PASSWORD
+        sync: false
+      # The owner's password for adding a branch. Unset locks it.
+      - key: BRANCH_PASSWORD
+        sync: false
+      # Lets the sign-in screen's Reset password set a branch's own password.
+      # 12+ random characters; unset turns reset off.
+      - key: BRANCH_RESET_CODE
+        sync: false
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
       # Square. Set these in Render's Environment tab — a local .env file is
       # never uploaded to Render. sandbox-sq0idb-… IDs pair with sandbox.
       - key: SQUARE_ENVIRONMENT

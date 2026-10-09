@@ -19,9 +19,11 @@ import {
   BookOpenCheck,
   Mail,
   Megaphone,
+  Radar,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { ChangePassword } from '@/components/ChangePassword';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
@@ -82,6 +84,7 @@ const OPERATIONS_NAV: NavItem[] = [
   { to: '/work-orders', label: 'Dispatch', icon: Truck, roles: CREW },
   { to: '/invoices', label: 'Invoices', icon: Receipt, roles: CORPORATE },
   { to: '/operators', label: 'Crew', icon: HardHat, roles: CREW },
+  { to: '/snow-map', label: 'Snow Map', icon: Radar, roles: ALL },
   { to: '/weather', label: 'Weather Alerts', icon: CloudSnow, roles: CORPORATE },
   { to: '/reports', label: 'Reports', icon: BarChart3, roles: CORPORATE },
   { to: '/admin', label: 'Company', icon: Building2, roles: CORPORATE },
@@ -232,6 +235,8 @@ function Account({ console: current }: { console: ConsoleName }): JSX.Element | 
         </div>
         <ThemeToggle />
       </div>
+      {/* A branch sign-in's password is the server's (BRANCH_SIGN_IN_PASSWORD), not its own. */}
+      {user.role === 'branch' ? null : <ChangePassword />}
       <Button variant="secondary" size="sm" className="justify-start gap-2" onClick={signOut}>
         <LogOut className="size-3.5" /> Sign out
       </Button>

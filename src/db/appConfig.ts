@@ -125,6 +125,13 @@ export const MESSAGE_TEMPLATES: MessageTemplateRow[] = [
         '{{completed_at}}.\nOperator: {{operator_name}}\n\nPhotos:\n{{photo_list}}',
     },
     {
+      code: 'service_complete',
+      channel: 'sms',
+      branch_id: null,
+      subject: null,
+      body: '{{branch_name}}: {{service_type}} at {{address_line1}} is done. Operator: {{operator_name}}.',
+    },
+    {
       // The office copy. A branch manager reading "Hi Harold, your driveway is
       // clear" is not a notification.
       code: 'service_complete_internal',
@@ -249,6 +256,24 @@ export const MESSAGE_TEMPLATES: MessageTemplateRow[] = [
         'Hi {{customer_first_name}},\n\nYour invoice for {{billing_period_start}} ' +
         'to {{billing_period_end}} at {{address_line1}} comes to ${{amount_due}}, ' +
         'due {{due_date}}.\n\n{{pay_prompt}}: {{pay_url}}\n\n— {{branch_name}}',
+    },
+    {
+      code: 'invoice_sent',
+      channel: 'sms',
+      branch_id: null,
+      subject: null,
+      body:
+        '{{branch_name}}: your invoice for {{address_line1}} is ${{amount_due}}, ' +
+        'due {{due_date}}. {{pay_prompt}}: {{pay_url}}',
+    },
+    {
+      code: 'invoice_overdue',
+      channel: 'sms',
+      branch_id: null,
+      subject: null,
+      body:
+        '{{branch_name}}: ${{amount_outstanding}} for {{address_line1}} was due ' +
+        '{{due_date}} and is still outstanding. {{pay_prompt}}: {{pay_url}}',
     },
     {
       code: 'invoice_overdue',

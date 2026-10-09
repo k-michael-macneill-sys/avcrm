@@ -3,6 +3,7 @@ import express, { type Express } from 'express';
 import { config } from './config';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { requestLogger } from './middleware/requestLogger';
+import { appPolicy, BASEMAP_HOST, inlineScriptHashes, PAY_POLICY, securityHeaders } from './middleware/securityHeaders';
 import { apiRouter } from './routes';
 import { AGREEMENT_TEMPLATE } from './services/agreement';
 import { checkReadiness } from './services/health';
@@ -20,6 +21,9 @@ export function createApp(): Express {
   // real client. Left off by default: trusting a header nobody set is worse
   // than recording the proxy.
   app.set('trust proxy', config.trustProxy);
+  // First, so every response carries them — errors and webhooks included.
+  // HSTS only where there is a real certificate in front of the app.
+  app.use(securityHeaders({ hsts: config.isPublicProduction }));
   /*
    * Before the JSON parser, deliberately. A webhook signature is computed
    * over the exact bytes that were sent, so the body has to reach the handler
@@ -68,6 +72,16 @@ export function createApp(): Express {
    */
   const publicDir = path.resolve(__dirname, '..', 'public');
   const clientDir = path.resolve(__dirname, '..', 'client', 'dist');
+  // Worked out once from the built index.html, so the theme script it
+  // carries inline is allowed by hash and nothing else inline ever is.
+  const clientPolicy = appPolicy(inlineScriptHashes(path.join(clientDir, 'index.html')), [
+    BASEMAP_HOST,
+    config.weather.radarTileHost,
+  ]);
+  app.use('/app', (_req, res, next) => {
+    res.setHeader('Content-Security-Policy', clientPolicy);
+    next();
+  });
   // redirect:false so a bare /app is served by the route below rather than
   // bounced to /app/ first.
   app.use('/app', express.static(clientDir, { index: false, redirect: false }));
@@ -87,6 +101,7 @@ export function createApp(): Express {
   // reads its token from the path and asks /portal for the rest.
   app.get(/^\/pay\/(?:card\/)?[A-Za-z0-9_-]{20,80}$/, (_req, res) => {
     res.set('Cache-Control', 'private, no-store');
+    res.set('Content-Security-Policy', PAY_POLICY);
     res.sendFile(path.join(publicDir, 'pay.html'));
   });
 
@@ -95,6 +110,17 @@ export function createApp(): Express {
   app.get('/agreement-template.pdf', (_req, res) => {
     res.set('Cache-Control', 'no-cache');
     res.type('application/pdf').sendFile(AGREEMENT_TEMPLATE);
+  });
+
+  // Apple Pay's domain check: Square hands out this file when the domain is
+  // added under Apple Pay in its dashboard, and Apple fetches it from here.
+  // Drop the downloaded file into public/.well-known/ to switch it on.
+  app.get('/.well-known/apple-developer-merchantid-domain-association', (_req, res, next) => {
+    res.type('text/plain').sendFile(
+      path.join(publicDir, '.well-known', 'apple-developer-merchantid-domain-association'),
+      { dotfiles: 'allow' },
+      (err) => err && next(),
+    );
   });
 
   app.get('/', (_req, res) => res.redirect('/app'));

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth';
+import { FILE_POLICY } from '../middleware/securityHeaders';
 import { acceptBytes, authorizeRead, issueTarget, readStream } from '../services/uploads';
 import { UPLOAD_PURPOSES } from '../types/models';
 import { asyncHandler } from '../utils/async';
@@ -71,6 +72,8 @@ filesRouter.get(
     res.setHeader('Content-Type', upload.content_type);
     // Never let a shared cache hold someone's signature.
     res.setHeader('Cache-Control', 'private, max-age=300');
+    // The bytes are whatever was uploaded. Inert if opened as a page.
+    res.setHeader('Content-Security-Policy', FILE_POLICY);
     if (upload.byte_size) res.setHeader('Content-Length', String(upload.byte_size));
 
     const stream = readStream(key);

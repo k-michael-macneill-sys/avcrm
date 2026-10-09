@@ -40,7 +40,7 @@ describe('deleting records and everything beneath them', () => {
   it('deletes a signed customer with every contract, invoice, payment and visit under them', async () => {
     const { corporate, contract, workOrder, invoiceId } = await paperwork();
 
-    const reply = await call(h.server(), 'DELETE', `/customers/${contract.customer_id}`, { token: corporate });
+    const reply = await call(h.server(), 'DELETE', `/customers/${contract.customer_id}?confirm=DELETE`, { token: corporate });
     assert.equal(reply.status, 204, JSON.stringify(reply.body));
 
     assert.equal(await db('customers').where({ id: contract.customer_id }).first(), undefined);
@@ -58,9 +58,33 @@ describe('deleting records and everything beneath them', () => {
     const { world, contract, invoiceId } = await paperwork();
     const sales = await login(h.server(), world.emails.sales);
 
-    const reply = await call(h.server(), 'DELETE', `/customers/${contract.customer_id}`, { token: sales });
+    const reply = await call(h.server(), 'DELETE', `/customers/${contract.customer_id}?confirm=DELETE`, { token: sales });
     assert.equal(reply.status, 403);
     assert.ok(await db('invoices').where({ id: invoiceId }).first());
+  });
+
+  it('lets a branch’s own sign-in delete a signed customer in its branch', async () => {
+    const { contract, invoiceId } = await paperwork();
+    const signedIn = await call(h.server(), 'POST', '/auth/sign-in', {
+      body: { choice: 'Kingston', password: '1234' },
+    });
+    assert.equal(signedIn.status, 200, JSON.stringify(signedIn.body));
+    const branch = signedIn.body.data.token as string;
+
+    const reply = await call(h.server(), 'DELETE', `/customers/${contract.customer_id}?confirm=DELETE`, { token: branch });
+    assert.equal(reply.status, 204, JSON.stringify(reply.body));
+    assert.equal(await db('invoices').where({ id: invoiceId }).first(), undefined);
+    const audit = await db('audit_log').where({ action: 'customer.deleted', entity_id: contract.customer_id }).first();
+    assert.ok(audit, 'who did it is on the record');
+  });
+
+  it('deletes nobody without DELETE typed to confirm', async () => {
+    const { corporate, contract } = await paperwork();
+    for (const query of ['', '?confirm=delete', '?confirm=yes']) {
+      const reply = await call(h.server(), 'DELETE', `/customers/${contract.customer_id}${query}`, { token: corporate });
+      assert.equal(reply.status, 400, query);
+    }
+    assert.ok(await db('customers').where({ id: contract.customer_id }).first());
   });
 
   it('lets a sales rep delete a lead and a presented quote', async () => {
@@ -71,7 +95,7 @@ describe('deleting records and everything beneath them', () => {
 
     const quoteReply = await call(h.server(), 'DELETE', `/quotes/${quote}`, { token: sales });
     assert.equal(quoteReply.status, 204, JSON.stringify(quoteReply.body));
-    const customerReply = await call(h.server(), 'DELETE', `/customers/${lead.customer_id}`, { token: sales });
+    const customerReply = await call(h.server(), 'DELETE', `/customers/${lead.customer_id}?confirm=DELETE`, { token: sales });
     assert.equal(customerReply.status, 204, JSON.stringify(customerReply.body));
   });
 

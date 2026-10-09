@@ -63,6 +63,15 @@ describe('invoices and what can be done to them', () => {
     assert.equal(queued.length, 1);
   });
 
+  it('texts the bill to a customer who asked for texts', async () => {
+    const { token, invoice } = await draft({ preferred_contact: 'sms', phone: '+16135550177' });
+    await call(h.server(), 'POST', `/invoices/${invoice.id}/send`, { token });
+
+    const [queued] = await db('message_log').where({ template_code: 'invoice_sent' });
+    assert.equal(queued?.channel, 'sms');
+    assert.equal(queued?.recipient, '+16135550177');
+  });
+
   it('voids a draft nobody was ever shown', async () => {
     const { token, invoice } = await draft();
     const reply = await call(h.server(), 'POST', `/invoices/${invoice.id}/void`, { token });

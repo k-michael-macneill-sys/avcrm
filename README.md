@@ -171,9 +171,11 @@ exactly one account for that:
 | --- | --- | --- | --- |
 | `corporate@avcrm.test` | corporate | — | Sees every branch; sign in as **ADMIN** |
 
-It shares the password in `SEED_PASSWORD` (default `Password123!`). On the
-sign-in screen choose **ADMIN** and enter that password; choose a branch and
-enter `BRANCH_SIGN_IN_PASSWORD` (default `1234`) to sign in as the branch.
+It shares the password in `SEED_PASSWORD` (`Password123!` in development). On
+the sign-in screen choose **ADMIN** and enter that password; choose a branch
+and enter `BRANCH_SIGN_IN_PASSWORD` (`1234` in development) to sign in as the
+branch. **Neither default exists in production** — both are printed here, so
+anyone could use them. See [Production safeguards](#production-safeguards).
 
 ## Auth and permissions
 
@@ -225,7 +227,9 @@ dropdown offers **Cranbrook**, **Kingston**, **Alberta**, **Regina** and
 **ADMIN** (`POST /auth/sign-in` with `{ choice, password }`).
 
 - **A branch** signs in to that branch's own shared account with the branch
-  password, `BRANCH_SIGN_IN_PASSWORD` — **`1234` unless you set it**. The
+  password, `BRANCH_SIGN_IN_PASSWORD` (`1234` in development; in production
+  there is no default, and one under 10 characters is refused) — or the
+  branch's own password, once one has been set with **Reset password**. The
   account has the `branch` role: customers, quotes, contracts, the leads map,
   dispatch and crew, plus its own Business Console, all in that branch only;
   none of corporate's screens (Reports, Company, Settings, Weather Alerts). It
@@ -250,12 +254,54 @@ branch picker for a branch sign-in, and the agreement's city is filled in and
 not tappable; on an Alberta agreement the city box starts blank for the rep to
 type. ADMIN's form is unchanged: branch picker, and the city as typed.
 
-**A shared four-digit password is weak, on purpose.** Anyone who knows it can
-sign in as any branch. The rate limits below apply to it — by address, and per
-branch choice, so guessing at one branch from many addresses runs out too —
-but set `BRANCH_SIGN_IN_PASSWORD` to something longer before the app faces the
-internet. `POST /auth/login` (email and password) is still there for staff
+**A shared password is the whole lock on a branch.** Anyone who knows it can
+sign in as any branch that has not set its own. The rate limits below apply to
+it — by address, and per branch choice, so guessing at one branch from many
+addresses runs out too — and production refuses one shorter than 10
+characters. `POST /auth/login` (email and password) is still there for staff
 accounts and scripts.
+
+**Changing a password.** Anyone signed in with their own account (everyone but
+a branch sign-in) has **Change password** under their name in the menu
+(`POST /auth/password` with `{ current_password, new_password }`, 10 characters
+at least). It signs out every other session on the account —
+`users.password_changed_at` is compared with each token's issue time — and
+hands this one a fresh token. Corporate can set a temporary password for
+someone locked out with `PATCH /users/:id` and `{ password }`; both are in the
+audit log, without the password.
+
+**Resetting a branch password.** **Reset password** on the sign-in screen
+(`POST /auth/sign-in/reset` with `{ choice, new_password, reset_code }`) gives
+one branch its own password, if the reset code matches `BRANCH_RESET_CODE` on
+the server. Unset, resetting is off. The code lets anyone set any branch's
+password from a page the whole internet can open, so make it long and random
+and keep it only in the server's environment; production refuses one under 12
+characters, and refuses the one that was once written into the source. A reset
+signs out whoever was signed in as that branch and is audited with the address
+it came from.
+
+### Production safeguards
+
+On a production deploy with a public address (`NODE_ENV=production` and an
+`APP_BASE_URL` or `RENDER_EXTERNAL_URL` that is not localhost), the
+conveniences that make a laptop easy are refused, because each is printed in
+this repository:
+
+- The app will not start with a `JWT_SECRET` or `SECRETS_KEY` that has been
+  published (the example files, the test and CI setup, or a value committed
+  here by mistake). Anyone holding the JWT secret can sign in as any account
+  without a password. `npm run secrets` makes new ones.
+- `Password123!` signs nobody in and is given to nobody. The seed refuses to
+  create the first admin with it; set `SEED_PASSWORD`. An install that still
+  has it on `corporate@avcrm.test` gets `SEED_PASSWORD` instead on the next
+  deploy or restart, so setting that variable is the way back in.
+- Branch sign-in is off until `BRANCH_SIGN_IN_PASSWORD` is set, and refuses
+  one under 10 characters; reset is off until `BRANCH_RESET_CODE` is set.
+- Changing the card processor under Settings asks for the admin's password
+  again, since it decides whose account customers pay. Recording a payment by
+  hand is corporate only.
+
+`npm run preflight` flags the same things in a `.env` before it is deployed.
 
 `/auth/login` is a password oracle open to the internet: without a limit, a
 list of common passwords against one known address is free, and nothing in the
@@ -362,7 +408,7 @@ A suspension is only lifted by corporate, never by the automatic refresh.
 | GET | `/customers/:id` | any | |
 | GET | `/customers/:id/properties` | any | |
 | PATCH | `/customers/:id` | any | |
-| DELETE | `/customers/:id` | any | |
+| DELETE | `/customers/:id?confirm=DELETE` | any | Takes their contracts, invoices and payments too: corporate or the branch sign-in only, once anything is signed |
 | GET | `/properties` | any | `customer_id`, `priority_flag`, `search` |
 | GET | `/properties/check-duplicate` | any | Warns before the rep signs |
 | POST | `/properties` | any | 409 with details if the address exists |
@@ -426,7 +472,7 @@ A suspension is only lifted by corporate, never by the automatic refresh.
 | GET | `/portal/cards/:token` | **public** | The card link, with the autopay agreement to sign |
 | POST | `/portal/cards/:token` | **public** | Signature plus card nonce; saves both or neither |
 | GET | `/settings/payments` | corporate | Current processor; credentials never returned |
-| PUT | `/settings/payments` | corporate | Connects Square, or switches it off |
+| PUT | `/settings/payments` | corporate | Connects Square, or switches it off; 409 while `SQUARE_ACCESS_TOKEN` is set |
 | GET | `/settings/payments/providers` | corporate | The catalogue the screen renders itself from |
 | POST | `/settings/payments/test` | corporate | Checks the token and location with Square; moves no money |
 | POST | `/uploads` | any | Asks for somewhere to put a file |
@@ -1034,6 +1080,20 @@ Both are checked at startup: `MAIL_DRIVER=smtp` without `SMTP_HOST` or
 `MAIL_FROM` refuses to boot, rather than failing when the first invoice goes
 out.
 
+**Twilio SendGrid** has a shortcut. An API key with Mail Send permission is
+all it needs:
+
+```bash
+SENDGRID_API_KEY=SG.…
+MAIL_FROM="Drift <billing@example.ca>"   # a sender verified in SendGrid
+```
+
+That stands in for `SMTP_HOST`/`SMTP_USER`/`SMTP_PASSWORD`
+(`smtp.sendgrid.net`, user `apikey`, the key as the password) and switches
+`MAIL_DRIVER` to `smtp` unless `MAIL_DRIVER` is set — so a leftover
+`MAIL_DRIVER=log` still keeps every email in the log. An explicit `SMTP_HOST`
+wins over the key.
+
 ### The staging valve
 
 ```bash
@@ -1077,11 +1137,14 @@ ways:
 
 - **From the environment** — set `SQUARE_ACCESS_TOKEN` (and the fields below
   it) and this install charges through Square with nothing to click through
-  first. This is what a single-branch install uses by default.
-- **From Settings** — a corporate user connects it at **Settings → Card
-  payments**, the same way an SMS provider is. Once switched on there it
-  takes precedence over the environment, which is how a multi-branch account
-  overrides what one branch's `.env` sets as the default.
+  first. When it is set, it is the only processor: **Settings → Card
+  payments** shows it read-only, `PUT /settings/payments` answers 409, and a
+  row already saved there is ignored. Credentials that live only on Render
+  cannot be swapped from inside the app, by a typo or by a stolen session.
+- **From Settings** — with no `SQUARE_ACCESS_TOKEN`, a corporate user
+  connects it at **Settings → Card payments**, the same way an SMS provider
+  is. The token is stored encrypted with `SECRETS_KEY` (or a key derived from
+  `JWT_SECRET`), so changing those keys means entering it again.
 
 With neither set, `POST /invoices/:id/payments` records what a processor, a
 cheque or an e-transfer says happened, same as it always could — nothing
@@ -1362,6 +1425,37 @@ one, and gets revisited, it is a setting instead.
 the credentials it asks for, send a test, switch it on. No redeploy, no .env
 edit, and a manager can do it.
 
+**Or Twilio comes from the environment**, the way `SQUARE_*` gives a payment
+processor:
+
+```bash
+TWILIO_ACCOUNT_SID=AC…
+TWILIO_AUTH_TOKEN=…
+TWILIO_FROM_NUMBER=+16135550123     # or a Messaging Service SID, MG…
+```
+
+All three or none — a partial set refuses to boot. Texts then go out with
+nothing switched on under Settings, which shows which of the three the server
+can see. A provider switched on in Settings takes over from the environment.
+
+### What is texted automatically
+
+The queue worker (`job:message-queue`, every minute under the scheduler)
+sends each queued message on its channel. A customer is texted rather than
+emailed when `preferred_contact` is `sms` and there is a phone on file, or
+when there is a phone and no email:
+
+| Message | When |
+| --- | --- |
+| Visit complete (`service_complete`) | A work order is marked completed |
+| Invoice (`invoice_sent`) and past-due notice (`invoice_overdue`) | Billing raises or chases an invoice |
+| Review request | After a completed visit |
+| Card setup link | The office asks for a card |
+| Snowfall notice | The forecast passes the threshold (`both` gets text and email) |
+
+Office copies, operator document reminders, signing links and cold email are
+email only.
+
 ### The catalogue
 
 `src/services/smsProviders.ts` describes each provider as data — the fields an
@@ -1370,7 +1464,7 @@ message id turns up in the reply:
 
 | Provider | Needs |
 | --- | --- |
-| Twilio | Account SID, auth token, sending number |
+| Twilio | Account SID, auth token, sending number or Messaging Service SID |
 | Telnyx | API key, sending number |
 | MessageBird (Bird) | Access key, originator |
 | Vonage (Nexmo) | API key, API secret, sending number |
@@ -1556,7 +1650,8 @@ counts active customers (as the Customers list does) and bills every active
 contract of an active customer the way its invoices will. A seasonal
 contract pays once, in November. A monthly one pays its discounted first
 month and then its recurring price, for as many months as it runs, up to
-five. The average contract value is that revenue divided by the customers
+five, starting in the month its billing starts: an exact-dates contract from
+December to January counts in December and January. The average contract value is that revenue divided by the customers
 with a contract.
 
 The page adds operator salaries, one line per position (or the whole crew on
@@ -1714,6 +1809,85 @@ decision the bot has made.
 the window, one alert per region per morning, per-region forecasts, the
 geocoder fallback, preferred channels, the evening-only schedule and a
 forecast that is down.
+
+## The snow map
+
+*Operations Console → Snow Map* (`/app/snow-map`), for everyone signed in. One
+screen with the radar, the snow forecast, and today's routes. **Nothing in it
+needs an API key, an account or a setting.**
+
+- **Regions.** Tabs (a dropdown on a phone) fly the map between the four
+  territories. Their exact forecast points are in
+  `src/config/weatherRegions.ts`: Kingston (44.2312, −76.4860), Regina
+  (50.4547, −104.6067), Lethbridge & Southern Alberta (49.6936, −112.8419) and
+  Cranbrook (49.5097, −115.7688). A branch's own sign-in opens on its own
+  territory.
+- **Weather panel.** `GET /weather/snow-summary?region=kingston` asks
+  Open-Meteo for Environment Canada's GEM models: `gem_seamless`, which is
+  HRDPS (2.5 km) for the first two days, then RDPS and GDPS. The panel shows
+  temperature, wind and gusts, snowfall over the next 6, 24 and 48 hours
+  against the clearing trigger, snow on the ground, a freezing-rain warning
+  (freezing drizzle or rain in the forecast) or watch (rain at or near 0 °C),
+  and a 48-hour snowfall strip. GEM does not report snow depth, so depth comes
+  from Open-Meteo's default blend. Each region's answer is cached for 10
+  minutes. If Open-Meteo is down, the last answer is shown, marked as not
+  refreshed.
+- **Radar.** `GET /weather/radar` relays RainViewer's frame index (cached two
+  minutes). Tile URLs are built from a validated frame path and the one host
+  in `WEATHER_RADAR_TILE_HOST`, never from a host the index names. The map
+  loads every frame at once and shows them in turn, with play/pause, a
+  scrubber and an opacity slider. Forecast ("nowcast") frames appear after the
+  latest past frame when RainViewer publishes them. Tiles are requested up to
+  zoom 7 and stretched beyond, which is as far as RainViewer's public tiles go.
+- **Properties and crews.** `GET /weather/dispatch-map` returns every active
+  customer's geocoded property in the caller's branch scope. Each is coloured
+  by today's visit in the branch's own timezone:
+  - *Active route*: en route or on site
+  - *Pending*: booked, not started
+  - *Serviced*: completed
+  - *Skipped*
+  - *No visit today*
+
+  Properties cluster when zoomed out, and a cluster's ring shows the most
+  urgent status inside it. A popup shows the client, lot size (driveway, in
+  cars), the snow trigger, the assigned crew and the visit. There is no live
+  GPS, so a crew with a visit under way is drawn at that property.
+- **Sample data.** `client/src/routes/weatherMap/sampleData.ts` holds about a
+  hundred made-up properties and crews across the four territories. The layer
+  switches on by itself while the CRM has no geocoded customers. It can be
+  turned on or off by hand, and the map says "Sample data shown — not real
+  customers" whenever it is on.
+- **Theme.** The basemap is OpenFreeMap's OpenStreetMap vector tiles in a
+  style of our own (`basemapStyle.ts`). Every colour is read from the app's
+  CSS tokens (land is `--background`, roads are `--border`, water is
+  `--background` blended toward `--primary`), and the map repaints when the
+  theme changes. The panels are the app's own Card, Badge, Tabs and Checkbox
+  components.
+- **Content-Security-Policy.** `/app` additionally allows
+  `https://tiles.openfreemap.org` and the radar tile host for `connect-src`
+  and `img-src`. MapLibre's worker is built by Vite and served from this
+  origin.
+
+| Variable | Default | What it is |
+| --- | --- | --- |
+| `WEATHER_RADAR_API_BASE` | `https://api.rainviewer.com` | Where the frame index comes from |
+| `WEATHER_RADAR_TILE_HOST` | `https://tilecache.rainviewer.com` | The only host radar tiles are drawn from |
+
+**Before relying on it commercially, check the terms.** Open-Meteo's free API
+is for non-commercial use; a business is expected to take its paid plan,
+which uses the same request with an API key. RainViewer's and OpenFreeMap's
+terms ask for the attribution the map shows. Check each provider's current
+terms.
+
+`tests/weatherMap.test.mts` covers:
+
+- the exact coordinates and model sent to Open-Meteo for each region
+- refusing unknown regions and anonymous callers
+- the depth fallback, caching, stale answers and the 502 when there is nothing
+  to fall back on
+- the ice rules
+- radar tile URLs pinned to the configured host
+- visit colouring by local day, crew placement and branch scoping
 
 ## What is mocked
 

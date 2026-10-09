@@ -1,8 +1,10 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth, requireCorporate, resolveActor } from '../middleware/auth';
+import { rateLimit } from '../middleware/rateLimit';
 import { recordAudit } from '../services/audit';
-import { envGateway, squareGateway } from '../services/gateway';
+import { confirmPassword } from '../services/auth';
+import { envGateway, squareFromEnvironment, squareGateway } from '../services/gateway';
 import {
   PAYMENTS_KEY,
   publicView,
@@ -16,7 +18,7 @@ import { SMS_PROVIDERS, type ProviderField } from '../services/smsProviders';
 import { SendFailure } from '../services/transport';
 import { config } from '../config';
 import { asyncHandler } from '../utils/async';
-import { ApiError, badRequest, unauthorized } from '../utils/errors';
+import { ApiError, badRequest, conflict, unauthorized } from '../utils/errors';
 import { parse } from '../utils/validate';
 
 /**
@@ -64,7 +66,18 @@ settingsRouter.get(
 settingsRouter.get(
   '/sms',
   asyncHandler(async (_req, res) => {
-    res.json({ data: publicView(SMS_KEY, await readIntegration(SMS_KEY)) });
+    res.json({
+      data: {
+        ...publicView(SMS_KEY, await readIntegration(SMS_KEY)),
+        // Which TWILIO_* variables the server can see — never their values.
+        env_twilio: {
+          account_sid: Boolean(process.env.TWILIO_ACCOUNT_SID?.trim()),
+          auth_token: Boolean(process.env.TWILIO_AUTH_TOKEN?.trim()),
+          from_number: Boolean(process.env.TWILIO_FROM_NUMBER?.trim()),
+          live: Boolean(config.sms.twilio),
+        },
+      },
+    });
   }),
 );
 
@@ -163,6 +176,8 @@ settingsRouter.get(
         webhook_url: `${config.messaging.appBaseUrl}/webhooks/square`,
         currency: config.payments.currency.toUpperCase(),
         env_gateway: envGateway.name,
+        // Square from Render's environment: the only processor, not editable here.
+        managed_by_environment: squareFromEnvironment(),
         // Which SQUARE_* variables the server process can see — never their
         // values — so a missing one on Render is visible from here.
         env_square: {
@@ -177,16 +192,41 @@ settingsRouter.get(
   }),
 );
 
+const paymentsSaveSchema = saveSchema.extend({
+  /** The admin's own password, asked again: see below. */
+  current_password: z.string().min(1, 'Enter your password to change card payments').max(200),
+});
+
+/** Wrong passwords on the payments form, per account. */
+const confirmLimiter = rateLimit({
+  name: 'settings-confirm-user',
+  windowMs: config.auth.rateLimit.windowMs,
+  max: Math.max(config.auth.rateLimit.maxPerEmail, 1),
+  key: (req) => (config.auth.rateLimit.maxPerEmail > 0 ? (req.user?.id ?? null) : null),
+  message: 'Too many wrong passwords. Try again shortly.',
+});
+
 /**
  * Connects a processor. This decides whose account every card payment goes
  * into, so it is audited like the SMS switch — without the credentials, which
  * are not in the public view.
+ *
+ * It is also the one setting that turns a stolen session into stolen money:
+ * swap in another Square account's token and every customer pays a stranger.
+ * So it asks for the admin's password again, not only a session.
  */
 settingsRouter.put(
   '/payments',
+  confirmLimiter,
   asyncHandler(async (req, res) => {
-    const body = parse(saveSchema, req.body);
+    const { current_password, ...body } = parse(paymentsSaveSchema, req.body);
     if (!req.user) throw unauthorized();
+    if (squareFromEnvironment()) {
+      throw conflict(
+        'Card payments are set in the server environment (SQUARE_* on Render). Change them there.',
+      );
+    }
+    await confirmPassword(req.user.id, current_password);
 
     const before = publicView(PAYMENTS_KEY, await readIntegration(PAYMENTS_KEY));
     const saved = await saveIntegration(PAYMENTS_KEY, body, req.user.id);

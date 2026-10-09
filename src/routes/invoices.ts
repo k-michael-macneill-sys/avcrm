@@ -193,9 +193,17 @@ invoicesRouter.post(
 /**
  * Books money, or records that a charge failed. A failed card charge queues
  * the notice to the customer and flags the branch manager.
+ *
+ * Corporate only, like every other money move on an invoice: a "succeeded"
+ * entry here marks a bill paid without any money having moved, so a crew or
+ * branch sign-in able to make one could settle any customer's balance — or
+ * pocket the cash and write it off. A rep's cash or cheque at the door goes
+ * through POST /sales/contracts/:id/collected-payment, which takes exactly
+ * the balance and nothing else.
  */
 invoicesRouter.post(
   '/:id/payments',
+  requireCorporate,
   asyncHandler(async (req, res) => {
     const { id } = parse(idParamSchema, req.params);
     const body = parse(paymentBodySchema, req.body);

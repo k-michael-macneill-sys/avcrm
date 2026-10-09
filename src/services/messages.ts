@@ -82,6 +82,21 @@ export async function templateFor(
   return template;
 }
 
+/**
+ * Where a customer hears from us: a text if they asked for texts and have a
+ * phone, otherwise email, otherwise a text to whatever phone is on file.
+ */
+export function contactFor(customer: {
+  preferred_contact: string | null;
+  email: string | null;
+  phone: string | null;
+}): { channel: MessageChannel; recipient: string } | null {
+  if (customer.preferred_contact === 'sms' && customer.phone) return { channel: 'sms', recipient: customer.phone };
+  if (customer.email) return { channel: 'email', recipient: customer.email };
+  if (customer.phone) return { channel: 'sms', recipient: customer.phone };
+  return null;
+}
+
 export interface EnqueueInput {
   template_code: TemplateCode;
   channel: MessageChannel;

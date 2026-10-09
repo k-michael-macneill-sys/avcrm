@@ -13,7 +13,7 @@ import { paymentSchedule, centsToDecimal } from '../types/serviceAgreement';
 import { loadQuoteTerms, localDate, type QuoteTerms } from './agreementTerms';
 import { applyCredit, earnReferralCredit } from './credits';
 import { activeGateway } from './gateway';
-import { enqueueMessage } from './messages';
+import { contactFor, enqueueMessage } from './messages';
 
 /** Days from the period starting to the money being due. */
 const PAYMENT_TERMS_DAYS = 14;
@@ -507,6 +507,8 @@ export async function ensurePortalToken(invoiceId: string, db: Knex = defaultDb)
 interface InvoiceContext {
   customer_first_name: string;
   customer_email: string | null;
+  customer_phone: string | null;
+  preferred_contact: string | null;
   branch_id: string;
   branch_name: string;
   address_line1: string;
@@ -533,6 +535,8 @@ async function enqueueInvoiceMessage(
     .first([
       'customers.first_name as customer_first_name',
       'customers.email as customer_email',
+      'customers.phone as customer_phone',
+      'customers.preferred_contact',
       'customers.id as customer_id',
       'invoices.branch_id',
       'invoices.amount_due',
@@ -545,8 +549,13 @@ async function enqueueInvoiceMessage(
     ])) as (InvoiceContext & { amount_paid: string }) | undefined;
 
   if (!row) return;
-  if (!row.customer_email) {
-    logger.info({ invoice_id: invoiceId }, 'No customer email on file; invoice not queued');
+  const contact = contactFor({
+    preferred_contact: row.preferred_contact,
+    email: row.customer_email,
+    phone: row.customer_phone,
+  });
+  if (!contact) {
+    logger.info({ invoice_id: invoiceId }, 'No customer email or phone on file; invoice not queued');
     return;
   }
 
@@ -556,8 +565,7 @@ async function enqueueInvoiceMessage(
   await enqueueMessage(
     {
       template_code: templateCode,
-      channel: 'email',
-      recipient: row.customer_email,
+      ...contact,
       branch_id: row.branch_id,
       customer_id: row.customer_id,
       context: {

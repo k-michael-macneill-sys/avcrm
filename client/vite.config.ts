@@ -1,4 +1,5 @@
 import path from 'node:path';
+import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
@@ -14,7 +15,8 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   root: __dirname,
   base: '/app/',
-  plugins: [react()],
+  // Tailwind runs as a Vite plugin; its theme is in src/index.css.
+  plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'src'),
@@ -26,13 +28,15 @@ export default defineConfig({
       // Every top-level resource the API owns (see src/routes/index.ts),
       // proxied to the API server in dev so a relative fetch('/customers')
       // from the client reaches it without a CORS dance.
-      '^/(auth|public|sales|leads|uploads|files|branches|users|operators|document-requirements|customers|properties|pricing-guide|quotes|checklist-requirements|contracts|work-orders|message-templates|message-log|review-requests|card-setups|invoices|payments|reports|settings|audit-log|webhooks|health|ready|card-complete)(/|$)':
+      '^/(auth|public|sales|leads|uploads|files|branches|users|operators|document-requirements|customers|properties|pricing-guide|quotes|checklist-requirements|contracts|work-orders|message-templates|message-log|review-requests|card-setups|invoices|payments|reports|settings|audit-log|weather|webhooks|health|ready|card-complete)(/|$)':
         {
           target: 'http://127.0.0.1:3000',
           changeOrigin: true,
         },
     },
   },
+  // MapLibre's worker is an ES module that imports its shared half.
+  worker: { format: 'es' },
   build: {
     outDir: path.resolve(__dirname, 'dist'),
     emptyOutDir: true,

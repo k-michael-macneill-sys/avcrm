@@ -16,7 +16,7 @@ export function Hero({
       <p className="relative text-xs font-semibold uppercase tracking-wider text-muted-foreground">
         {label}
       </p>
-      <p className="relative my-1.5 bg-gradient-to-b from-foreground to-muted-foreground bg-clip-text text-[44px] font-semibold leading-tight tracking-tight text-transparent">
+      <p className="relative my-1.5 bg-linear-to-b from-foreground to-muted-foreground bg-clip-text text-[44px] font-semibold leading-tight tracking-tight text-transparent">
         {value}
       </p>
       {note ? <p className="relative text-sm text-muted-foreground">{note}</p> : null}
@@ -40,7 +40,7 @@ export function StatTile({
         {value}
       </p>
       {note ? <p className="mt-0.5 text-xs text-muted-foreground">{note}</p> : null}
-      <div className="mt-2.5 h-[3px] rounded-full bg-gradient-to-r from-primary to-transparent opacity-60" />
+      <div className="mt-2.5 h-[3px] rounded-full bg-linear-to-r from-primary to-transparent opacity-60" />
     </div>
   );
 }

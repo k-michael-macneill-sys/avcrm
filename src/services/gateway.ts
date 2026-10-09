@@ -3,7 +3,8 @@ import { config } from '../config';
 import { db as defaultDb } from '../db/client';
 import { badRequest } from '../utils/errors';
 import { logger } from '../utils/logger';
-import { PAYMENTS_KEY, readIntegration, resolveValues } from './integrations';
+import { PAYMENTS_KEY, readIntegration, secretsIfReadable } from './integrations';
+import type { IntegrationSetting } from '../types/models';
 import { SquareGateway } from './squareGateway';
 
 /**
@@ -18,8 +19,9 @@ import { SquareGateway } from './squareGateway';
  *
  * Square can come from the environment — a default processor with nothing to
  * click through first — or from the settings screen, which a corporate user
- * fills in once it is switched on there. Settings takes precedence over the
- * environment; see activeGateway() at the bottom.
+ * fills in when the environment has none. When SQUARE_ACCESS_TOKEN is set,
+ * the environment wins and Settings cannot override it; see activeGateway()
+ * at the bottom.
  */
 
 export interface CardDetails {
@@ -190,11 +192,8 @@ class ManualGateway implements PaymentGateway {
 /**
  * The processor configured in the environment: Square, if a token is set, or
  * nothing. This is what a single-branch install charges through by default,
- * with no Settings screen to click through first. A corporate account
- * managing several branches overrides it there instead — see activeGateway()
- * below. Square's webhook route always answers to this one when the
- * settings row has nothing configured, so a payment taken through it still
- * reconciles either way.
+ * with no Settings screen to click through first, and when it is set it is
+ * the only processor: Settings cannot replace it — see activeGateway() below.
  */
 function gatewayFromEnvironment(): PaymentGateway {
   const square = config.payments.square;
@@ -239,13 +238,30 @@ export const envGateway: PaymentGateway = gatewayFromEnvironment();
  * has to be reconciled.
  */
 export async function squareGateway(db: Knex = defaultDb): Promise<SquareGateway | null> {
+  if (squareFromEnvironment()) return envGateway as SquareGateway;
   const row = await readIntegration(PAYMENTS_KEY, db);
-  const saved = row && row.provider === 'square' ? row : null;
-  // The one taking payments comes first, so a half-filled draft saved under
-  // Settings never shadows working credentials from the environment.
-  if (saved?.is_enabled) return new SquareGateway(resolveValues(saved));
-  if (envGateway instanceof SquareGateway) return envGateway;
-  return saved ? new SquareGateway(resolveValues(saved)) : null;
+  return row && row.provider === 'square' ? savedSquare(row) : null;
+}
+
+/**
+ * True when Square is configured in the server's environment (Render). Then
+ * it is the one processor: the Settings screen shows it but cannot change it,
+ * so nothing typed there — and no stolen admin session — can send customers'
+ * payments to another Square account.
+ */
+export function squareFromEnvironment(): boolean {
+  return envGateway instanceof SquareGateway;
+}
+
+/**
+ * The Settings row's Square, or null when its credentials cannot be
+ * decrypted (the key changed since they were saved). Treated as not
+ * connected rather than as an error, so the app keeps working — taking no
+ * cards — and Settings stays open to put the credentials back.
+ */
+function savedSquare(row: IntegrationSetting): SquareGateway | null {
+  const secrets = secretsIfReadable(row);
+  return secrets ? new SquareGateway({ ...(row.settings ?? {}), ...secrets }) : null;
 }
 
 /**
@@ -254,9 +270,11 @@ export async function squareGateway(db: Knex = defaultDb): Promise<SquareGateway
  * who switches Square on expects the next charge to go through it.
  */
 export async function activeGateway(db: Knex = defaultDb): Promise<PaymentGateway> {
+  if (squareFromEnvironment()) return envGateway;
   const row = await readIntegration(PAYMENTS_KEY, db);
   if (row?.is_enabled && row.provider === 'square') {
-    return new SquareGateway(resolveValues(row));
+    const saved = savedSquare(row);
+    if (saved) return saved;
   }
   return envGateway;
 }

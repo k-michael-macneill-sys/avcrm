@@ -144,7 +144,7 @@ export function Bookkeeping(): JSX.Element {
             {
               header: 'Category',
               cell: (row) => (
-                <div className="min-w-[10rem]">
+                <div className="min-w-40">
                   <p className="text-foreground">{row.category_label}</p>
                   {row.description || row.vendor ? (
                     <p className="text-xs text-muted-foreground">

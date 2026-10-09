@@ -15,6 +15,7 @@ import {
 } from './contracts';
 import type { AgreementValues } from '../types/agreement';
 import { agreementFromDeal } from './agreement';
+import { contractValues } from '../types/agreement';
 import { enqueueMessage } from './messages';
 import { keyFor, ruleFor, storage } from './storage';
 
@@ -252,10 +253,13 @@ export async function openInvitation(
     addon_stairs: quote.addon_stairs,
     expires_at: request.expires_at,
     terms_version: CURRENT_TERMS_VERSION,
-    agreement: agreementFromDeal(
-      { first_name: quote.first_name, last_name: quote.last_name, email: quote.email, phone: quote.phone },
-      quote,
-      quote,
+    // The customer's copy: the crew's notes are not theirs to see.
+    agreement: contractValues(
+      agreementFromDeal(
+        { first_name: quote.first_name, last_name: quote.last_name, email: quote.email, phone: quote.phone },
+        quote,
+        quote,
+      ),
     ),
     checklist: (await listChecklistRequirements(db))
       .filter((r) => r.code !== CARD_ON_FILE)
@@ -379,7 +383,7 @@ function decodeSignature(dataUrl: string): Buffer {
 async function verified(token: string, db: Knex): Promise<SigningRequest> {
   let payload: SigningTokenPayload;
   try {
-    payload = jwt.verify(token, config.auth.jwtSecret) as SigningTokenPayload;
+    payload = jwt.verify(token, config.auth.jwtSecret, { algorithms: ['HS256'] }) as SigningTokenPayload;
   } catch {
     throw unauthorized('That signing link is not valid or has expired');
   }

@@ -45,13 +45,21 @@ interface IntegrationSettings {
   is_enabled: boolean;
   settings: Record<string, string>;
   secrets_set: string[];
+  /** Saved before JWT_SECRET or SECRETS_KEY changed: has to be typed again. */
+  secrets_unreadable: boolean;
   updated_at: string | null;
+}
+
+interface SmsSettings extends IntegrationSettings {
+  env_twilio: { account_sid: boolean; auth_token: boolean; from_number: boolean; live: boolean };
 }
 
 interface PaymentSettings extends IntegrationSettings {
   webhook_url: string;
   currency: string;
   env_gateway: string;
+  /** Square comes from Render's environment, and cannot be changed here. */
+  managed_by_environment: boolean;
   env_square: {
     environment: string;
     access_token: boolean;
@@ -68,7 +76,7 @@ export function Settings(): JSX.Element {
     () =>
       Promise.all([
         api.get<Provider[]>('/settings/sms/providers'),
-        api.get<IntegrationSettings>('/settings/sms'),
+        api.get<SmsSettings>('/settings/sms'),
         api.get<Provider[]>('/settings/payments/providers'),
         api.get<PaymentSettings>('/settings/payments'),
       ]),
@@ -84,40 +92,116 @@ export function Settings(): JSX.Element {
     <>
       <PageHeader title="Settings" subtitle="Outside services this company uses" />
 
+      {payments.managed_by_environment ? (
+        <Section title="Card payments" className="mb-4">
+          <FieldList>
+            <Field label="Status">Taking payments through Square — set in the server environment (Render)</Field>
+          </FieldList>
+          <p className="mt-3 max-w-[60ch] text-sm text-muted-foreground">
+            The Square credentials live only in Render&apos;s environment variables, so they cannot be changed or
+            replaced from this screen. To change them, edit the SQUARE_* variables on the Render service and redeploy.
+          </p>
+          <div className="mt-4">
+            <FieldList>
+              <Field label="Webhook URL">
+                <code className="break-all text-xs">{payments.webhook_url}</code>
+              </Field>
+              <Field label="Billing currency">{payments.currency}</Field>
+              <Field label="Server (Render) Square settings">
+                <span className="text-xs">
+                  SQUARE_ENVIRONMENT: {payments.env_square.environment} ·{' '}
+                  {(
+                    [
+                      ['SQUARE_ACCESS_TOKEN', payments.env_square.access_token],
+                      ['SQUARE_APPLICATION_ID', payments.env_square.application_id],
+                      ['SQUARE_LOCATION_ID', payments.env_square.location_id],
+                      ['SQUARE_WEBHOOK_SIGNATURE_KEY', payments.env_square.webhook_signature_key],
+                    ] as const
+                  ).map(([name, set]) => (
+                    <span key={name} className={set ? 'text-good' : 'text-critical'}>
+                      {name}: {set ? 'set' : 'missing'}{' '}
+                    </span>
+                  ))}
+                </span>
+              </Field>
+            </FieldList>
+          </div>
+        </Section>
+      ) : (
+        <IntegrationSection
+          path="/settings/payments"
+          confirmWithPassword
+          title="Card payments"
+          enableLabel="Take card payments through this processor"
+          statusOn="Taking payments"
+          statusOff="Not taking payments"
+          activeFromServer={
+            payments.env_gateway === 'square'
+              ? 'Taking payments through Square — set in the server environment (Render)'
+              : undefined
+          }
+          noneText={
+            payments.env_gateway === 'square'
+              ? 'Square is configured on the server and handles card payments. Connect it here instead to override that for this company.'
+              : 'No processor connected. Payments can still be recorded by hand, and nothing is charged automatically.'
+          }
+          providers={paymentProviders}
+          current={payments}
+          onSaved={reload}
+        >
+          <FieldList>
+            <Field label="Webhook URL">
+              <code className="break-all text-xs">{payments.webhook_url}</code>
+            </Field>
+            <Field label="Billing currency">{payments.currency}</Field>
+            <Field label="Server (Render) Square settings">
+              <span className="text-xs">
+                SQUARE_ENVIRONMENT: {payments.env_square.environment} ·{' '}
+                {(
+                  [
+                    ['SQUARE_ACCESS_TOKEN', payments.env_square.access_token],
+                    ['SQUARE_APPLICATION_ID', payments.env_square.application_id],
+                    ['SQUARE_LOCATION_ID', payments.env_square.location_id],
+                    ['SQUARE_WEBHOOK_SIGNATURE_KEY', payments.env_square.webhook_signature_key],
+                  ] as const
+                ).map(([name, set]) => (
+                  <span key={name} className={set ? 'text-good' : 'text-critical'}>
+                    {name}: {set ? 'set' : 'missing'}{' '}
+                  </span>
+                ))}
+              </span>
+            </Field>
+          </FieldList>
+        </IntegrationSection>
+      )}
+      <PaymentTestSection />
+
       <IntegrationSection
-        path="/settings/payments"
-        title="Card payments"
-        enableLabel="Take card payments through this processor"
-        statusOn="Taking payments"
-        statusOff="Not taking payments"
+        path="/settings/sms"
+        title="Text messages"
+        enableLabel="Send text messages to customers"
+        statusOn="Sending"
+        statusOff="Not sending"
         activeFromServer={
-          payments.env_gateway === 'square'
-            ? 'Taking payments through Square — set in the server environment (Render)'
-            : undefined
+          sms.env_twilio.live ? 'Sending through Twilio — set in the server environment (Render)' : undefined
         }
         noneText={
-          payments.env_gateway === 'square'
-            ? 'Square is configured on the server and handles card payments. Connect it here instead to override that for this company.'
-            : 'No processor connected. Payments can still be recorded by hand, and nothing is charged automatically.'
+          sms.env_twilio.live
+            ? 'Twilio is configured on the server and sends every text. Connect a provider here instead to override that for this company.'
+            : 'No provider yet. Messages queued for SMS are rendered and logged, and nothing is sent until one is picked here or TWILIO_* is set on the server.'
         }
-        providers={paymentProviders}
-        current={payments}
+        providers={smsProviders}
+        current={sms}
         onSaved={reload}
       >
         <FieldList>
-          <Field label="Webhook URL">
-            <code className="break-all text-xs">{payments.webhook_url}</code>
-          </Field>
-          <Field label="Billing currency">{payments.currency}</Field>
-          <Field label="Server (Render) Square settings">
+          <Field label="Server (Render) Twilio settings">
             <span className="text-xs">
-              SQUARE_ENVIRONMENT: {payments.env_square.environment} ·{' '}
               {(
                 [
-                  ['SQUARE_ACCESS_TOKEN', payments.env_square.access_token],
-                  ['SQUARE_APPLICATION_ID', payments.env_square.application_id],
-                  ['SQUARE_LOCATION_ID', payments.env_square.location_id],
-                  ['SQUARE_WEBHOOK_SIGNATURE_KEY', payments.env_square.webhook_signature_key],
+                  ['TWILIO_ACCOUNT_SID', sms.env_twilio.account_sid],
+                  ['TWILIO_AUTH_TOKEN', sms.env_twilio.auth_token],
+                  ['TWILIO_FROM_NUMBER', sms.env_twilio.from_number],
                 ] as const
               ).map(([name, set]) => (
                 <span key={name} className={set ? 'text-good' : 'text-critical'}>
@@ -128,19 +212,6 @@ export function Settings(): JSX.Element {
           </Field>
         </FieldList>
       </IntegrationSection>
-      <PaymentTestSection />
-
-      <IntegrationSection
-        path="/settings/sms"
-        title="Text messages"
-        enableLabel="Send text messages to customers"
-        statusOn="Sending"
-        statusOff="Not sending"
-        noneText="No provider yet. Messages queued for SMS are rendered and logged, and nothing is sent until one is picked here."
-        providers={smsProviders}
-        current={sms}
-        onSaved={reload}
-      />
       <TestSection />
     </>
   );
@@ -158,8 +229,15 @@ function IntegrationSection({
   current,
   onSaved,
   children,
+  confirmWithPassword = false,
 }: {
   path: string;
+  /**
+   * Asks for the admin's own password with every save. Card payments set it:
+   * that form decides whose account customers pay, and the server will not
+   * change it on a session alone.
+   */
+  confirmWithPassword?: boolean;
   title: string;
   enableLabel: string;
   statusOn: string;
@@ -208,7 +286,11 @@ function IntegrationSection({
     setValues(Object.fromEntries(specs.map((s) => [s.name, s.value ?? ''])));
   }, [specs]);
 
-  const { run, pending, error } = useSubmit(onSaved);
+  const [password, setPassword] = React.useState('');
+  const { run, pending, error } = useSubmit(() => {
+    setPassword('');
+    onSaved();
+  });
 
   const save = (): void => {
     const settings: Record<string, string> = {};
@@ -219,7 +301,15 @@ function IntegrationSection({
       // A blank secret means "keep what is stored", so it is not sent at all.
       else if (value) secrets[f.name] = value;
     }
-    run(() => api.put(path, { provider: chosen, is_enabled: enabled, settings, secrets }));
+    run(() =>
+      api.put(path, {
+        provider: chosen,
+        is_enabled: enabled,
+        settings,
+        secrets,
+        ...(confirmWithPassword ? { current_password: password } : {}),
+      }),
+    );
   };
 
   const selectId = `${path.replace(/\W/g, '-')}-provider`;
@@ -234,6 +324,14 @@ function IntegrationSection({
           <Field label="Last changed">{current.updated_at ? stamp(current.updated_at) : 'never'}</Field>
         </FieldList>
         {children}
+
+        {current.secrets_unreadable ? (
+          <div className="mt-4">
+              <ErrorNotice
+                message={`The saved ${current.provider === 'square' ? 'Square' : 'provider'} credentials can no longer be read, because the server's encryption key (JWT_SECRET or SECRETS_KEY) changed after they were saved. Until they are typed in again and saved, this is switched off. Enter every credential below again.`}
+              />
+          </div>
+        ) : null}
 
         <div className="mt-4 flex flex-col gap-1.5">
           <Label htmlFor={selectId}>Provider</Label>
@@ -271,6 +369,19 @@ function IntegrationSection({
           <Checkbox checked={enabled} onCheckedChange={(v) => setEnabled(v === true)} />
           {enableLabel}
         </label>
+
+        {confirmWithPassword ? (
+          <div className="mt-4 flex max-w-xs flex-col gap-1.5">
+            <Label htmlFor={`${selectId}-password`}>Your password, to confirm</Label>
+            <Input
+              id={`${selectId}-password`}
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
+        ) : null}
 
         {error ? <ErrorNotice message={error} /> : null}
         <div className="mt-3">
@@ -312,7 +423,7 @@ function PaymentTestSection(): JSX.Element {
     <Section title="Check the connection" className="mb-4">
       <p className="mb-3 max-w-[60ch] text-xs text-muted-foreground">
         Asks Square about the location using the access token payments actually go through —
-        the one switched on here, or else the one set on the server. No money moves.
+        the one set on the server (Render) if there is one, or else the one saved here. No money moves.
       </p>
       <Button type="button" variant="secondary" disabled={pending} onClick={check}>
         Check connection

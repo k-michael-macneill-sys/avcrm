@@ -2,6 +2,8 @@ import * as React from 'react';
 import { Trash2 } from 'lucide-react';
 import { ErrorNotice } from '@/components/Misc';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Dialog,
   DialogClose,
@@ -25,6 +27,7 @@ export function ConfirmDelete({
   onDeleted,
   label = 'Delete',
   size = 'sm',
+  typeToConfirm,
 }: {
   /** "this customer", "the pin at 12 Main St" — finishes "Delete …?" */
   what: string;
@@ -34,8 +37,12 @@ export function ConfirmDelete({
   onDeleted: () => void;
   label?: string;
   size?: 'sm' | 'default';
+  /** A word that must be typed exactly before the delete button wakes up. */
+  typeToConfirm?: string;
 }): JSX.Element {
   const [open, setOpen] = React.useState(false);
+  const [typed, setTyped] = React.useState('');
+  const confirmed = !typeToConfirm || typed === typeToConfirm;
   const { run, pending, error, clearError } = useSubmit(() => {
     setOpen(false);
     onDeleted();
@@ -47,6 +54,7 @@ export function ConfirmDelete({
       onOpenChange={(next) => {
         if (pending) return;
         if (!next) clearError();
+        setTyped('');
         setOpen(next);
       }}
     >
@@ -63,6 +71,21 @@ export function ConfirmDelete({
             {consequences ? ` ${consequences}` : ''}
           </DialogDescription>
         </DialogHeader>
+        {typeToConfirm ? (
+          <div className="mb-3 flex flex-col gap-1.5">
+            <Label htmlFor="confirm-delete-word">
+              Type <span className="font-mono font-semibold">{typeToConfirm}</span> to confirm
+            </Label>
+            <Input
+              id="confirm-delete-word"
+              autoComplete="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+            />
+          </div>
+        ) : null}
         {error ? (
           <div className="mb-3">
             <ErrorNotice message={error} />
@@ -77,7 +100,7 @@ export function ConfirmDelete({
           <Button
             type="button"
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            disabled={pending}
+            disabled={pending || !confirmed}
             onClick={() => run(onConfirm)}
           >
             {pending ? 'Deleting…' : 'Yes, delete'}

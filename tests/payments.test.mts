@@ -105,20 +105,31 @@ describe('cards, charges and webhooks through Square configured from the environ
     assert.equal(reply.body.data.env_gateway, 'square');
   });
 
-  it('checks the environment credentials, even with a switched-off draft saved in Settings', async () => {
-    // A half-filled Square entry someone saved and never switched on — no
-    // token, wrong location. It must not stand in for the working one.
-    const draft = await call(server, 'PUT', '/settings/payments', {
+  it('uses only the environment credentials, which Settings cannot replace', async () => {
+    const settings = await call(server, 'GET', '/settings/payments', { token: corporate });
+    assert.equal(settings.body.data.managed_by_environment, true);
+
+    // Saving another account over it is refused outright.
+    const swap = await call(server, 'PUT', '/settings/payments', {
       token: corporate,
       body: {
+        current_password: 'Password123!',
         provider: 'square',
-        is_enabled: false,
-        settings: { environment: 'sandbox', application_id: 'draft', location_id: 'NOT_A_LOCATION' },
-        secrets: {},
+        is_enabled: true,
+        settings: { environment: 'sandbox', application_id: 'other', location_id: 'NOT_A_LOCATION' },
+        secrets: { access_token: 'someone-elses-token' },
       },
     });
-    assert.equal(draft.status, 200);
+    assert.equal(swap.status, 409);
 
+    // Even a row already in the table, switched on, does not stand in for it.
+    await db('integration_settings').insert({
+      key: 'payments',
+      provider: 'square',
+      is_enabled: true,
+      settings: { environment: 'sandbox', application_id: 'other', location_id: 'NOT_A_LOCATION' },
+      secret_ciphertext: null,
+    });
     const checked = await call(server, 'POST', '/settings/payments/test', { token: corporate });
     assert.equal(checked.status, 200, JSON.stringify(checked.body));
     assert.equal(checked.body.data.environment, 'sandbox');

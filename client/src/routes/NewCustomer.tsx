@@ -9,7 +9,12 @@ import {
   type Property,
   type Quote,
 } from '../../../src/types/models';
-import { defaultAgreementYears, type AgreementValues } from '../../../src/types/agreement';
+import {
+  seasonTerm,
+  termDate,
+  termTypeOf,
+  type AgreementValues,
+} from '../../../src/types/agreement';
 import { useAuth } from '@/auth/AuthContext';
 import { AgreementPdf, type SignatureField } from '@/components/AgreementPdf';
 import { ErrorNotice, Loading } from '@/components/Misc';
@@ -17,10 +22,12 @@ import { PageHeader } from '@/components/PageHeader';
 import { Section } from '@/components/Section';
 import { SignDialog, type Signature } from '@/components/SignDialog';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import * as api from '@/lib/api';
-import { usePublicConfig } from '@/lib/publicApi';
+import { usePublicConfigState } from '@/lib/publicApi';
 import { openFile, uploadBlob } from '@/lib/upload';
 import { useQuery } from '@/lib/useQuery';
 import { useSubmit } from '@/lib/useSubmit';
@@ -104,7 +111,8 @@ function startingValues(
     customer_city: city,
     customer_province: prefill.get('province') ?? branch?.province ?? '',
     customer_postal: prefill.get('postal_code') ?? '',
-    ...defaultAgreementYears(),
+    term_type: 'Seasonal',
+    ...seasonTerm(),
   };
 }
 
@@ -262,6 +270,28 @@ function AgreementSignup({
         </div>
       ) : null}
 
+      <ContractPeriod
+        values={values}
+        onChange={edit}
+        invalid={invalid.some((f) => f === 'term_start' || f === 'term_end')}
+      />
+
+      <div className="mx-auto mb-4 flex w-full max-w-3xl flex-col gap-1.5">
+        <Label htmlFor="crew-notes">Notes for the crew</Label>
+        <Textarea
+          id="crew-notes"
+          rows={3}
+          maxLength={2000}
+          placeholder="Gate code, where to pile snow, the dog in the yard…"
+          value={typeof values.customer_notes === 'string' ? values.customer_notes : ''}
+          onChange={(e) => edit({ ...values, customer_notes: e.target.value })}
+        />
+        <p className="text-xs text-muted-foreground">
+          Kept in the CRM for operators and managers, on dispatch and the customer’s profile. Not on the contract, and
+          never shown to the customer.
+        </p>
+      </div>
+
       <div className="mx-auto w-full max-w-3xl">
         <AgreementPdf
           values={values}
@@ -276,7 +306,7 @@ function AgreementSignup({
         />
       </div>
 
-      <div className="sticky bottom-0 z-10 mx-auto mt-4 w-full max-w-3xl rounded-xl border border-border bg-background/95 p-3 backdrop-blur max-[720px]:bottom-[calc(4.5rem+env(safe-area-inset-bottom))]">
+      <div className="sticky bottom-0 z-10 mx-auto mt-4 w-full max-w-3xl rounded-xl border border-border bg-background/95 p-3 backdrop-blur-sm max-[720px]:bottom-[calc(4.5rem+env(safe-area-inset-bottom))]">
         {problem ? (
           <div className="mb-3">
             <ErrorNotice message={problem} />
@@ -308,6 +338,76 @@ function AgreementSignup({
         hasSignature={!!(signing && signatures[signing])}
       />
     </>
+  );
+}
+
+/**
+ * The contract period as two buttons: the full season, or exact dates. Exact
+ * dates shows its start and end inputs right here, no pop-up.
+ */
+function ContractPeriod({
+  values,
+  onChange,
+  invalid,
+}: {
+  values: AgreementValues;
+  onChange: (next: AgreementValues) => void;
+  invalid: boolean;
+}): JSX.Element {
+  const exact = termTypeOf(values) === 'Exact dates';
+  // From today, or November 1st before the season, to March 31st.
+  const season = seasonTerm();
+  const day = (name: 'term_start' | 'term_end'): string =>
+    typeof values[name] === 'string' ? (values[name] as string) : '';
+  const bad = invalid ? 'ring-2 ring-red-500' : undefined;
+
+  return (
+    <div id="contract-period" className="mx-auto mb-4 flex w-full max-w-3xl flex-col gap-2">
+      <Label>Contract period</Label>
+      <div className="grid grid-cols-2 gap-2">
+        <Button
+          type="button"
+          variant={exact ? 'secondary' : 'default'}
+          aria-pressed={!exact}
+          onClick={() => onChange({ ...values, term_type: 'Seasonal', ...season })}
+        >
+          Full season ({termDate(season.term_start).replace(/, \d{4}$/, '')} – Mar 31)
+        </Button>
+        <Button
+          type="button"
+          variant={exact ? 'default' : 'secondary'}
+          aria-pressed={exact}
+          onClick={() => onChange({ ...values, term_type: 'Exact dates' })}
+        >
+          Exact dates
+        </Button>
+      </div>
+      {exact ? (
+        <div className="grid grid-cols-2 gap-2">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="term-start">Service starts on</Label>
+            <Input
+              id="term-start"
+              type="date"
+              value={day('term_start')}
+              className={bad}
+              onChange={(e) => onChange({ ...values, term_type: 'Exact dates', term_start: e.target.value })}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="term-end">Service ends on</Label>
+            <Input
+              id="term-end"
+              type="date"
+              min={day('term_start') || undefined}
+              value={day('term_end')}
+              className={bad}
+              onChange={(e) => onChange({ ...values, term_type: 'Exact dates', term_end: e.target.value })}
+            />
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -348,7 +448,7 @@ function EmailSent({ sent }: { sent: { url: string; sent_to: string; quote: Quot
 
 /** Signed: the document, then the card for autopay. */
 function AfterSigning({ contract }: { contract: Contract }): JSX.Element {
-  const config = usePublicConfig();
+  const { config, error: configError } = usePublicConfigState();
   const [cardUrl, setCardUrl] = React.useState<string | null>(null);
   const [sentTo, setSentTo] = React.useState<string | null>(null);
   const { run, pending, error } = useSubmit();
@@ -374,7 +474,9 @@ function AfterSigning({ contract }: { contract: Contract }): JSX.Element {
           </Button>
         ) : null}
 
-        {config && !config.card_capture ? (
+        {configError ? (
+          <ErrorNotice message={configError} />
+        ) : config && !config.card_capture ? (
           <p className="text-sm text-muted-foreground">
             Card payments are not connected yet, so the office will follow up for the card. (Connect Square to take
             cards here.)
