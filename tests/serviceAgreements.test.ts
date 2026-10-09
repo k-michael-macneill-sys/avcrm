@@ -383,6 +383,68 @@ describe('the service agreement', () => {
     });
   });
 
+  describe('signing by emailed link', () => {
+    async function send(token: string, quoteId: string) {
+      return call(h.server(), 'POST', `/agreements/${quoteId}/send`, { token });
+    }
+    const linkToken = (url: string) => url.split('/sign/')[1]!;
+
+    it('emails the customer a link, and refuses a paper agreement', async () => {
+      const { quote_id, token, customer_id } = await setup();
+      const reply = await send(token, quote_id);
+      assert.equal(reply.status, 201, JSON.stringify(reply.body));
+      assert.equal(reply.body.data.sent_to, 'harold@example.test');
+      const email = await table('message_log').where({ customer_id, template_code: 'signing_request' }).first();
+      assert.equal(email?.recipient, 'harold@example.test', 'the link is emailed to the customer');
+
+      const form = (await call(h.server(), 'GET', `/agreements/${quote_id}`, { token })).body.data;
+      assert.equal(form.signing_request.status, 'sent');
+      const summary = (await call(h.server(), 'GET', `/customers/${customer_id}/summary`, { token })).body.data;
+      assert.equal(summary.contracts[0].status, 'sent_for_signature');
+
+      const paper = await setup(
+        { contract_type_id: await idOf('contract_types', 'seasonal_1_paper') },
+        { first_name: 'Pat', address_line1: '9 Earl St' },
+      );
+      assert.equal((await send(paper.token, paper.quote_id)).status, 409);
+    });
+
+    it('shows the customer the same agreement, signed box by box', async () => {
+      const { quote_id, token, customer_id } = await setup();
+      const sent = (await send(token, quote_id)).body.data;
+      const opened = await call(h.server(), 'GET', `/public/sign/${linkToken(sent.url)}`);
+      assert.equal(opened.status, 200);
+      const invitation = opened.body.data;
+      assert.equal(invitation.service_agreement.customer.name, 'Harold Bell');
+      assert.deepEqual(invitation.required_boxes, ALL_BOXES);
+      assert.ok(!JSON.stringify(invitation.service_agreement).includes('Pile snow left of the garage'), 'crew notes stay internal');
+
+      const png = `data:image/png;base64,${PNG.toString('base64')}`;
+      const unsigned = await call(h.server(), 'POST', `/public/sign/${linkToken(sent.url)}`, {
+        body: { signature_png: png, confirmed: [], boxes: ['commitment'], signer_name: 'Harold Bell' },
+      });
+      assert.equal(unsigned.status, 400);
+
+      const signed = await call(h.server(), 'POST', `/public/sign/${linkToken(sent.url)}`, {
+        body: { signature_png: png, confirmed: [], boxes: ALL_BOXES, signer_name: 'Harold Bell' },
+      });
+      assert.equal(signed.status, 201, JSON.stringify(signed.body));
+      const contract = await table('contracts').where({ id: signed.body.data.contract_id }).first();
+      assert.equal(contract.signer_name, 'Harold Bell');
+      assert.equal(contract.terms_version, 'SA-2026-10-09');
+      assert.ok(contract.signed_ip);
+      assert.ok(contract.pdf_url, 'the locked PDF is stored');
+      assert.deepEqual(Object.keys(contract.signature_boxes).sort(), [...ALL_BOXES].sort());
+      const copy = await table('message_log').where({ customer_id, template_code: 'agreement_signed' }).first();
+      assert.equal(copy?.attachment_key, contract.pdf_url);
+
+      const again = await call(h.server(), 'POST', `/public/sign/${linkToken(sent.url)}`, {
+        body: { signature_png: png, confirmed: [], boxes: ALL_BOXES, signer_name: 'Harold Bell' },
+      });
+      assert.equal(again.status, 409, 'the link is single-use');
+    });
+  });
+
   describe('billing from the schedule', () => {
     /** A season under way, so the first payment is due the day it is signed. */
     function inSeason(): { season_start: string; season_end: string } {

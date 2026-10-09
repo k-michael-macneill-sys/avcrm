@@ -66,6 +66,8 @@ export interface AgreementForm extends AgreementInput {
   status: Quote['status'];
   contract_id: string | null;
   created_at: Date;
+  /** The newest emailed signing link, if one was sent. */
+  signing_request: { sent_to: string; status: string; created_at: Date; expires_at: Date } | null;
 }
 
 function scopedQuotes(db: Knex, scope: BranchScope) {
@@ -377,6 +379,10 @@ async function formOf(quoteId: string, db: Knex): Promise<AgreementForm> {
     db('quote_tags').where({ quote_id: quoteId }).pluck('tag_id') as Promise<string[]>,
     db('contracts').where({ quote_id: quoteId }).first('id') as Promise<{ id: string } | undefined>,
   ]);
+  const invite = (await db('signing_requests')
+    .where({ quote_id: quoteId })
+    .orderBy('created_at', 'desc')
+    .first('sent_to', 'status', 'created_at', 'expires_at')) as AgreementForm['signing_request'] | undefined;
   const addonsTotal = addons.reduce((sum, a) => sum + (toCents(a.price) ?? 0), 0);
   return {
     quote_id: quote.id,
@@ -384,6 +390,7 @@ async function formOf(quoteId: string, db: Knex): Promise<AgreementForm> {
     status: quote.status,
     contract_id: contract?.id ?? null,
     created_at: quote.created_at,
+    signing_request: invite ?? null,
     property_id: quote.property_id,
     contract_type_id: quote.contract_type_id!,
     billing_plan_id: quote.billing_plan_id!,
@@ -410,7 +417,7 @@ async function formOf(quoteId: string, db: Knex): Promise<AgreementForm> {
 }
 
 /** The scope check every read below starts with. */
-async function assertAgreementInScope(quoteId: string, scope: BranchScope, db: Knex): Promise<void> {
+export async function assertAgreementInScope(quoteId: string, scope: BranchScope, db: Knex = defaultDb): Promise<void> {
   const row = await scopedQuotes(db, scope).andWhere('quotes.id', quoteId).first('quotes.billing_plan_id');
   if (!row) throw notFound('Agreement not found');
   if (!(row as { billing_plan_id: string | null }).billing_plan_id) {
@@ -561,7 +568,7 @@ async function assertStored(key: string, purpose: 'signature' | 'contract_pdf', 
 }
 
 /** The signed PDF, by email, if the customer has an address to send it to. */
-async function emailSignedCopy(contractId: string, trx: Knex.Transaction): Promise<void> {
+export async function emailSignedCopy(contractId: string, trx: Knex.Transaction): Promise<void> {
   const row = (await trx('contracts')
     .join('customers', 'customers.id', 'contracts.customer_id')
     .join('properties', 'properties.id', 'contracts.property_id')

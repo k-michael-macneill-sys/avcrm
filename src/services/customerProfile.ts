@@ -114,6 +114,10 @@ export async function getCustomerSummary(id: string, scope: BranchScope, db: Kne
       .select(
         'quotes.id as quote_id',
         'quotes.created_at',
+        // An emailed link still waiting on the customer.
+        db.raw(
+          "exists (select 1 from signing_requests sr where sr.quote_id = quotes.id and sr.status = 'sent' and sr.expires_at > now()) as emailed",
+        ),
         'quotes.property_id',
         'properties.address_line1',
         'contract_types.label as type_label',
@@ -126,6 +130,7 @@ export async function getCustomerSummary(id: string, scope: BranchScope, db: Kne
         address_line1: string;
         type_label: string;
         agreement_medium: 'electronic' | 'paper';
+        emailed: boolean;
       }[]
     >,
     db('invoices')
@@ -151,7 +156,7 @@ export async function getCustomerSummary(id: string, scope: BranchScope, db: Kne
       contract_id: null,
       quote_id: p.quote_id,
       agreement: p.type_label,
-      status: 'pending_signature',
+      status: p.emailed ? 'sent_for_signature' : 'pending_signature',
       signup_date: p.created_at,
       property_id: p.property_id,
       address_line1: p.address_line1,

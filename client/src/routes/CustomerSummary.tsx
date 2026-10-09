@@ -928,7 +928,7 @@ function ServiceInfoDialog({
   onOpenChange: (open: boolean) => void;
 }): JSX.Element {
   // The active contract's agreement, or the newest one waiting to be signed.
-  const row = summary.active_contract ?? summary.contracts.find((c) => c.status === 'pending_signature') ?? null;
+  const row = summary.active_contract ?? summary.contracts.find((c) => c.status === 'pending_signature' || c.status === 'sent_for_signature') ?? null;
   const doc = useQuery(
     () => (open && row ? api.get<AgreementModel>(`/agreements/${row.quote_id}/document`).catch(() => null) : Promise.resolve(null)),
     [open, row?.quote_id],

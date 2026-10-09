@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { CreditCard, FileText, Pencil, Printer, Upload } from 'lucide-react';
+import { Copy, CreditCard, FileText, Mail, Pencil, Printer, Upload } from 'lucide-react';
 import type { Contract } from '../../../src/types/models';
 import {
   agreementDateLabel,
@@ -13,15 +13,13 @@ import { ErrorNotice, Loading } from '@/components/Misc';
 import { PageHeader } from '@/components/PageHeader';
 import { Section } from '@/components/Section';
 import { ServiceAgreementDocument } from '@/components/ServiceAgreementDocument';
-import { SignaturePad, type SignaturePadHandle } from '@/components/SignaturePad';
-import { trimToInk } from '@/components/SignDialog';
+import { DrawSignatureDialog } from '@/components/DrawSignatureDialog';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { AgreementForm } from '@/lib/agreements';
 import * as api from '@/lib/api';
-import { isoDate } from '@/lib/format';
+import { isoDate, stamp } from '@/lib/format';
 import { usePublicConfigState } from '@/lib/publicApi';
 import { downloadDocument, openFile, uploadBlob } from '@/lib/upload';
 import { useQuery } from '@/lib/useQuery';
@@ -106,10 +104,13 @@ export function AgreementSign(): JSX.Element {
           reload();
         }} />
       ) : (
+        <>
+        <EmailForSignature quoteId={quoteId} model={model} form={form} onSent={reload} />
         <ElectronicSigning quoteId={quoteId} model={model} onSigned={(c) => {
           setSigned(c);
           reload();
         }} />
+        </>
       )}
     </>
   );
@@ -202,7 +203,7 @@ function ElectronicSigning({
         </div>
       </Section>
 
-      <DrawDialog
+      <DrawSignatureDialog
         box={drawingFor}
         onClose={() => setDrawingFor(null)}
         onDrawn={(drawn) => {
@@ -225,51 +226,6 @@ function position(): Promise<{ lat: number; lng: number } | null> {
       { timeout: 4000, maximumAge: 60_000 },
     );
   });
-}
-
-function DrawDialog({
-  box,
-  onClose,
-  onDrawn,
-}: {
-  box: SignatureBox | null;
-  onClose: () => void;
-  onDrawn: (signature: { blob: Blob; url: string }) => void;
-}): JSX.Element {
-  const pad = React.useRef<SignaturePadHandle>(null);
-  const [empty, setEmpty] = React.useState(false);
-  return (
-    <Dialog open={!!box} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Customer signature</DialogTitle>
-          <DialogDescription>
-            Draw your signature once. It is placed in this box, and you tap each other box on the agreement to sign it
-            too.
-          </DialogDescription>
-        </DialogHeader>
-        <SignaturePad ref={pad} />
-        {empty ? <p className="text-sm text-critical">Sign in the box first.</p> : null}
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={() => pad.current?.clear()}>
-            Clear
-          </Button>
-          <Button
-            type="button"
-            onClick={async () => {
-              const drawn = pad.current?.isEmpty() ? null : await pad.current?.toBlob();
-              if (!drawn) return setEmpty(true);
-              setEmpty(false);
-              const blob = await trimToInk(drawn);
-              onDrawn({ blob, url: URL.createObjectURL(blob) });
-            }}
-          >
-            Sign
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
 }
 
 function PaperUpload({
@@ -394,6 +350,79 @@ function AfterSigning({ contractId }: { contractId: string }): JSX.Element {
             </Button>
           </div>
         )}
+        {error ? <ErrorNotice message={error} /> : null}
+      </div>
+    </Section>
+  );
+}
+
+/**
+ * For a customer who is not in front of the rep: email them a link to read
+ * and sign this agreement on their own device, then add their card. A new
+ * link replaces one still outstanding.
+ */
+function EmailForSignature({
+  quoteId,
+  model,
+  form,
+  onSent,
+}: {
+  quoteId: string;
+  model: AgreementModel;
+  form: AgreementForm;
+  onSent: () => void;
+}): JSX.Element {
+  const [link, setLink] = React.useState<string | null>(null);
+  const [copied, setCopied] = React.useState(false);
+  const { run, pending, error } = useSubmit(onSent);
+  const invite = form.signing_request;
+  const live = invite?.status === 'sent' && new Date(invite.expires_at).getTime() > Date.now();
+
+  return (
+    <Section title="Customer not here?" className="mb-4">
+      <div className="flex flex-col gap-2 text-sm">
+        {model.customer.email ? (
+          <p className="text-muted-foreground">
+            Email the agreement to <span className="text-foreground">{model.customer.email}</span>. They read it, sign every
+            box on their own device, and go straight on to add their card. They get the signed copy by email.
+          </p>
+        ) : (
+          <p className="text-muted-foreground">Add an email address to this customer to send them the agreement.</p>
+        )}
+        {invite ? (
+          <p>
+            {live
+              ? `Emailed to ${invite.sent_to} on ${stamp(invite.created_at)} — waiting for their signature (link good until ${stamp(invite.expires_at)}).`
+              : invite.status === 'completed'
+                ? 'Signed by the customer from the emailed link.'
+                : `The last link (sent ${stamp(invite.created_at)}) is no longer active.`}
+          </p>
+        ) : null}
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant={live ? 'secondary' : 'default'}
+            disabled={pending || !model.customer.email}
+            onClick={() =>
+              run(async () => {
+                const result = await api.post<{ url: string }>(`/agreements/${quoteId}/send`);
+                setLink(result.url);
+                setCopied(false);
+              })
+            }
+          >
+            <Mail className="size-4" /> {pending ? 'Sending…' : live ? 'Send a new link' : 'Email to customer for signature'}
+          </Button>
+          {link ? (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void navigator.clipboard?.writeText(link).then(() => setCopied(true))}
+            >
+              <Copy className="size-4" /> {copied ? 'Link copied' : 'Copy link'}
+            </Button>
+          ) : null}
+        </div>
         {error ? <ErrorNotice message={error} /> : null}
       </div>
     </Section>

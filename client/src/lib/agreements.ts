@@ -81,6 +81,7 @@ export interface AgreementForm extends AgreementFormValues {
   status: string;
   contract_id: string | null;
   created_at: string;
+  signing_request: { sent_to: string; status: string; created_at: string; expires_at: string } | null;
 }
 
 export interface NoteRow {

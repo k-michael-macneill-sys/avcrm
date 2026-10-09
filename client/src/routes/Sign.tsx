@@ -9,6 +9,17 @@ import { Button } from '@/components/ui/button';
 import { ApiError } from '@/lib/api';
 import { publicGet, publicPost } from '@/lib/publicApi';
 import { ThemeToggle } from '@/theme/ThemeToggle';
+import { DrawSignatureDialog } from '@/components/DrawSignatureDialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { ServiceAgreementDocument } from '@/components/ServiceAgreementDocument';
+import {
+  agreementDateLabel,
+  SIGNATURE_BOXES,
+  type AgreementModel,
+  type SignatureBox,
+} from '../../../src/types/serviceAgreement';
+import { isoDate } from '@/lib/format';
 
 /**
  * The page an emailed agreement link opens. No account, no navigation:
@@ -37,6 +48,9 @@ interface Invitation {
   terms_version: string;
   checklist: { code: string; label: string; is_required: boolean }[];
   agreement: AgreementValues;
+  /** A service agreement from the contract form, drawn and signed box by box. */
+  service_agreement: AgreementModel | null;
+  required_boxes: SignatureBox[];
 }
 
 export function Sign(): JSX.Element {
@@ -52,7 +66,7 @@ export function Sign(): JSX.Element {
 
   return (
     <div className="min-h-screen px-4 py-8">
-      <div className="mx-auto w-full max-w-3xl">
+      <div className={invitation?.service_agreement ? 'mx-auto w-full max-w-4xl' : 'mx-auto w-full max-w-3xl'}>
         <div className="mb-6 flex items-center justify-between">
           <img src={logo} alt="Drift Property Services" className="h-12 w-auto rounded-md" />
           <ThemeToggle />
@@ -67,6 +81,8 @@ export function Sign(): JSX.Element {
               </p>
             )}
           </Panel>
+        ) : invitation?.service_agreement ? (
+          <ServiceAgreementSigning token={token} invitation={invitation} model={invitation.service_agreement} />
         ) : invitation ? (
           <Agreement token={token} invitation={invitation} />
         ) : (
@@ -163,6 +179,136 @@ function Agreement({ token, invitation: inv }: { token: string; invitation: Invi
           setSigning(false);
         }}
         hasSignature={!!signature}
+      />
+    </>
+  );
+}
+
+/** The service agreement from the contract form: draw once, tap each box, then on to the card. */
+function ServiceAgreementSigning({
+  token,
+  invitation: inv,
+  model,
+}: {
+  token: string;
+  invitation: Invitation;
+  model: AgreementModel;
+}): JSX.Element {
+  const [signature, setSignature] = React.useState<{ blob: Blob; url: string } | null>(null);
+  const [boxes, setBoxes] = React.useState<Record<SignatureBox, boolean>>({
+    commitment: false,
+    service_commitment: false,
+    card_authorization: false,
+  });
+  const [drawingFor, setDrawingFor] = React.useState<SignatureBox | null>(null);
+  const [signerName, setSignerName] = React.useState(model.customer.name);
+  const [pending, setPending] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [done, setDone] = React.useState(false);
+  const missing = inv.required_boxes.filter((box) => !boxes[box]);
+
+  const submit = async (): Promise<void> => {
+    setError(null);
+    if (!signature || missing.length) {
+      setError('Please sign every box outlined in red — tap a box to sign it.');
+      return;
+    }
+    setPending(true);
+    try {
+      const result = await publicPost<{ contract_id: string; card_url: string | null }>(
+        `/public/sign/${encodeURIComponent(token)}`,
+        {
+          signature_png: await toDataUrl(signature.blob),
+          confirmed: [],
+          boxes: SIGNATURE_BOXES.filter((box) => boxes[box]),
+          signer_name: signerName,
+        },
+      );
+      if (result.card_url && model.plan_kind !== 'seasonal_yia') {
+        window.location.assign(result.card_url);
+        return;
+      }
+      setDone(true);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'That did not go through. Please try again.');
+    } finally {
+      setPending(false);
+    }
+  };
+
+  if (done) {
+    return (
+      <Panel>
+        <h1 className="text-xl font-semibold">Thanks, {inv.customer_first_name} — you're signed up</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Your agreement for {inv.address_line1} is signed, and a copy is on its way to your email. {inv.branch_name} will
+          be in touch about anything else. You can close this page.
+        </p>
+      </Panel>
+    );
+  }
+
+  return (
+    <>
+      <Panel>
+        <h1 className="text-2xl font-semibold tracking-tight">Your snow removal agreement</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          For {inv.customer_name} · {inv.branch_name}. Read it through, then tap each signature box outlined in red to sign
+          it. You draw your signature once.
+        </p>
+      </Panel>
+
+      <div className="my-4">
+        <ServiceAgreementDocument
+          model={model}
+          signing={{
+            signatureUrl: signature?.url ?? null,
+            signed: boxes,
+            required: inv.required_boxes,
+            signerName,
+            dateLabel: agreementDateLabel(isoDate()),
+            onBoxClick: (box) => {
+              if (boxes[box]) setBoxes((b) => ({ ...b, [box]: false }));
+              else if (signature) setBoxes((b) => ({ ...b, [box]: true }));
+              else setDrawingFor(box);
+            },
+          }}
+        />
+      </div>
+
+      <Panel>
+        <div className="flex max-w-sm flex-col gap-1.5">
+          <Label htmlFor="signer">Your full name</Label>
+          <Input id="signer" value={signerName} onChange={(e) => setSignerName(e.target.value)} />
+        </div>
+        <p className="mt-3 text-xs text-muted-foreground">
+          By signing you agree to this agreement, including the terms and conditions.{' '}
+          {model.plan_kind === 'seasonal_yia'
+            ? ''
+            : "Next you'll add a card on our payment provider's secure page — we never see your card number."}
+        </p>
+        <p className="mt-2 text-sm">
+          {missing.length ? `${missing.length} signature box${missing.length === 1 ? '' : 'es'} still to sign.` : 'Every box is signed.'}
+        </p>
+        {error ? (
+          <div className="mt-4">
+            <ErrorNotice message={error} />
+          </div>
+        ) : null}
+        <Button type="button" className="mt-5 w-full" disabled={pending || !signerName.trim()} onClick={() => void submit()}>
+          {pending ? 'Signing…' : model.plan_kind === 'seasonal_yia' ? 'Sign agreement' : 'Sign and continue to payment'}
+        </Button>
+      </Panel>
+
+      <DrawSignatureDialog
+        box={drawingFor}
+        onClose={() => setDrawingFor(null)}
+        onDrawn={(drawn) => {
+          setSignature(drawn);
+          if (drawingFor) setBoxes((b) => ({ ...b, [drawingFor]: true }));
+          setDrawingFor(null);
+          setError(null);
+        }}
       />
     </>
   );

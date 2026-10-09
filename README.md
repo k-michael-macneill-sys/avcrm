@@ -672,6 +672,15 @@ agreement and takes an uploaded scan instead. Signing takes no card: the card
 is added afterwards through the existing **Add card** flow on the processor's
 page, and only the token, brand and last 4 digits are kept.
 
+A customer who is not with the rep can sign remotely: **Email to customer for
+signature** on the agreement page (`POST /agreements/:id/send`) emails them a
+single-use link that lasts 14 days. The link opens the same agreement on their
+own device; they sign every box and go on to the card page. Remote signing
+produces the same locked PDF, emailed copy and first invoice as signing in
+person, with the customer's own IP recorded. Sending a new link cancels the
+old one, and paper types can't be emailed. Until it is signed, the agreement
+shows as *Sent for signature* on the customer page.
+
 **Texts** typed on the customer page go through the message queue and the SMS
 provider configured in Settings. "Send later" sets `message_log.send_after`.
 Replies arrive at `POST /webhooks/sms/inbound?secret=$SMS_INBOUND_SECRET`

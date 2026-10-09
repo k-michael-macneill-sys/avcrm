@@ -1,8 +1,11 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth, resolveActor, resolveBranchScope, sellersWrite } from '../middleware/auth';
+import { requestSignature } from '../services/signing';
+import { unauthorized } from '../utils/errors';
 import {
   agreementPreviewPdf,
+  assertAgreementInScope,
   getAgreementForm,
   getAgreementModel,
   recordPaperAgreement,
@@ -123,5 +126,22 @@ serviceAgreementsRouter.post(
     const { id } = parse(idParam, req.params);
     const body = parse(paperBodySchema, req.body);
     res.status(201).json({ data: await recordPaperAgreement(id, scopeOf(req), body, resolveActor(req)) });
+  }),
+);
+
+/**
+ * Emails the customer a link to read and sign the agreement on their own
+ * device, then add their card. Replaces any link still outstanding. Returns
+ * the link too, for a rep on the phone with them.
+ */
+serviceAgreementsRouter.post(
+  '/:id/send',
+  asyncHandler(async (req, res) => {
+    const { id } = parse(idParam, req.params);
+    if (!req.user) throw unauthorized();
+    const scope = scopeOf(req);
+    await assertAgreementInScope(id, scope);
+    const result = await requestSignature(id, scope, req.user.id);
+    res.status(201).json({ data: { url: result.url, sent_to: result.request.sent_to, expires_at: result.request.expires_at } });
   }),
 );
