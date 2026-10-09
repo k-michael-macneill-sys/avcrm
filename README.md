@@ -628,6 +628,64 @@ read too; door-knock pins are for sales and corporate only. The map needs
 `GOOGLE_MAPS_API_KEY`: a browser key with the Maps JavaScript and Geocoding
 APIs enabled, restricted to the site's address in Google Cloud.
 
+## Service agreements and the Customer Summary
+
+The customer page (`/app/customers/:id`) is the Customer Summary: the service
+address with balance, credit and card on file; the contracts table; the SMS
+thread; account and operator notes; and links to the service information and
+the contract form. **Add customer** (`/app/customers/add`) takes the details and
+address and goes straight to the contract form; the older door sign-up on the
+PDF agreement is still at `/app/customers/new`.
+
+**The contract form** (`/app/customers/:id/contracts/new`) writes a quote, and
+signing it produces the contract as before, so billing, deletion and every
+contract rule are unchanged. Its choices come from lookup tables that corporate
+edits at **Settings → Contract lists** (`/lookups`), with active flags and sort
+order: contract types, billing plans, scope items, add-ons, tags, tax codes and
+routes. Where a choice changes behaviour (the YIA tag, a pay-in-full plan, the
+referral tag), the behaviour is a fixed `kind` and the label is free text.
+
+**Money** is worked out in one shared module, `src/types/serviceAgreement.ts`,
+which the form, the agreement and the billing run all use. Amounts are whole
+cents, and tax is rounded half-up on each payment.
+
+| Plan | Payments |
+| --- | --- |
+| 1-yr Seasonal (Monthly) | Season price ÷ 5, on Nov 1 (or on signing, in season), then the 1st of each month. $75 early termination fee, plus tax. |
+| 1-yr Seasonal (YIA) | The whole commitment, once, on signing. No monthly billing. |
+| Monthly (Recurring) | The monthly price each month of the season until cancelled. No fee. |
+| Monthly (One-time) | One month. |
+
+A 2-season contract type doubles the commitment. Auto-renew carries the same
+schedule into later seasons. The tax code defaults to the branch's province;
+every province is seeded, and which codes apply to snow removal is the office's
+call. Referral credit ($10/month by default) goes to the referring customer
+when each of the referred customer's bills is paid, and comes off the
+referrer's next bill automatically.
+
+**The agreement** is drawn from the same model on screen (`/app/agreements/:id`)
+and in the PDF (pdfkit, `src/services/pdf/serviceAgreement.ts`). An electronic
+agreement is signed by drawing the signature once and tapping each box. Signing
+records the signer's name, the time and the IP address, locks the PDF, stores it
+with the contract and emails it to the customer. A paper type prints the
+agreement and takes an uploaded scan instead. Signing takes no card: the card
+is added afterwards through the existing **Add card** flow on the processor's
+page, and only the token, brand and last 4 digits are kept.
+
+A customer who is not with the rep can sign remotely: **Email to customer for
+signature** on the agreement page (`POST /agreements/:id/send`) emails them a
+single-use link that lasts 14 days. The link opens the same agreement on their
+own device; they sign every box and go on to the card page. Remote signing
+produces the same locked PDF, emailed copy and first invoice as signing in
+person, with the customer's own IP recorded. Sending a new link cancels the
+old one, and paper types can't be emailed. Until it is signed, the agreement
+shows as *Sent for signature* on the customer page.
+
+**Texts** typed on the customer page go through the message queue and the SMS
+provider configured in Settings. "Send later" sets `message_log.send_after`.
+Replies arrive at `POST /webhooks/sms/inbound?secret=$SMS_INBOUND_SECRET`
+(Twilio form posts or JSON), and STOP opts the customer out.
+
 ## Work orders and the completion gate
 
 A contract is a promise; a work order is one visit against it. The property

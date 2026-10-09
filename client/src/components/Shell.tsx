@@ -1,4 +1,5 @@
 import {
+  ListChecks,
   LayoutDashboard,
   Users,
   FileText,
@@ -88,7 +89,8 @@ const OPERATIONS_NAV: NavItem[] = [
   { to: '/weather', label: 'Weather Alerts', icon: CloudSnow, roles: CORPORATE },
   { to: '/reports', label: 'Reports', icon: BarChart3, roles: CORPORATE },
   { to: '/admin', label: 'Company', icon: Building2, roles: CORPORATE },
-  { to: '/settings', label: 'Settings', icon: SettingsIcon, roles: CORPORATE },
+  { to: '/settings', label: 'Settings', icon: SettingsIcon, roles: CORPORATE, end: true },
+  { to: '/settings/lists', label: 'Contract Lists', icon: ListChecks, roles: CORPORATE },
 ];
 
 const BUSINESS_NAV: NavItem[] = [

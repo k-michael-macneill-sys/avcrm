@@ -17,6 +17,10 @@ import type { AgreementValues } from '../types/agreement';
 import { agreementFromDeal } from './agreement';
 import { contractValues } from '../types/agreement';
 import { enqueueMessage } from './messages';
+import type { AgreementModel, SignatureBox } from '../types/serviceAgreement';
+import { buildAgreementModel, SERVICE_AGREEMENT_TERMS_VERSION } from './agreementDocument';
+import { loadQuoteTerms } from './agreementTerms';
+import { emailSignedCopy, requiredBoxes } from './serviceAgreements';
 import { keyFor, ruleFor, storage } from './storage';
 
 /**
@@ -73,6 +77,12 @@ export interface SigningInvitation {
   checklist: { code: string; label: string; is_required: boolean }[];
   /** The agreement's fields as filled in, for showing the PDF being signed. */
   agreement: AgreementValues;
+  /**
+   * A service agreement from the contract form: the document to draw and the
+   * boxes the customer must sign. Null for the older PDF sign-up.
+   */
+  service_agreement: AgreementModel | null;
+  required_boxes: SignatureBox[];
 }
 
 interface QuoteRow {
@@ -164,6 +174,10 @@ export async function requestSignature(
   }
   if (!quote.email) {
     throw badRequest('That customer has no email address to send the agreement to');
+  }
+  const terms = await loadQuoteTerms(quoteId, db);
+  if (terms?.contract_type.agreement_medium === 'paper') {
+    throw conflict('This is a paper agreement: print it for the customer to sign instead');
   }
 
   const signed = await db('contracts').where({ quote_id: quoteId }).first('id');
@@ -264,7 +278,17 @@ export async function openInvitation(
     checklist: (await listChecklistRequirements(db))
       .filter((r) => r.code !== CARD_ON_FILE)
       .map((r) => ({ code: r.code, label: r.label, is_required: r.is_required })),
+    ...(await serviceAgreementFor(request.quote_id, db)),
   };
+}
+
+async function serviceAgreementFor(
+  quoteId: string,
+  db: Knex,
+): Promise<{ service_agreement: AgreementModel | null; required_boxes: SignatureBox[] }> {
+  const terms = await loadQuoteTerms(quoteId, db);
+  if (!terms) return { service_agreement: null, required_boxes: [] };
+  return { service_agreement: await buildAgreementModel(quoteId, db), required_boxes: requiredBoxes(terms.plan.kind) };
 }
 
 export interface RemoteSignatureInput {
@@ -272,6 +296,9 @@ export interface RemoteSignatureInput {
   signature_png: string;
   /** The checklist items the customer confirmed on the page. */
   confirmed: string[];
+  /** A service agreement: the boxes they signed, and the name they signed as. */
+  boxes?: SignatureBox[];
+  signer_name?: string;
 }
 
 /** A signature is a few kilobytes; anything near this is not one. */
@@ -292,6 +319,24 @@ export async function completeInvitation(
 ): Promise<{ contract: ContractWithChecklist; branch_id: string }> {
   const request = await verified(token, db);
   const bytes = decodeSignature(input.signature_png);
+
+  // A service agreement is signed box by box, under the signer's own name.
+  const terms = await loadQuoteTerms(request.quote_id, db);
+  let service: { signer_name: string; boxes: Record<string, string> } | null = null;
+  if (terms) {
+    const boxes = input.boxes ?? [];
+    const missing = requiredBoxes(terms.plan.kind).filter((box) => !boxes.includes(box));
+    if (missing.length) {
+      throw badRequest(
+        'Every signature box has to be signed',
+        missing.map((box) => ({ path: `boxes.${box}`, message: 'not signed' })),
+      );
+    }
+    const signerName = (input.signer_name ?? '').trim();
+    if (signerName.split(/\s+/).length < 2) throw badRequest('Enter your full name');
+    const now = new Date().toISOString();
+    service = { signer_name: signerName, boxes: Object.fromEntries(boxes.map((box) => [box, now])) };
+  }
 
   // Stored before the contract, the same order the rep's phone uses. A
   // failure after this leaves an unreferenced image, never a contract
@@ -340,7 +385,10 @@ export async function completeInvitation(
         signed_at: null,
         signed_lat: null,
         signed_lng: null,
-        terms_version: CURRENT_TERMS_VERSION,
+        terms_version: service ? SERVICE_AGREEMENT_TERMS_VERSION : CURRENT_TERMS_VERSION,
+        ...(service
+          ? { agreement_medium: 'electronic' as const, signer_name: service.signer_name, signature_boxes: service.boxes }
+          : {}),
         checklist: requirements
           // The card is captured after this, on the processor's own page,
           // which ticks card_on_file itself when it lands.
@@ -359,6 +407,8 @@ export async function completeInvitation(
       completed_at: new Date(),
       contract_id: contract.id,
     });
+    // Their locked copy, by email, the same as signing in person.
+    if (service) await emailSignedCopy(contract.id, trx);
 
     return { contract, branch_id: request.branch_id };
   });

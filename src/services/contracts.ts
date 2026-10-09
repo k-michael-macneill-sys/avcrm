@@ -13,8 +13,9 @@ import { offsetOf, paginated, type Paginated, type Pagination } from '../utils/p
 import { isPgError, pgConstraint, PG_UNIQUE_VIOLATION } from '../utils/pg';
 import { applyBranchScope } from '../utils/scope';
 import { recordAudit, type AuditActor } from './audit';
-import { generateInvoicesForContract } from './invoices';
+import { generateInvoicesForContract, sendInvoice, today } from './invoices';
 import { attachSignedAgreement } from './agreement';
+import { attachServiceAgreement } from './agreementDocument';
 import { lock as lockQuote } from './quotes';
 import { assertAttachable } from './uploads';
 
@@ -61,6 +62,9 @@ const PUBLIC_CONTRACT_COLUMNS = [
   'contracts.autopay_expires_on',
   'contracts.pdf_url',
   'contracts.provider_signature_url',
+  'contracts.agreement_medium',
+  'contracts.signer_name',
+  'contracts.signature_boxes',
   'contracts.status',
   'contracts.created_at',
   'contracts.updated_at',
@@ -87,7 +91,8 @@ export interface ChecklistInput {
 }
 
 export interface ContractInput {
-  signature_image_url: string;
+  /** Null only for a paper agreement, whose signed scan is `pdf_url`. */
+  signature_image_url: string | null;
   provider_signature_image_url?: string | null;
   /** Defaults to now: the rep is standing there. */
   signed_at: Date | null;
@@ -98,6 +103,12 @@ export interface ContractInput {
   payment_method_last4: string | null;
   payment_method_brand: string | null;
   checklist: ChecklistInput[];
+  /** A service agreement: who signed, which boxes, and on paper or on screen. */
+  agreement_medium?: 'electronic' | 'paper';
+  signer_name?: string | null;
+  signature_boxes?: Record<string, string> | null;
+  /** The scanned paper agreement. */
+  pdf_url?: string | null;
 }
 
 export interface ContractWithChecklist extends PublicContract {
@@ -196,6 +207,12 @@ export async function createContract(
     assertRequiredChecked(requirements, checked);
     assertCardCoherent(checked, input.payment_method_token);
 
+    // Only a paper service agreement comes without a drawn signature.
+    const signatureKey = input.signature_image_url;
+    if (!signatureKey && !(quote.billing_plan_id && input.agreement_medium === 'paper' && input.pdf_url)) {
+      throw badRequest('A signature is required');
+    }
+
     const signedAt = input.signed_at ?? new Date();
 
     let inserted: Contract | undefined;
@@ -217,6 +234,10 @@ export async function createContract(
           payment_method_token: input.payment_method_token,
           payment_method_last4: input.payment_method_last4,
           payment_method_brand: input.payment_method_brand,
+          agreement_medium: input.agreement_medium ?? 'electronic',
+          signer_name: input.signer_name ?? null,
+          signature_boxes: input.signature_boxes ?? null,
+          pdf_url: input.pdf_url ?? null,
           status: 'active',
         })
         .returning('*');
@@ -241,15 +262,26 @@ export async function createContract(
 
     // Signed on the company's PDF agreement: the signed copy is produced
     // now, inside this transaction, so the contract never exists without it.
-    if (quote.agreement_fields) {
-      const owner = (await trx('customers').where({ id: property.customer_id }).first('branch_id')) as {
-        branch_id: string;
-      };
+    const owner = (await trx('customers').where({ id: property.customer_id }).first('branch_id')) as {
+      branch_id: string;
+    };
+    if (quote.billing_plan_id) {
+      // A service agreement signed on screen: print it, signature in every
+      // box they signed, and lock it. A paper one arrived as its scan.
+      if (input.signature_image_url) {
+        contract.pdf_url = await attachServiceAgreement(trx, {
+          contractId: contract.id,
+          quoteId: quote.id,
+          branchId: owner.branch_id,
+          signatureKey: input.signature_image_url,
+        });
+      }
+    } else if (quote.agreement_fields) {
       contract.pdf_url = await attachSignedAgreement(trx, {
         contractId: contract.id,
         branchId: owner.branch_id,
         values: quote.agreement_fields,
-        customerSignatureKey: input.signature_image_url,
+        customerSignatureKey: signatureKey!,
         providerSignatureKey: input.provider_signature_image_url ?? null,
         signedAt,
       });
@@ -291,7 +323,15 @@ export async function createContract(
     // A seasonal contract is billed the moment it is signed, per the spec.
     // A monthly one waits for the billing job to raise each period as it
     // starts, so this is a no-op for those.
-    if (quote.billing_type === 'seasonal_upfront') {
+    if (quote.billing_plan_id) {
+      // A service agreement bills from its schedule: whatever is due today
+      // — a YIA payment, or the first month of an in-season sign-up — is
+      // raised and sent now; the rest as it falls due.
+      const raised = await generateInvoicesForContract(contract.id, today(), trx);
+      for (const invoice of raised.filter((i) => i.status === 'draft')) {
+        await sendInvoice(invoice.id, { kind: 'all' }, trx);
+      }
+    } else if (quote.billing_type === 'seasonal_upfront') {
       await generateInvoicesForContract(contract.id, undefined, trx);
     }
 

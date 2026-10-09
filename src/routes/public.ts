@@ -7,6 +7,7 @@ import { requestCard } from '../services/cards';
 import { leadForToken, optIn, unsubscribe } from '../services/coldEmail';
 import { activeGateway } from '../services/gateway';
 import { completeInvitation, openInvitation } from '../services/signing';
+import { SIGNATURE_BOXES } from '../types/serviceAgreement';
 import { asyncHandler } from '../utils/async';
 import { ApiError, badRequest } from '../utils/errors';
 import { logger } from '../utils/logger';
@@ -39,6 +40,9 @@ const tokenParamSchema = z.object({ token: z.string().min(10).max(2000) });
 const signBodySchema = z.object({
   signature_png: z.string().min(30).max(800_000),
   confirmed: z.array(z.string().min(1).max(100)).max(50),
+  // A service agreement: the boxes signed, and the name signed as.
+  boxes: z.array(z.enum(SIGNATURE_BOXES)).max(10).optional(),
+  signer_name: z.string().trim().max(200).optional(),
 });
 
 publicRouter.get(

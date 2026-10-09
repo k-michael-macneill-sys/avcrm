@@ -55,8 +55,11 @@ export function Customers(): JSX.Element {
             <Disclosure label="Add lead">
               <NewLeadForm branches={branches} showBranch={isCorporate} onDone={reload} />
             </Disclosure>
+            <Button asChild variant="secondary">
+              <Link to="/customers/new">Door sign-up (PDF)</Link>
+            </Button>
             <Button asChild>
-              <Link to="/customers/new">Add customer</Link>
+              <Link to="/customers/add">Add customer</Link>
             </Button>
           </>
         }

@@ -27,6 +27,12 @@ export interface CustomerInput {
   preferred_contact: PreferredContact;
   notes: string | null;
   status: CustomerStatus;
+  /** Where bills go, when that is not the service address. */
+  billing_address_line1?: string | null;
+  billing_address_line2?: string | null;
+  billing_city?: string | null;
+  billing_province?: string | null;
+  billing_postal_code?: string | null;
 }
 
 export async function listCustomers(
@@ -103,6 +109,7 @@ export async function createCustomer(
     if (!customer) {
       throw new Error('Insert returned no customer row');
     }
+    await syncPrimaryPhone(customer.id, customer.phone, db);
     return customer;
   } catch (err) {
     throw translate(err);
@@ -128,9 +135,25 @@ export async function updateCustomer(
     if (!customer) {
       throw notFound('Customer not found');
     }
+    if (patch.phone !== undefined) await syncPrimaryPhone(customer.id, customer.phone, db);
     return customer;
   } catch (err) {
     throw translate(err);
+  }
+}
+
+/**
+ * customers.phone is the primary number in customer_phones, kept in step
+ * from either side: a phone set here becomes (or replaces) the primary.
+ */
+async function syncPrimaryPhone(customerId: string, phone: string | null, db: Knex): Promise<void> {
+  const primary = await db('customer_phones').where({ customer_id: customerId, is_primary: true }).first('id');
+  if (!phone) {
+    if (primary) await db('customer_phones').where({ id: primary.id }).del();
+  } else if (primary) {
+    await db('customer_phones').where({ id: primary.id }).update({ number: phone });
+  } else {
+    await db('customer_phones').insert({ customer_id: customerId, number: phone, phone_type: 'mobile', is_primary: true });
   }
 }
 

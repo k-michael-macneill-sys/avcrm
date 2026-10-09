@@ -3,6 +3,7 @@ import nodemailer, { type Transporter } from 'nodemailer';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 import { deliverSms } from './sms';
+import { storage } from './storage';
 import { SendFailure, type SendResult } from './transport';
 
 // Re-exported: the queue imports "how a message is sent" from one place.
@@ -25,6 +26,8 @@ export interface OutboundEmail {
   body: string;
   /** Correlates the provider's copy with our message_log row. */
   message_id?: string;
+  /** A stored file, by its storage key, to attach. */
+  attachment?: { key: string; name: string };
 }
 
 interface MailTransport {
@@ -53,7 +56,7 @@ class LogTransport implements MailTransport {
   async send(email: OutboundEmail): Promise<SendResult> {
     const { to, subject } = recipientFor(email);
     logger.info(
-      { driver: 'log', channel: 'email', to, subject, body: email.body },
+      { driver: 'log', channel: 'email', to, subject, body: email.body, attachment: email.attachment?.name },
       'Email (not sent: MAIL_DRIVER=log)',
     );
     return { provider_message_id: `log-${randomUUID()}` };
@@ -96,6 +99,9 @@ class SmtpTransport implements MailTransport {
         to,
         subject,
         text: email.body,
+        ...(email.attachment
+          ? { attachments: [{ filename: email.attachment.name, content: storage.read(email.attachment.key) }] }
+          : {}),
         ...(email.message_id
           ? { headers: { 'X-Avcrm-Message-Id': email.message_id } }
           : {}),
@@ -140,8 +146,9 @@ export function sendEmail(
   subject: string,
   body: string,
   messageId?: string,
+  attachment?: { key: string; name: string },
 ): Promise<SendResult> {
-  return transport.send({ to, subject, body, message_id: messageId });
+  return transport.send({ to, subject, body, message_id: messageId, attachment });
 }
 
 /** Lets a job exit instead of waiting on a pooled connection. */

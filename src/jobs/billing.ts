@@ -57,7 +57,9 @@ export async function runBilling(
   const contracts = await db('contracts')
     .join('quotes', 'quotes.id', 'contracts.quote_id')
     .where('contracts.status', 'active')
-    .andWhere('quotes.season_start', '<=', asOf)
+    // A service agreement can owe before its season starts: a YIA payment
+    // is due on signing. Its own schedule decides.
+    .andWhere((q) => q.where('quotes.season_start', '<=', asOf).orWhereNotNull('quotes.billing_plan_id'))
     .pluck('contracts.id');
 
   summary.contracts_considered = contracts.length;
@@ -66,7 +68,8 @@ export async function runBilling(
     const raised = await generateInvoicesForContract(contractId, asOf, db);
     summary.invoices_raised += raised.length;
 
-    for (const invoice of raised) {
+    // One the customer's credit paid in full has nothing to send.
+    for (const invoice of raised.filter((i) => i.status === 'draft')) {
       // Corporate scope: this is the company's own scheduled work, not a
       // request from a branch.
       await sendInvoice(invoice.id, { kind: 'all' }, db);

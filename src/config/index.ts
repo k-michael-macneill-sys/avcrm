@@ -105,6 +105,9 @@ const envSchema = z.object({
    * unset anywhere a real message matters.
    */
   SMS_API_BASE: z.string().trim().url().optional(),
+  // Shared secret for texts customers send back (POST /webhooks/sms/inbound?secret=...).
+  // Unset means inbound texts are refused.
+  SMS_INBOUND_SECRET: z.string().trim().min(16).optional(),
 
   /**
    * Twilio SendGrid, the shortcut: an API key with Mail Send permission is
@@ -406,6 +409,7 @@ export const config = {
         : null,
     redirectTo: env.SMS_REDIRECT_TO ?? null,
     apiBase: env.SMS_API_BASE ?? null,
+    inboundSecret: env.SMS_INBOUND_SECRET ?? null,
   },
   messaging: {
     appBaseUrl: (env.APP_BASE_URL ?? env.RENDER_EXTERNAL_URL ?? 'http://localhost:3000').replace(/\/+$/, ''),

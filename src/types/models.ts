@@ -131,6 +131,8 @@ export const TEMPLATE_CODES = [
   'drip_followup_3',
   // The night-before notice the weather bot sends when snow is coming.
   'snowfall_notice',
+  // The signed service agreement, emailed to the customer with the PDF attached.
+  'agreement_signed',
 ] as const;
 export type TemplateCode = (typeof TEMPLATE_CODES)[number];
 
@@ -330,6 +332,16 @@ export interface Customer {
   /** Where the processor knows this customer, once they have been asked. */
   stripe_customer_id: string | null;
   square_customer_id: string | null;
+  /** Null when bills go to the service address. */
+  billing_address_line1: string | null;
+  billing_address_line2: string | null;
+  billing_city: string | null;
+  billing_province: string | null;
+  billing_postal_code: string | null;
+  /** The member of staff looking after this customer's text thread. */
+  sms_assigned_user_id: string | null;
+  /** Asked not to be texted: nothing is sent by hand. */
+  sms_opt_out: boolean;
   created_at: Date;
   updated_at: Date;
 }
@@ -386,8 +398,112 @@ export interface Quote {
   agreement_fields: Record<string, string | boolean> | null;
   package: 'basic' | 'premium' | null;
   addons: string[];
+  /** The service agreement form. All null on a quote from the older PDF sign-up. */
+  contract_type_id: string | null;
+  billing_plan_id: string | null;
+  tax_code_id: string | null;
+  /** Frozen when the form is saved. */
+  tax_rate: string | null;
+  assigned_operator_id: string | null;
+  service_route_id: string | null;
+  route_code: string | null;
+  discount: string;
+  trigger_cm: string | null;
+  referral_credit: string | null;
+  referred_by_customer_id: string | null;
+  auto_renew: boolean;
+  driveway_car_lengths: number | null;
+  driveway_width: 'single' | 'double' | 'triple' | null;
+  property_notes: string | null;
+  early_termination_fee: string | null;
   created_at: Date;
   updated_at: Date;
+}
+
+/** A row in one of the lookup tables the contract form is built from. */
+export interface LookupRow {
+  id: string;
+  code: string;
+  label: string;
+  active: boolean;
+  sort_order: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface ContractType extends LookupRow {
+  seasons: number;
+  agreement_medium: 'electronic' | 'paper';
+  is_switch_over: boolean;
+}
+
+export interface BillingPlan extends LookupRow {
+  kind: 'seasonal_installments' | 'seasonal_yia' | 'monthly_recurring' | 'monthly_one_time';
+  installments_per_season: number;
+  early_termination_fee: string;
+}
+
+export interface AddonService extends LookupRow {
+  default_price: string | null;
+}
+
+export interface ContractTag extends LookupRow {
+  kind: 'yia' | 'route_code' | 'referral' | null;
+}
+
+export interface TaxCode extends LookupRow {
+  rate: string;
+  province: string | null;
+  is_default: boolean;
+}
+
+export interface ServiceRoute extends LookupRow {
+  branch_id: string | null;
+}
+
+export interface CustomerPhone {
+  id: string;
+  customer_id: string;
+  number: string;
+  phone_type: 'mobile' | 'home' | 'work' | 'other';
+  is_primary: boolean;
+  sort_order: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface CustomerNote {
+  id: string;
+  customer_id: string;
+  kind: 'account' | 'operator';
+  body: string;
+  author_user_id: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+/** Positive is credit earned; negative is credit spent on an invoice. */
+export interface CustomerCredit {
+  id: string;
+  customer_id: string;
+  kind: 'referral' | 'applied' | 'adjustment';
+  amount: string;
+  description: string | null;
+  source_invoice_id: string | null;
+  invoice_id: string | null;
+  created_by_user_id: string | null;
+  created_at: Date;
+}
+
+/** A text a customer sent us. */
+export interface SmsInbound {
+  id: string;
+  customer_id: string | null;
+  from_number: string;
+  body: string;
+  provider_message_id: string | null;
+  received_at: Date;
+  created_at: Date;
 }
 
 export interface ChecklistRequirement {
@@ -405,7 +521,8 @@ export interface Contract {
   quote_id: string;
   customer_id: string;
   property_id: string;
-  signature_image_url: string;
+  /** Null only on a paper agreement, which arrives as a scan. */
+  signature_image_url: string | null;
   signed_at: Date;
   signed_ip: string | null;
   signed_lat: string | null;
@@ -426,6 +543,10 @@ export interface Contract {
   payment_method_brand: string | null;
   pdf_url: string | null;
   provider_signature_url: string | null;
+  agreement_medium: 'electronic' | 'paper';
+  signer_name: string | null;
+  /** Which signature boxes were signed, and when. */
+  signature_boxes: Record<string, string> | null;
   status: ContractStatus;
   created_at: Date;
   updated_at: Date;
@@ -525,6 +646,12 @@ export interface MessageLogEntry {
   error: string | null;
   attempts: number;
   last_attempt_at: Date | null;
+  /** Not sent before this time. */
+  send_after: Date | null;
+  /** Who typed it, for a message written by hand. */
+  sent_by_user_id: string | null;
+  attachment_key: string | null;
+  attachment_name: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -562,6 +689,11 @@ export interface Invoice {
   pdf_url: string | null;
   /** The capability in the customer's pay link. Null until one is sent. */
   portal_token: string | null;
+  /** Before tax and credit. Null on invoices raised before tax was charged. */
+  subtotal: string | null;
+  tax_amount: string | null;
+  credit_applied: string;
+  service_months: number | null;
   created_at: Date;
   updated_at: Date;
 }
