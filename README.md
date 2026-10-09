@@ -171,9 +171,11 @@ exactly one account for that:
 | --- | --- | --- | --- |
 | `corporate@avcrm.test` | corporate | — | Sees every branch; sign in as **ADMIN** |
 
-It shares the password in `SEED_PASSWORD` (default `Password123!`). On the
-sign-in screen choose **ADMIN** and enter that password; choose a branch and
-enter `BRANCH_SIGN_IN_PASSWORD` (default `1234`) to sign in as the branch.
+It shares the password in `SEED_PASSWORD` (`Password123!` in development). On
+the sign-in screen choose **ADMIN** and enter that password; choose a branch
+and enter `BRANCH_SIGN_IN_PASSWORD` (`1234` in development) to sign in as the
+branch. **Neither default exists in production** — both are printed here, so
+anyone could use them. See [Production safeguards](#production-safeguards).
 
 ## Auth and permissions
 
@@ -225,7 +227,9 @@ dropdown offers **Cranbrook**, **Kingston**, **Alberta**, **Regina** and
 **ADMIN** (`POST /auth/sign-in` with `{ choice, password }`).
 
 - **A branch** signs in to that branch's own shared account with the branch
-  password, `BRANCH_SIGN_IN_PASSWORD` — **`1234` unless you set it**. The
+  password, `BRANCH_SIGN_IN_PASSWORD` (`1234` in development; in production
+  there is no default, and one under 10 characters is refused) — or the
+  branch's own password, once one has been set with **Reset password**. The
   account has the `branch` role: customers, quotes, contracts, the leads map,
   dispatch and crew, plus its own Business Console, all in that branch only;
   none of corporate's screens (Reports, Company, Settings, Weather Alerts). It
@@ -250,12 +254,54 @@ branch picker for a branch sign-in, and the agreement's city is filled in and
 not tappable; on an Alberta agreement the city box starts blank for the rep to
 type. ADMIN's form is unchanged: branch picker, and the city as typed.
 
-**A shared four-digit password is weak, on purpose.** Anyone who knows it can
-sign in as any branch. The rate limits below apply to it — by address, and per
-branch choice, so guessing at one branch from many addresses runs out too —
-but set `BRANCH_SIGN_IN_PASSWORD` to something longer before the app faces the
-internet. `POST /auth/login` (email and password) is still there for staff
+**A shared password is the whole lock on a branch.** Anyone who knows it can
+sign in as any branch that has not set its own. The rate limits below apply to
+it — by address, and per branch choice, so guessing at one branch from many
+addresses runs out too — and production refuses one shorter than 10
+characters. `POST /auth/login` (email and password) is still there for staff
 accounts and scripts.
+
+**Changing a password.** Anyone signed in with their own account (everyone but
+a branch sign-in) has **Change password** under their name in the menu
+(`POST /auth/password` with `{ current_password, new_password }`, 10 characters
+at least). It signs out every other session on the account —
+`users.password_changed_at` is compared with each token's issue time — and
+hands this one a fresh token. Corporate can set a temporary password for
+someone locked out with `PATCH /users/:id` and `{ password }`; both are in the
+audit log, without the password.
+
+**Resetting a branch password.** **Reset password** on the sign-in screen
+(`POST /auth/sign-in/reset` with `{ choice, new_password, reset_code }`) gives
+one branch its own password, if the reset code matches `BRANCH_RESET_CODE` on
+the server. Unset, resetting is off. The code lets anyone set any branch's
+password from a page the whole internet can open, so make it long and random
+and keep it only in the server's environment; production refuses one under 12
+characters, and refuses the one that was once written into the source. A reset
+signs out whoever was signed in as that branch and is audited with the address
+it came from.
+
+### Production safeguards
+
+On a production deploy with a public address (`NODE_ENV=production` and an
+`APP_BASE_URL` or `RENDER_EXTERNAL_URL` that is not localhost), the
+conveniences that make a laptop easy are refused, because each is printed in
+this repository:
+
+- The app will not start with a `JWT_SECRET` or `SECRETS_KEY` that has been
+  published (the example files, the test and CI setup, or a value committed
+  here by mistake). Anyone holding the JWT secret can sign in as any account
+  without a password. `npm run secrets` makes new ones.
+- `Password123!` signs nobody in and is given to nobody. The seed refuses to
+  create the first admin with it; set `SEED_PASSWORD`. An install that still
+  has it on `corporate@avcrm.test` gets `SEED_PASSWORD` instead on the next
+  deploy or restart, so setting that variable is the way back in.
+- Branch sign-in is off until `BRANCH_SIGN_IN_PASSWORD` is set, and refuses
+  one under 10 characters; reset is off until `BRANCH_RESET_CODE` is set.
+- Changing the card processor under Settings asks for the admin's password
+  again, since it decides whose account customers pay. Recording a payment by
+  hand is corporate only.
+
+`npm run preflight` flags the same things in a `.env` before it is deployed.
 
 `/auth/login` is a password oracle open to the internet: without a limit, a
 list of common passwords against one known address is free, and nothing in the
@@ -1034,6 +1080,20 @@ Both are checked at startup: `MAIL_DRIVER=smtp` without `SMTP_HOST` or
 `MAIL_FROM` refuses to boot, rather than failing when the first invoice goes
 out.
 
+**Twilio SendGrid** has a shortcut. An API key with Mail Send permission is
+all it needs:
+
+```bash
+SENDGRID_API_KEY=SG.…
+MAIL_FROM="Drift <billing@example.ca>"   # a sender verified in SendGrid
+```
+
+That stands in for `SMTP_HOST`/`SMTP_USER`/`SMTP_PASSWORD`
+(`smtp.sendgrid.net`, user `apikey`, the key as the password) and switches
+`MAIL_DRIVER` to `smtp` unless `MAIL_DRIVER` is set — so a leftover
+`MAIL_DRIVER=log` still keeps every email in the log. An explicit `SMTP_HOST`
+wins over the key.
+
 ### The staging valve
 
 ```bash
@@ -1362,6 +1422,37 @@ one, and gets revisited, it is a setting instead.
 the credentials it asks for, send a test, switch it on. No redeploy, no .env
 edit, and a manager can do it.
 
+**Or Twilio comes from the environment**, the way `SQUARE_*` gives a payment
+processor:
+
+```bash
+TWILIO_ACCOUNT_SID=AC…
+TWILIO_AUTH_TOKEN=…
+TWILIO_FROM_NUMBER=+16135550123     # or a Messaging Service SID, MG…
+```
+
+All three or none — a partial set refuses to boot. Texts then go out with
+nothing switched on under Settings, which shows which of the three the server
+can see. A provider switched on in Settings takes over from the environment.
+
+### What is texted automatically
+
+The queue worker (`job:message-queue`, every minute under the scheduler)
+sends each queued message on its channel. A customer is texted rather than
+emailed when `preferred_contact` is `sms` and there is a phone on file, or
+when there is a phone and no email:
+
+| Message | When |
+| --- | --- |
+| Visit complete (`service_complete`) | A work order is marked completed |
+| Invoice (`invoice_sent`) and past-due notice (`invoice_overdue`) | Billing raises or chases an invoice |
+| Review request | After a completed visit |
+| Card setup link | The office asks for a card |
+| Snowfall notice | The forecast passes the threshold (`both` gets text and email) |
+
+Office copies, operator document reminders, signing links and cold email are
+email only.
+
 ### The catalogue
 
 `src/services/smsProviders.ts` describes each provider as data — the fields an
@@ -1370,7 +1461,7 @@ message id turns up in the reply:
 
 | Provider | Needs |
 | --- | --- |
-| Twilio | Account SID, auth token, sending number |
+| Twilio | Account SID, auth token, sending number or Messaging Service SID |
 | Telnyx | API key, sending number |
 | MessageBird (Bird) | Access key, originator |
 | Vonage (Nexmo) | API key, API secret, sending number |
@@ -1556,7 +1647,8 @@ counts active customers (as the Customers list does) and bills every active
 contract of an active customer the way its invoices will. A seasonal
 contract pays once, in November. A monthly one pays its discounted first
 month and then its recurring price, for as many months as it runs, up to
-five. The average contract value is that revenue divided by the customers
+five, starting in the month its billing starts: an exact-dates contract from
+December to January counts in December and January. The average contract value is that revenue divided by the customers
 with a contract.
 
 The page adds operator salaries, one line per position (or the whole crew on

@@ -5,7 +5,7 @@ import { optionalAuth, requireAuth, resolveActor } from '../middleware/auth';
 import { recordAudit } from '../services/audit';
 import { rateLimit, type RateLimitRule } from '../middleware/rateLimit';
 import { changePassword, createUser, findUserById, login, MIN_PASSWORD_LENGTH } from '../services/auth';
-import { SIGN_IN_CHOICES, signInByChoice } from '../services/branchSignIn';
+import { resetBranchPassword, SIGN_IN_CHOICES, signInByChoice } from '../services/branchSignIn';
 import { asyncHandler } from '../utils/async';
 import { forbidden, unauthorized } from '../utils/errors';
 import { parse } from '../utils/validate';
@@ -197,6 +197,30 @@ authRouter.post(
     const result = await changePassword(req.user.id, body.current_password, body.new_password);
     await recordAudit(resolveActor(req), { action: 'user.password_changed', entity_type: 'user', entity_id: req.user.id });
     res.json({ data: result });
+  }),
+);
+
+const resetSchema = z.object({
+  choice: z.enum(SIGN_IN_CHOICES, {
+    errorMap: () => ({ message: `Choose one of ${SIGN_IN_CHOICES.join(', ')}` }),
+  }),
+  new_password: z.string().min(4, 'The new password needs at least 4 characters').max(200),
+  reset_code: z.string().min(1, 'Enter the reset code').max(200),
+});
+
+/**
+ * "Reset password" on the sign-in screen: a branch, a new password and the
+ * reset code (BRANCH_RESET_CODE). Rate-limited like signing in, per branch as
+ * well as per address, so the code cannot be guessed. Production holds the
+ * new password to the shared one's minimum; see resetBranchPassword.
+ */
+authRouter.post(
+  '/sign-in/reset',
+  signInLimiter,
+  asyncHandler(async (req, res) => {
+    const body = parse(resetSchema, req.body);
+    await resetBranchPassword(body.choice, body.new_password, body.reset_code, req.ip ?? null);
+    res.json({ data: { reset: true } });
   }),
 );
 

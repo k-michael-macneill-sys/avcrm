@@ -9,7 +9,11 @@ import {
   type Property,
   type Quote,
 } from '../../../src/types/models';
-import { defaultAgreementYears, type AgreementValues } from '../../../src/types/agreement';
+import {
+  defaultAgreementYears,
+  termTypeOf,
+  type AgreementValues,
+} from '../../../src/types/agreement';
 import { useAuth } from '@/auth/AuthContext';
 import { AgreementPdf, type SignatureField } from '@/components/AgreementPdf';
 import { ErrorNotice, Loading } from '@/components/Misc';
@@ -17,6 +21,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { Section } from '@/components/Section';
 import { SignDialog, type Signature } from '@/components/SignDialog';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import * as api from '@/lib/api';
@@ -104,6 +109,7 @@ function startingValues(
     customer_city: city,
     customer_province: prefill.get('province') ?? branch?.province ?? '',
     customer_postal: prefill.get('postal_code') ?? '',
+    term_type: 'Seasonal',
     ...defaultAgreementYears(),
   };
 }
@@ -262,6 +268,12 @@ function AgreementSignup({
         </div>
       ) : null}
 
+      <ContractPeriod
+        values={values}
+        onChange={edit}
+        invalid={invalid.some((f) => f === 'term_start' || f === 'term_end')}
+      />
+
       <div className="mx-auto w-full max-w-3xl">
         <AgreementPdf
           values={values}
@@ -308,6 +320,76 @@ function AgreementSignup({
         hasSignature={!!(signing && signatures[signing])}
       />
     </>
+  );
+}
+
+/** Next month, as YYYY-MM: the usual one-month sign-up. */
+function nextMonth(today: Date = new Date()): string {
+  const d = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/** The first and last day of a YYYY-MM month, as the exact-dates term wants them. */
+function monthTerm(month: string): { term_start: string; term_end: string } {
+  const [y, m] = month.split('-').map(Number) as [number, number];
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return { term_start: `${month}-01`, term_end: `${month}-${String(last).padStart(2, '0')}` };
+}
+
+/**
+ * The contract period as two buttons: the full season, or one month. One
+ * month is an exact-dates term from the 1st to the last day of the month
+ * picked, so the agreement prints those dates; other dates can still be set
+ * by tapping the term on the agreement.
+ */
+function ContractPeriod({
+  values,
+  onChange,
+  invalid,
+}: {
+  values: AgreementValues;
+  onChange: (next: AgreementValues) => void;
+  invalid: boolean;
+}): JSX.Element {
+  const exact = termTypeOf(values) === 'Exact dates';
+  const start = typeof values.term_start === 'string' ? values.term_start : '';
+  const month = /^\d{4}-\d{2}-01$/.test(start) ? start.slice(0, 7) : '';
+  const pick = (m: string): void => onChange({ ...values, term_type: 'Exact dates', ...monthTerm(m) });
+
+  return (
+    <div className="mx-auto mb-4 flex w-full max-w-3xl flex-col gap-2">
+      <Label>Contract period</Label>
+      <div className="grid grid-cols-2 gap-2">
+        <Button
+          type="button"
+          variant={exact ? 'secondary' : 'default'}
+          aria-pressed={!exact}
+          onClick={() => onChange({ ...values, term_type: 'Seasonal' })}
+        >
+          Full season (Nov 1 – Mar 31)
+        </Button>
+        <Button
+          type="button"
+          variant={exact ? 'default' : 'secondary'}
+          aria-pressed={exact}
+          onClick={() => pick(month || nextMonth())}
+        >
+          One month
+        </Button>
+      </div>
+      {exact ? (
+        <div className="flex max-w-xs flex-col gap-1.5">
+          <Label htmlFor="term-month">Month of service</Label>
+          <Input
+            id="term-month"
+            type="month"
+            value={month}
+            className={invalid ? 'ring-2 ring-red-500' : undefined}
+            onChange={(e) => e.target.value && pick(e.target.value)}
+          />
+        </div>
+      ) : null}
+    </div>
   );
 }
 

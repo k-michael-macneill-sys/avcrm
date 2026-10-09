@@ -1,10 +1,11 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Knex } from 'knex';
 import { config } from '../config';
-import { MIN_BRANCH_SIGN_IN_PASSWORD } from '../config/published';
+import { MIN_BRANCH_RESET_CODE, MIN_BRANCH_SIGN_IN_PASSWORD, PUBLISHED_SECRETS } from '../config/published';
 import { db as defaultDb } from '../db/client';
 import { SIGN_IN_CHOICES, type Branch, type PublicUser, type SignInChoice, type User } from '../types/models';
-import { forbidden, unauthorized } from '../utils/errors';
+import { badRequest, forbidden, unauthorized } from '../utils/errors';
+import { recordAudit } from './audit';
 import {
   hashPassword,
   PUBLIC_USER_COLUMNS,
@@ -201,10 +202,77 @@ export async function signInByChoice(
 
   const setup = SIGN_IN_BRANCHES.find((b) => b.name === choice);
   if (!setup) throw unauthorized('Choose a branch to sign in to');
-  if (!sameSecret(password, branchPassword())) {
-    throw unauthorized(`That password is not right for ${setup.name}`);
-  }
+  const row = (await db('branch_sign_in_passwords as p')
+    .join('branches as b', 'b.id', 'p.branch_id')
+    .whereRaw('lower(b.name) = lower(?)', [setup.name])
+    .first('p.password_hash')) as { password_hash: string } | undefined;
+  // A branch that has reset its password uses its own; the rest the shared one.
+  const ok = row
+    ? await verifyPassword(password, row.password_hash)
+    : sameSecret(password, branchPassword());
+  if (!ok) throw unauthorized(`That password is not right for ${setup.name}`);
   return branchSignIn(setup, db);
+}
+
+/**
+ * The code that authorises "Reset password" on the sign-in screen. Whoever
+ * has it can set any branch's password from a page anyone can open, so it
+ * lives on the server (BRANCH_RESET_CODE) and never in this code — the first
+ * one was written here, in a public repository, and is refused for that.
+ * Unset means resetting is switched off.
+ */
+function resetCode(): string {
+  const code = config.branchResetCode;
+  if (!code) {
+    throw forbidden('Resetting branch passwords is switched off until BRANCH_RESET_CODE is set on the server');
+  }
+  if (PUBLISHED_SECRETS.has(code) || (config.isPublicProduction && code.length < MIN_BRANCH_RESET_CODE)) {
+    throw forbidden(
+      'Resetting branch passwords is switched off: BRANCH_RESET_CODE has been published or is ' +
+        `shorter than ${MIN_BRANCH_RESET_CODE} characters. The owner sets a new one on the server.`,
+    );
+  }
+  return code;
+}
+
+/**
+ * Sets a branch's sign-in password, given the reset code. ADMIN is not reset
+ * here. Whoever was signed in as the branch is signed out — a reset usually
+ * means the old password got around — and the reset is audited with the
+ * address it came from, since nobody is signed in to own it.
+ */
+export async function resetBranchPassword(
+  choice: SignInChoice,
+  newPassword: string,
+  givenCode: string,
+  ipAddress: string | null = null,
+  db: Knex = defaultDb,
+): Promise<void> {
+  if (!sameSecret(givenCode, resetCode())) {
+    throw unauthorized('That reset code is not right. Only authorised staff can reset branch passwords.');
+  }
+  const setup = SIGN_IN_BRANCHES.find((b) => b.name === choice);
+  if (!setup) throw forbidden('Only a branch password can be reset here, not ADMIN');
+  if (config.isPublicProduction && newPassword.length < MIN_BRANCH_SIGN_IN_PASSWORD) {
+    throw badRequest(`A branch password must be at least ${MIN_BRANCH_SIGN_IN_PASSWORD} characters`);
+  }
+  refusePublishedPassword(newPassword);
+
+  await db.transaction(async (trx) => {
+    const branch = await branchFor(setup, trx);
+    await trx('branch_sign_in_passwords')
+      .insert({ branch_id: branch.id, password_hash: await hashPassword(newPassword), updated_at: trx.fn.now() })
+      .onConflict('branch_id')
+      .merge();
+    await trx('users')
+      .where({ email: branchAccountEmail(branch.name) })
+      .update({ password_changed_at: new Date() });
+    await recordAudit(
+      { user_id: null, ip_address: ipAddress },
+      { action: 'branch.sign_in_password_reset', entity_type: 'branch', entity_id: branch.id },
+      trx,
+    );
+  });
 }
 
 /** The branch a signed-in user's session is for, as the client keeps it. */

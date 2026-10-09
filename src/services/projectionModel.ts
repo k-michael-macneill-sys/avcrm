@@ -47,6 +47,11 @@ export interface ContractTerms {
   recurring_price: number | null;
   /** Billing periods the contract actually runs for; at most five count. */
   periods: number;
+  /**
+   * The season month its billing starts in, November being 0: a contract on
+   * exact dates from December starts at 1. Months outside the season drop off.
+   */
+  first_month?: number;
 }
 
 /**
@@ -62,8 +67,11 @@ export function contractRevenueByMonth(terms: ContractTerms): number[] {
     return months;
   }
   const runs = Math.max(1, Math.min(SEASON_LENGTH, terms.periods));
+  const first = terms.first_month ?? 0;
   for (let i = 0; i < runs; i += 1) {
-    months[i] = i === 0 || terms.recurring_price === null ? terms.discounted_price : terms.recurring_price;
+    const at = first + i;
+    if (at < 0 || at >= SEASON_LENGTH) continue;
+    months[at] = i === 0 || terms.recurring_price === null ? terms.discounted_price : terms.recurring_price;
   }
   return months;
 }

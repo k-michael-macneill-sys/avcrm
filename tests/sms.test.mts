@@ -166,6 +166,20 @@ describe('connecting a text message provider', () => {
     assert.match(row?.provider_message_id ?? '', /^SM/);
   });
 
+  it('sends through a Twilio Messaging Service when one is given instead of a number', async () => {
+    const service = 'MG0123456789abcdef0123456789abcdef';
+    await call(server, 'PUT', '/settings/sms', {
+      token: corporate,
+      body: { ...twilio(true), settings: { account_sid: 'AC_test_account', from: service } },
+    });
+
+    await queueSms('+19025557777');
+    await sendQueued(10);
+
+    assert.equal(gateway.sent().length, 1);
+    assert.equal(gateway.sent()[0]?.from, service);
+  });
+
   it('stops at once on a bad number, and retries an outage', async () => {
     await call(server, 'PUT', '/settings/sms', { token: corporate, body: twilio(true) });
 

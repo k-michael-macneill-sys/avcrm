@@ -53,6 +53,23 @@ describe('production on a public address', () => {
     assert.match(reply.body.error.message, /BRANCH_SIGN_IN_PASSWORD/);
   });
 
+  it('holds a branch password set by reset to the same minimum as the shared one', async () => {
+    const reply = await call(h.server(), 'POST', '/auth/sign-in/reset', {
+      body: { choice: 'Kingston', new_password: 'snow', reset_code: process.env.BRANCH_RESET_CODE },
+    });
+    assert.equal(reply.status, 400);
+
+    const long = await call(h.server(), 'POST', '/auth/sign-in/reset', {
+      body: { choice: 'Kingston', new_password: 'north-lot-plough-2026', reset_code: process.env.BRANCH_RESET_CODE },
+    });
+    assert.equal(long.status, 200);
+    // Its own password now, so the too-short shared one no longer matters for it.
+    const signedIn = await call(h.server(), 'POST', '/auth/sign-in', {
+      body: { choice: 'Kingston', password: 'north-lot-plough-2026' },
+    });
+    assert.equal(signedIn.status, 200);
+  });
+
   it('replaces the published default on the first admin with SEED_PASSWORD', async () => {
     await db('users').insert({
       email: SEED_ADMIN_EMAIL,

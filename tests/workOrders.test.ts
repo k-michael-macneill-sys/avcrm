@@ -193,4 +193,29 @@ describe('dispatch and the completion gate', () => {
       ['harold@example.test', 'kingston.manager@test.local'],
     );
   });
+
+  it('texts the customer that the visit is done when they asked for texts', async () => {
+    const world = h.world();
+    const contract = await makeContract(world.branches.kingston, world.users.operator, {
+      preferred_contact: 'sms',
+      phone: '+16135550166',
+    });
+    const id = await makeWorkOrder(contract, world.branches.kingston, {
+      assigned_user_id: world.users.operator,
+      status: 'in_progress',
+      started_at: new Date(),
+    });
+
+    const token = await login(h.server(), world.emails.operator);
+    await call(h.server(), 'POST', `/work-orders/${id}/photos`, { token, body: photo('before') });
+    await call(h.server(), 'POST', `/work-orders/${id}/photos`, { token, body: photo('after') });
+    const done = await call(h.server(), 'PATCH', `/work-orders/${id}/status`, { token, body: { status: 'completed' } });
+    assert.equal(done.status, 200, JSON.stringify(done.body));
+
+    const text = await eventually('the customer notice to be queued', async () =>
+      (await db('message_log').where({ template_code: 'service_complete' }).first()) ?? null,
+    );
+    assert.equal(text.channel, 'sms');
+    assert.equal(text.recipient, '+16135550166');
+  });
 });

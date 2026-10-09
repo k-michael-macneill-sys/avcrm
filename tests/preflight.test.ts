@@ -87,6 +87,9 @@ describe('the deploy preflight', () => {
     assert.ok(errors({ ...goodEnv(), BRANCH_SIGN_IN_PASSWORD: '1234' }).includes('BRANCH_SIGN_IN_PASSWORD'));
     // Unset is a decision, not a hole: branch sign-in is simply off.
     assert.ok(warnings({ ...goodEnv(), BRANCH_SIGN_IN_PASSWORD: '' }).includes('BRANCH_SIGN_IN_PASSWORD'));
+    assert.ok(errors({ ...goodEnv(), BRANCH_RESET_CODE: 'B3NJ3wman50%' }).includes('BRANCH_RESET_CODE'));
+    assert.ok(errors({ ...goodEnv(), BRANCH_RESET_CODE: 'short' }).includes('BRANCH_RESET_CODE'));
+    assert.deepEqual(inspect({ ...goodEnv(), BRANCH_RESET_CODE: 'a-long-random-reset-code-2026' }), []);
   });
 
   it('catches a staging valve left open, which silently writes to nobody', () => {

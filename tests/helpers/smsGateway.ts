@@ -87,7 +87,8 @@ export async function startGateway(): Promise<FakeGateway> {
         sent.push({
           provider: 'twilio',
           to,
-          from: body.From ?? '',
+          // A Messaging Service stands in for the number.
+          from: body.From ?? body.MessagingServiceSid ?? '',
           body: body.Body ?? '',
           account,
         });

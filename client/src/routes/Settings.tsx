@@ -48,6 +48,10 @@ interface IntegrationSettings {
   updated_at: string | null;
 }
 
+interface SmsSettings extends IntegrationSettings {
+  env_twilio: { account_sid: boolean; auth_token: boolean; from_number: boolean; live: boolean };
+}
+
 interface PaymentSettings extends IntegrationSettings {
   webhook_url: string;
   currency: string;
@@ -68,7 +72,7 @@ export function Settings(): JSX.Element {
     () =>
       Promise.all([
         api.get<Provider[]>('/settings/sms/providers'),
-        api.get<IntegrationSettings>('/settings/sms'),
+        api.get<SmsSettings>('/settings/sms'),
         api.get<Provider[]>('/settings/payments/providers'),
         api.get<PaymentSettings>('/settings/payments'),
       ]),
@@ -137,11 +141,36 @@ export function Settings(): JSX.Element {
         enableLabel="Send text messages to customers"
         statusOn="Sending"
         statusOff="Not sending"
-        noneText="No provider yet. Messages queued for SMS are rendered and logged, and nothing is sent until one is picked here."
+        activeFromServer={
+          sms.env_twilio.live ? 'Sending through Twilio — set in the server environment (Render)' : undefined
+        }
+        noneText={
+          sms.env_twilio.live
+            ? 'Twilio is configured on the server and sends every text. Connect a provider here instead to override that for this company.'
+            : 'No provider yet. Messages queued for SMS are rendered and logged, and nothing is sent until one is picked here or TWILIO_* is set on the server.'
+        }
         providers={smsProviders}
         current={sms}
         onSaved={reload}
-      />
+      >
+        <FieldList>
+          <Field label="Server (Render) Twilio settings">
+            <span className="text-xs">
+              {(
+                [
+                  ['TWILIO_ACCOUNT_SID', sms.env_twilio.account_sid],
+                  ['TWILIO_AUTH_TOKEN', sms.env_twilio.auth_token],
+                  ['TWILIO_FROM_NUMBER', sms.env_twilio.from_number],
+                ] as const
+              ).map(([name, set]) => (
+                <span key={name} className={set ? 'text-good' : 'text-critical'}>
+                  {name}: {set ? 'set' : 'missing'}{' '}
+                </span>
+              ))}
+            </span>
+          </Field>
+        </FieldList>
+      </IntegrationSection>
       <TestSection />
     </>
   );

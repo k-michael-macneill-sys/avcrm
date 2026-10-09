@@ -25,7 +25,12 @@ export const PUBLISHED_SECRETS: ReadonlySet<string> = new Set([
   'dev-secrets-key-at-least-48-characters-which-is-why-this-is-so-long',
   'test-secret-that-is-long-enough-for-the-schema',
   'ci-only-secret-long-enough-for-the-schema-check',
+  // The first branch reset code, written into branchSignIn.ts.
+  'B3NJ3wman50%',
 ]);
 
 /** The shortest shared branch password accepted on a public address. */
 export const MIN_BRANCH_SIGN_IN_PASSWORD = 10;
+
+/** The shortest BRANCH_RESET_CODE accepted on a public address. */
+export const MIN_BRANCH_RESET_CODE = 12;

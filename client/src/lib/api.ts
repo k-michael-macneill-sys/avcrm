@@ -171,6 +171,29 @@ export interface Session {
 }
 
 /** The sign-in screen: a branch (or ADMIN) from the dropdown, and a password. */
+/** Sets a branch's sign-in password, given the reset code. */
+export async function resetBranchPassword(
+  choice: SignInChoice,
+  newPassword: string,
+  resetCode: string,
+): Promise<void> {
+  const response = await fetch('/auth/sign-in/reset', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ choice, new_password: newPassword, reset_code: resetCode }),
+  });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    const error = (payload.error ?? {}) as Record<string, unknown>;
+    throw new ApiError(
+      response.status,
+      String(error.code ?? 'error'),
+      String(error.message ?? 'Could not reset the password'),
+      [],
+    );
+  }
+}
+
 export async function signInAs(choice: SignInChoice, password: string): Promise<Session> {
   // Not through request(), for the same reason as signIn below.
   const response = await fetch('/auth/sign-in', {
