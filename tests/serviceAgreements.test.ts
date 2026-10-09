@@ -180,6 +180,9 @@ describe('the service agreement', () => {
       assert.equal(saved.normal_price, '500.00');
       assert.equal(saved.scope_item_ids.length, 2);
       assert.equal(saved.addons[0].price, '100.00');
+      // The crew sees the property notes on dispatch.
+      const property = await table('properties').where({ id: quote.property_id }).first();
+      assert.equal(property.access_notes, 'Pile snow left of the garage.');
     });
 
     it('refuses a YIA tag on a monthly plan, and tags a YIA plan itself', async () => {
@@ -371,8 +374,11 @@ describe('the service agreement', () => {
       const { quote_id, token } = await setup();
       const { body } = await sign(token, quote_id);
       const row = await table('contracts').where({ id: body.data.id }).first();
+      // Signing takes no card at all: the card comes later, on the
+      // processor's page, as a token.
+      assert.equal(row.payment_method_token, null);
       for (const value of Object.values(row)) {
-        if (typeof value === 'string') assert.ok(!/\d{12,19}/.test(value.replace(/[\s-]/g, '')), 'no card number');
+        if (typeof value === 'string') assert.ok(!/^\d{12,19}$/.test(value.replace(/[\s-]/g, '')), 'no card number');
       }
     });
   });

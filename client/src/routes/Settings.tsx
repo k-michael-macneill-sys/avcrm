@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import * as React from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import { Section } from '@/components/Section';
@@ -90,7 +91,15 @@ export function Settings(): JSX.Element {
   const [smsProviders, sms, paymentProviders, payments] = data;
   return (
     <>
-      <PageHeader title="Settings" subtitle="Outside services this company uses" />
+      <PageHeader
+        title="Settings"
+        subtitle="Outside services this company uses"
+        actions={
+          <Button asChild variant="secondary">
+            <Link to="/settings/lists">Contract lists</Link>
+          </Button>
+        }
+      />
 
       {payments.managed_by_environment ? (
         <Section title="Card payments" className="mb-4">

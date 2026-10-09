@@ -80,7 +80,7 @@ export function SignDialog({
  * down to the ink, so on the agreement's signature line it is the signature
  * that fills the space rather than the empty pad around it.
  */
-async function trimToInk(blob: Blob): Promise<Blob> {
+export async function trimToInk(blob: Blob): Promise<Blob> {
   const bitmap = await createImageBitmap(blob);
   const canvas = document.createElement('canvas');
   canvas.width = bitmap.width;

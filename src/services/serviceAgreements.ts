@@ -274,6 +274,18 @@ async function resolve(
   };
 }
 
+/**
+ * The form's property notes and driveway size describe the address, so they
+ * are written to it too: that is what dispatch shows the crew as "Notes for
+ * the crew", and what the pricing guide sizes a driveway by.
+ */
+async function writeToProperty(input: AgreementInput, trx: Knex.Transaction): Promise<void> {
+  const patch: Record<string, unknown> = {};
+  if (input.property_notes !== null) patch.access_notes = input.property_notes;
+  if (input.driveway_car_lengths !== null) patch.driveway_size_cars = Math.min(6, input.driveway_car_lengths);
+  if (Object.keys(patch).length) await trx('properties').where({ id: input.property_id }).update(patch);
+}
+
 async function writeChoices(quoteId: string, resolved: Resolved, trx: Knex.Transaction): Promise<void> {
   await trx('quote_scope_items').where({ quote_id: quoteId }).del();
   await trx('quote_addons').where({ quote_id: quoteId }).del();
@@ -311,6 +323,7 @@ export async function createAgreement(
       .returning('*')) as Quote[];
     if (!quote) throw new Error('Insert returned no quote row');
     await writeChoices(quote.id, resolved, trx);
+    await writeToProperty(input, trx);
     await recordAudit(
       actor,
       { action: 'quote.created', entity_type: 'quote', entity_id: quote.id, after: { ...quote, kind: 'service_agreement' } },
@@ -341,6 +354,7 @@ export async function updateAgreement(
     const resolved = await resolve(input, owner, before, trx);
     const [quote] = (await trx('quotes').where({ id: quoteId }).update(resolved.values).returning('*')) as Quote[];
     await writeChoices(quoteId, resolved, trx);
+    await writeToProperty(input, trx);
     await recordAudit(
       actor,
       { action: 'quote.updated', entity_type: 'quote', entity_id: quoteId, before, after: quote },

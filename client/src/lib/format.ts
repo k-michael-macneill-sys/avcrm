@@ -27,6 +27,7 @@ export const TONES: Record<string, Tone> = {
   expired: 'critical',
   // Contracts and invoices
   active: 'good',
+  pending_signature: 'warning',
   cancelled: 'critical',
   completed: 'good',
   sent: 'warning',
