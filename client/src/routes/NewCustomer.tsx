@@ -323,24 +323,9 @@ function AgreementSignup({
   );
 }
 
-/** Next month, as YYYY-MM: the usual one-month sign-up. */
-function nextMonth(today: Date = new Date()): string {
-  const d = new Date(today.getFullYear(), today.getMonth() + 1, 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
-
-/** The first and last day of a YYYY-MM month, as the exact-dates term wants them. */
-function monthTerm(month: string): { term_start: string; term_end: string } {
-  const [y, m] = month.split('-').map(Number) as [number, number];
-  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  return { term_start: `${month}-01`, term_end: `${month}-${String(last).padStart(2, '0')}` };
-}
-
 /**
- * The contract period as two buttons: the full season, or one month. One
- * month is an exact-dates term from the 1st to the last day of the month
- * picked, so the agreement prints those dates; other dates can still be set
- * by tapping the term on the agreement.
+ * The contract period as two buttons: the full season, or exact dates. Exact
+ * dates shows its start and end inputs right here, no pop-up.
  */
 function ContractPeriod({
   values,
@@ -352,12 +337,12 @@ function ContractPeriod({
   invalid: boolean;
 }): JSX.Element {
   const exact = termTypeOf(values) === 'Exact dates';
-  const start = typeof values.term_start === 'string' ? values.term_start : '';
-  const month = /^\d{4}-\d{2}-01$/.test(start) ? start.slice(0, 7) : '';
-  const pick = (m: string): void => onChange({ ...values, term_type: 'Exact dates', ...monthTerm(m) });
+  const day = (name: 'term_start' | 'term_end'): string =>
+    typeof values[name] === 'string' ? (values[name] as string) : '';
+  const bad = invalid ? 'ring-2 ring-red-500' : undefined;
 
   return (
-    <div className="mx-auto mb-4 flex w-full max-w-3xl flex-col gap-2">
+    <div id="contract-period" className="mx-auto mb-4 flex w-full max-w-3xl flex-col gap-2">
       <Label>Contract period</Label>
       <div className="grid grid-cols-2 gap-2">
         <Button
@@ -372,21 +357,34 @@ function ContractPeriod({
           type="button"
           variant={exact ? 'default' : 'secondary'}
           aria-pressed={exact}
-          onClick={() => pick(month || nextMonth())}
+          onClick={() => onChange({ ...values, term_type: 'Exact dates' })}
         >
-          One month
+          Exact dates
         </Button>
       </div>
       {exact ? (
-        <div className="flex max-w-xs flex-col gap-1.5">
-          <Label htmlFor="term-month">Month of service</Label>
-          <Input
-            id="term-month"
-            type="month"
-            value={month}
-            className={invalid ? 'ring-2 ring-red-500' : undefined}
-            onChange={(e) => e.target.value && pick(e.target.value)}
-          />
+        <div className="grid grid-cols-2 gap-2">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="term-start">Service starts on</Label>
+            <Input
+              id="term-start"
+              type="date"
+              value={day('term_start')}
+              className={bad}
+              onChange={(e) => onChange({ ...values, term_type: 'Exact dates', term_start: e.target.value })}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="term-end">Service ends on</Label>
+            <Input
+              id="term-end"
+              type="date"
+              min={day('term_start') || undefined}
+              value={day('term_end')}
+              className={bad}
+              onChange={(e) => onChange({ ...values, term_type: 'Exact dates', term_end: e.target.value })}
+            />
+          </div>
         </div>
       ) : null}
     </div>
