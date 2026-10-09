@@ -109,6 +109,17 @@ export function createApp(): Express {
     res.type('application/pdf').sendFile(AGREEMENT_TEMPLATE);
   });
 
+  // Apple Pay's domain check: Square hands out this file when the domain is
+  // added under Apple Pay in its dashboard, and Apple fetches it from here.
+  // Drop the downloaded file into public/.well-known/ to switch it on.
+  app.get('/.well-known/apple-developer-merchantid-domain-association', (_req, res, next) => {
+    res.type('text/plain').sendFile(
+      path.join(publicDir, '.well-known', 'apple-developer-merchantid-domain-association'),
+      { dotfiles: 'allow' },
+      (err) => err && next(),
+    );
+  });
+
   app.get('/', (_req, res) => res.redirect('/app'));
 
   app.use(notFoundHandler);
