@@ -105,11 +105,17 @@ export function ContractDetail(): JSX.Element {
           <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             Signature
           </p>
-          <FileImage
-            fileKey={contract.signature_image_url}
-            alt="The signature captured at the door"
-            className="block w-full max-w-[340px] rounded-md border border-border bg-white p-1.5"
-          />
+          {contract.signature_image_url ? (
+            <FileImage
+              fileKey={contract.signature_image_url}
+              alt="The signature captured at the door"
+              className="block w-full max-w-[340px] rounded-md border border-border bg-white p-1.5"
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Signed on paper{contract.signer_name ? ` by ${contract.signer_name}` : ''} — the scan is the agreement below.
+            </p>
+          )}
           {contract.pdf_url ? (
             <Button
               type="button"

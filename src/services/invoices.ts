@@ -9,6 +9,9 @@ import { logger } from '../utils/logger';
 import { offsetOf, paginated, type Paginated, type Pagination } from '../utils/pagination';
 import { isPgError, PG_UNIQUE_VIOLATION } from '../utils/pg';
 import { applyBranchScope } from '../utils/scope';
+import { paymentSchedule, centsToDecimal } from '../types/serviceAgreement';
+import { loadQuoteTerms, localDate, type QuoteTerms } from './agreementTerms';
+import { applyCredit, earnReferralCredit } from './credits';
 import { activeGateway } from './gateway';
 import { enqueueMessage } from './messages';
 
@@ -77,6 +80,8 @@ export function addDays(isoDate: string, days: number): string {
 
 interface BillableContract {
   contract_id: string;
+  quote_id: string;
+  timezone: string;
   customer_id: string;
   branch_id: string;
   status: string;
@@ -95,9 +100,12 @@ async function billableContract(
   return (await db('contracts')
     .join('quotes', 'quotes.id', 'contracts.quote_id')
     .join('customers', 'customers.id', 'contracts.customer_id')
+    .join('branches', 'branches.id', 'customers.branch_id')
     .where('contracts.id', contractId)
     .first([
       'contracts.id as contract_id',
+      'contracts.quote_id',
+      'branches.timezone',
       'contracts.customer_id',
       'contracts.status',
       'contracts.signed_at',
@@ -133,6 +141,12 @@ export async function generateInvoicesForContract(
   }
   if (contract.status !== 'active') {
     return [];
+  }
+
+  // A service agreement bills from its own payment schedule.
+  const terms = await loadQuoteTerms(contract.quote_id, db);
+  if (terms) {
+    return raiseScheduledInvoices(contract, terms, asOf, db);
   }
 
   const periods =
@@ -201,6 +215,85 @@ export async function generateInvoicesForContract(
     }
   }
 
+  return raised;
+}
+
+/**
+ * Raises every payment a service agreement's schedule has due by `asOf` that
+ * has not been billed yet: the first payment on signing or November 1st,
+ * then one a month, renewals included once the commitment is over and the
+ * agreement renews. Tax is added per payment, and any credit the customer
+ * has — referral credit, mostly — is taken off before the bill goes out.
+ * A bill the credit covers entirely is raised already paid.
+ *
+ * Safe to call repeatedly, for the same reason the monthly path is: the
+ * period's start date is unique per contract among invoices that are not void.
+ */
+async function raiseScheduledInvoices(
+  contract: BillableContract,
+  terms: QuoteTerms,
+  asOf: string,
+  db: Knex,
+): Promise<Invoice[]> {
+  const signedOn = localDate(contract.signed_at, contract.timezone);
+  const due = paymentSchedule({ ...terms.schedule, signed_on: signedOn }, terms.pricing, asOf);
+
+  const existing = await db('invoices')
+    .where({ contract_id: contract.contract_id })
+    .whereNot({ status: 'void' })
+    .pluck('billing_period_start');
+  const alreadyBilled = new Set(existing);
+
+  const raised: Invoice[] = [];
+  for (const entry of due) {
+    if (alreadyBilled.has(entry.due_on)) continue;
+    try {
+      const invoice = await db.transaction(async (trx) => {
+        const [row] = (await trx('invoices')
+          .insert({
+            contract_id: contract.contract_id,
+            customer_id: contract.customer_id,
+            branch_id: contract.branch_id,
+            billing_period_start: entry.due_on,
+            billing_period_end: entry.period_end,
+            subtotal: centsToDecimal(entry.amount),
+            tax_amount: centsToDecimal(entry.tax),
+            credit_applied: '0',
+            amount_due: centsToDecimal(entry.total),
+            amount_paid: '0',
+            service_months: entry.months,
+            status: 'draft',
+            due_date: addDays(entry.due_on, PAYMENT_TERMS_DAYS),
+          })
+          .returning('*')) as Invoice[];
+        if (!row) throw new Error('Insert returned no invoice row');
+
+        const credit = await applyCredit(contract.customer_id, row.id, entry.total, trx);
+        if (credit === 0) return row;
+
+        const owing = entry.total - credit;
+        const now = new Date();
+        const [updated] = (await trx('invoices')
+          .where({ id: row.id })
+          .update({
+            credit_applied: centsToDecimal(credit),
+            amount_due: centsToDecimal(owing),
+            // Nothing left to pay: it was paid with credit.
+            ...(owing === 0 ? { status: 'paid', sent_at: now, paid_at: now } : {}),
+          })
+          .returning('*')) as Invoice[];
+        if (owing === 0) await earnReferralCredit(row.id, trx);
+        return updated!;
+      });
+      raised.push(invoice);
+    } catch (err) {
+      if (isPgError(err, PG_UNIQUE_VIOLATION)) {
+        logger.debug({ contract_id: contract.contract_id, due_on: entry.due_on }, 'Invoice for this payment already exists');
+        continue;
+      }
+      throw err;
+    }
+  }
   return raised;
 }
 
@@ -381,6 +474,10 @@ export async function recomputeInvoiceTotals(
     .returning('*');
   if (!updated) {
     throw notFound('Invoice not found');
+  }
+  // A referred customer paying their bill earns their referrer's credit.
+  if (status === 'paid' && invoice.status !== 'paid') {
+    await earnReferralCredit(invoiceId, db);
   }
   return updated;
 }

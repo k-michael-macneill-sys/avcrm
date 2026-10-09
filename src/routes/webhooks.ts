@@ -6,6 +6,7 @@ import {
   verifyWebhookChallenge,
 } from '../services/metaMessaging';
 import { reconcilePayment } from '../services/payments';
+import { recordInboundSms } from '../services/customerProfile';
 import { asyncHandler } from '../utils/async';
 import { badRequest } from '../utils/errors';
 import { logger } from '../utils/logger';
@@ -115,5 +116,43 @@ webhooksRouter.post(
     logger.info(summary, 'Meta webhook received');
 
     res.type('text/plain').send('EVENT_RECEIVED');
+  }),
+);
+
+/**
+ * Texts customers send back. Point the SMS provider's inbound webhook here
+ * with the shared secret in the query string:
+ *
+ *   POST /webhooks/sms/inbound?secret=<SMS_INBOUND_SECRET>
+ *
+ * Takes Twilio's form post (From, Body, MessageSid) or plain JSON
+ * ({ from, body, message_id }), so most providers fit without code. Without
+ * SMS_INBOUND_SECRET set, every call is refused. Answers with empty TwiML,
+ * which Twilio reads as "no reply".
+ */
+webhooksRouter.post(
+  '/sms/inbound',
+  express.urlencoded({ extended: false, limit: '64kb' }),
+  express.json({ limit: '64kb' }),
+  asyncHandler(async (req, res) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const pick = (...names: string[]): string => {
+      for (const name of names) {
+        const value = body[name];
+        if (typeof value === 'string' && value.trim()) return value.trim();
+      }
+      return '';
+    };
+    const from = pick('From', 'from', 'msisdn');
+    const text = pick('Body', 'body', 'text');
+    if (!from || !text) throw badRequest('Expected a sender and a message body');
+
+    await recordInboundSms({
+      from,
+      body: text.slice(0, 1600),
+      provider_message_id: pick('MessageSid', 'message_id', 'id') || null,
+      secret: typeof req.query.secret === 'string' ? req.query.secret : undefined,
+    });
+    res.type('text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
   }),
 );

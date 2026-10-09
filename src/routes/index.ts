@@ -16,6 +16,8 @@ import { paymentsRouter } from './payments';
 import { portalRouter } from './portal';
 import { pricingGuideRouter } from './pricing';
 import { leadsRouter } from './leads';
+import { lookupsRouter } from './lookups';
+import { serviceAgreementsRouter } from './serviceAgreements';
 import { propertiesRouter } from './properties';
 import { publicRouter } from './public';
 import { quotesRouter } from './quotes';
@@ -50,6 +52,9 @@ apiRouter.use('/sales', salesRouter);
 apiRouter.use('/leads', leadsRouter);
 apiRouter.use('/checklist-requirements', checklistRequirementsRouter);
 apiRouter.use('/contracts', contractsRouter);
+// The contract form's lists, and the service agreements written from it.
+apiRouter.use('/lookups', lookupsRouter);
+apiRouter.use('/agreements', serviceAgreementsRouter);
 apiRouter.use('/work-orders', workOrdersRouter);
 apiRouter.use('/message-templates', messageTemplatesRouter);
 apiRouter.use('/message-log', messageLogRouter);

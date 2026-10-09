@@ -101,6 +101,9 @@ const envSchema = z.object({
    * unset anywhere a real message matters.
    */
   SMS_API_BASE: z.string().trim().url().optional(),
+  // Shared secret for texts customers send back (POST /webhooks/sms/inbound?secret=...).
+  // Unset means inbound texts are refused.
+  SMS_INBOUND_SECRET: z.string().trim().min(16).optional(),
 
   SMTP_HOST: z.string().trim().min(1).optional(),
   SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
@@ -300,6 +303,7 @@ export const config = {
   sms: {
     redirectTo: env.SMS_REDIRECT_TO ?? null,
     apiBase: env.SMS_API_BASE ?? null,
+    inboundSecret: env.SMS_INBOUND_SECRET ?? null,
   },
   messaging: {
     appBaseUrl: (env.APP_BASE_URL ?? env.RENDER_EXTERNAL_URL ?? 'http://localhost:3000').replace(/\/+$/, ''),

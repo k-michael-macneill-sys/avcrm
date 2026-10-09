@@ -91,6 +91,9 @@ export interface EnqueueInput {
   customer_id?: string | null;
   work_order_id?: string | null;
   email_lead_id?: string | null;
+  /** A stored file to attach to an email, such as the signed agreement. */
+  attachment_key?: string | null;
+  attachment_name?: string | null;
 }
 
 /**
@@ -127,6 +130,8 @@ export async function enqueueMessage(
         ? renderTemplate(template.subject, input.context, `${input.template_code}.subject`)
         : null,
       body: renderTemplate(template.body, input.context, `${input.template_code}.body`),
+      attachment_key: input.attachment_key ?? null,
+      attachment_name: input.attachment_key ? (input.attachment_name ?? 'attachment') : null,
       status: 'queued',
     })
     .returning('*');
@@ -179,6 +184,9 @@ export async function sendQueued(
               message.subject ?? '',
               message.body,
               message.id,
+              message.attachment_key
+                ? { key: message.attachment_key, name: message.attachment_name ?? 'attachment' }
+                : undefined,
             );
 
       await db('message_log').where({ id: message.id }).update({
@@ -235,6 +243,8 @@ async function claim(limit: number, db: Knex): Promise<MessageLogEntry[]> {
   return db.transaction(async (trx) => {
     const rows = (await trx('message_log')
       .where({ status: 'queued' })
+      // "Send later": not before its time.
+      .andWhere((qb) => qb.whereNull('send_after').orWhere('send_after', '<=', new Date()))
       .andWhere((qb) =>
         qb
           .whereNull('last_attempt_at')

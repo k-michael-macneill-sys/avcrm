@@ -249,7 +249,7 @@ describe('signing by emailed link', () => {
     assert.equal(first.status, 201, JSON.stringify(first.body));
 
     const contract = await db('contracts').where({ quote_id: quoteId }).first();
-    assert.ok(contract, 'the contract should exist');
+    assert.ok(contract?.signature_image_url, 'the contract should exist, signed');
     const upload = await db('uploads').where({ key: contract.signature_image_url }).first();
     assert.equal(upload?.status, 'stored');
     // Nobody on staff signed this.

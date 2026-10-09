@@ -369,6 +369,18 @@ export const MESSAGE_TEMPLATES: MessageTemplateRow[] = [
         'clearance.\n\n— {{branch_name}}',
     },
     {
+      code: 'agreement_signed',
+      channel: 'email',
+      branch_id: null,
+      subject: 'Your Drift Property Services agreement for {{address_line1}}',
+      body:
+        'Hi {{customer_first_name}},\n\nThank you for choosing Drift Property Services. ' +
+        'Your signed service agreement for {{address_line1}} is attached for your records.\n\n' +
+        'Agreement: {{agreement_name}}\nFirst payment: {{first_payment}}\n\n' +
+        'You may cancel within ten days of signing at no charge. Reply to this email with any questions.\n\n' +
+        '— {{branch_name}}',
+    },
+    {
       code: 'payment_failed_internal',
       channel: 'email',
       branch_id: null,
