@@ -93,8 +93,12 @@ export function WorkOrderDetail(): JSX.Element {
               View the contract
             </Link>
           </Field>
-          <Field label="Access notes">{property.access_notes ?? 'none'}</Field>
         </FieldList>
+
+        <div className="mt-3 rounded-lg border border-warning/35 bg-warning/10 px-3 py-2 text-sm">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Notes for the crew</p>
+          <p className="mt-0.5 whitespace-pre-wrap text-foreground">{property.access_notes || 'None'}</p>
+        </div>
 
         {visit.skip_reason ? (
           <p className="mt-3 rounded-lg bg-accent/40 px-3 py-2 text-sm text-secondary-foreground">

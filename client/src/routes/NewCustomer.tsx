@@ -10,7 +10,8 @@ import {
   type Quote,
 } from '../../../src/types/models';
 import {
-  defaultAgreementYears,
+  seasonTerm,
+  termDate,
   termTypeOf,
   type AgreementValues,
 } from '../../../src/types/agreement';
@@ -23,9 +24,10 @@ import { SignDialog, type Signature } from '@/components/SignDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import * as api from '@/lib/api';
-import { usePublicConfig } from '@/lib/publicApi';
+import { usePublicConfigState } from '@/lib/publicApi';
 import { openFile, uploadBlob } from '@/lib/upload';
 import { useQuery } from '@/lib/useQuery';
 import { useSubmit } from '@/lib/useSubmit';
@@ -110,7 +112,7 @@ function startingValues(
     customer_province: prefill.get('province') ?? branch?.province ?? '',
     customer_postal: prefill.get('postal_code') ?? '',
     term_type: 'Seasonal',
-    ...defaultAgreementYears(),
+    ...seasonTerm(),
   };
 }
 
@@ -274,6 +276,22 @@ function AgreementSignup({
         invalid={invalid.some((f) => f === 'term_start' || f === 'term_end')}
       />
 
+      <div className="mx-auto mb-4 flex w-full max-w-3xl flex-col gap-1.5">
+        <Label htmlFor="crew-notes">Notes for the crew</Label>
+        <Textarea
+          id="crew-notes"
+          rows={3}
+          maxLength={2000}
+          placeholder="Gate code, where to pile snow, the dog in the yard…"
+          value={typeof values.customer_notes === 'string' ? values.customer_notes : ''}
+          onChange={(e) => edit({ ...values, customer_notes: e.target.value })}
+        />
+        <p className="text-xs text-muted-foreground">
+          Kept in the CRM for operators and managers, on dispatch and the customer’s profile. Not on the contract, and
+          never shown to the customer.
+        </p>
+      </div>
+
       <div className="mx-auto w-full max-w-3xl">
         <AgreementPdf
           values={values}
@@ -337,6 +355,8 @@ function ContractPeriod({
   invalid: boolean;
 }): JSX.Element {
   const exact = termTypeOf(values) === 'Exact dates';
+  // From today, or November 1st before the season, to March 31st.
+  const season = seasonTerm();
   const day = (name: 'term_start' | 'term_end'): string =>
     typeof values[name] === 'string' ? (values[name] as string) : '';
   const bad = invalid ? 'ring-2 ring-red-500' : undefined;
@@ -349,9 +369,9 @@ function ContractPeriod({
           type="button"
           variant={exact ? 'secondary' : 'default'}
           aria-pressed={!exact}
-          onClick={() => onChange({ ...values, term_type: 'Seasonal' })}
+          onClick={() => onChange({ ...values, term_type: 'Seasonal', ...season })}
         >
-          Full season (Nov 1 – Mar 31)
+          Full season ({termDate(season.term_start).replace(/, \d{4}$/, '')} – Mar 31)
         </Button>
         <Button
           type="button"
@@ -428,7 +448,7 @@ function EmailSent({ sent }: { sent: { url: string; sent_to: string; quote: Quot
 
 /** Signed: the document, then the card for autopay. */
 function AfterSigning({ contract }: { contract: Contract }): JSX.Element {
-  const config = usePublicConfig();
+  const { config, error: configError } = usePublicConfigState();
   const [cardUrl, setCardUrl] = React.useState<string | null>(null);
   const [sentTo, setSentTo] = React.useState<string | null>(null);
   const { run, pending, error } = useSubmit();
@@ -454,7 +474,9 @@ function AfterSigning({ contract }: { contract: Contract }): JSX.Element {
           </Button>
         ) : null}
 
-        {config && !config.card_capture ? (
+        {configError ? (
+          <ErrorNotice message={configError} />
+        ) : config && !config.card_capture ? (
           <p className="text-sm text-muted-foreground">
             Card payments are not connected yet, so the office will follow up for the card. (Connect Square to take
             cards here.)

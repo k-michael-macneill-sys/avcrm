@@ -15,13 +15,17 @@ import { applyBranchScope } from '../utils/scope';
  * transaction: all of it goes, or none of it does.
  *
  * Because that takes invoices and payments with it, anything with a contract
- * underneath is corporate-only. The audit log is append-only and keeps the
- * record that the delete happened, and who did it.
+ * underneath is corporate-only — except a whole customer, which a branch's
+ * own sign-in may also delete within its branch (the route makes them type
+ * DELETE first). The audit log is append-only and keeps the record that the
+ * delete happened, and who did it.
  */
 
 export interface Deleter {
   actor: AuditActor;
   isCorporate: boolean;
+  /** A branch's own shared sign-in. */
+  isBranchLogin?: boolean;
 }
 
 const OFFICE_ONLY =
@@ -61,7 +65,11 @@ export async function deleteCustomer(
     if (!customer) throw notFound('Customer not found');
 
     const contracts = await contractsWhere(trx, 'customer_id', id);
-    if (contracts.length && !by.isCorporate) throw forbidden(`This customer ${OFFICE_ONLY}`);
+    if (contracts.length && !by.isCorporate && !by.isBranchLogin) {
+      throw forbidden(
+        'This customer has a signed contract, and deleting them removes that contract, its invoices and payments too. Only the office or the branch’s own sign-in can do that.',
+      );
+    }
     await purgeContracts(trx, contracts);
     // Any invoice not tied to one of those contracts still names the customer.
     const invoiceIds = trx('invoices').where('customer_id', id).select('id');

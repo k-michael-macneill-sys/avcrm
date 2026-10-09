@@ -3,7 +3,9 @@ import { describe, it } from 'node:test';
 import { PDFDocument } from 'pdf-lib';
 import { db } from './helpers/database';
 import { harness } from './helpers/harness';
+import { pdfText } from './helpers/pdf';
 import { call, login } from './helpers/server';
+import { contractValues, seasonTerm, termDate } from '../src/types/agreement';
 
 /** A one-pixel PNG, so the signature bytes are real image bytes. */
 const PNG = Buffer.from(
@@ -73,8 +75,30 @@ describe('signing up on the PDF agreement', () => {
     assert.equal(quote.package, 'premium');
     assert.deepEqual(quote.addons, ['de_ice', 'deck']);
     assert.equal(quote.agreement_fields.customer_notes, 'Gate code 1234.');
-    assert.equal(String(quote.season_start).slice(0, 10), '2026-11-01');
-    assert.equal(String(quote.season_end).slice(0, 10), '2027-03-31');
+    // Seasonal: no years typed, the dates come from the day it is signed.
+    const season = seasonTerm();
+    assert.equal(String(quote.season_start).slice(0, 10), season.term_start);
+    assert.equal(String(quote.season_end).slice(0, 10), season.term_end);
+    assert.equal(quote.agreement_fields.term_start, season.term_start);
+  });
+
+  it('runs a seasonal term from today, or November 1st before the season, to March 31st', () => {
+    // 9 Oct: before the season.
+    assert.deepEqual(seasonTerm(new Date('2026-10-09T16:00:00Z')), { term_start: '2026-11-01', term_end: '2027-03-31' });
+    // 1 Apr: the next season.
+    assert.deepEqual(seasonTerm(new Date('2027-04-01T16:00:00Z')), { term_start: '2027-11-01', term_end: '2028-03-31' });
+    // In the season: from today, to the coming March 31st.
+    assert.deepEqual(seasonTerm(new Date('2026-12-15T16:00:00Z')), { term_start: '2026-12-15', term_end: '2027-03-31' });
+    assert.deepEqual(seasonTerm(new Date('2027-02-03T16:00:00Z')), { term_start: '2027-02-03', term_end: '2027-03-31' });
+    // 1 Nov itself.
+    assert.deepEqual(seasonTerm(new Date('2026-11-01T16:00:00Z')), { term_start: '2026-11-01', term_end: '2027-03-31' });
+  });
+
+  it('keeps the crew’s notes and the phone type off what the customer sees', () => {
+    const shown = contractValues(agreement());
+    assert.equal(shown.customer_notes, undefined);
+    assert.equal(shown.phone_type_cell, undefined);
+    assert.equal(shown.customer_name, 'Harold Bell');
   });
 
   it('runs an exact-dates agreement between the dates given, rather than the season', async () => {
@@ -151,8 +175,13 @@ describe('signing up on the PDF agreement', () => {
       headers: { Authorization: `Bearer ${token}` },
     });
     assert.equal(file.status, 200);
-    const pdf = await PDFDocument.load(Buffer.from(await file.arrayBuffer()));
+    const bytes = Buffer.from(await file.arrayBuffer());
+    const pdf = await PDFDocument.load(bytes);
     assert.equal(pdf.getPageCount(), 2);
+    const printed = pdfText(bytes);
+    assert.doesNotMatch(printed, /Gate code/, 'the crew’s notes are not on the contract');
+    // The season's dates are printed in the term sentence: nothing typed.
+    assert.ok(printed.includes(`begins on ${termDate(seasonTerm().term_start)}`), 'the start date is on the contract');
     // Flattened: the values are printed on the page, not editable fields.
     assert.equal(pdf.getForm().getFields().length, 0);
   });
@@ -167,6 +196,7 @@ describe('signing up on the PDF agreement', () => {
     assert.equal(view.status, 200);
     assert.equal(view.body.data.agreement.package, 'Premium');
     assert.equal(view.body.data.agreement.price_premium, '129.50');
+    assert.equal(view.body.data.agreement.customer_notes, undefined, 'the crew’s notes stay in the CRM');
 
     const done = await call(h.server(), 'POST', `/public/sign/${link}`, {
       body: { signature_png: `data:image/png;base64,${PNG.toString('base64')}`, confirmed: [] },

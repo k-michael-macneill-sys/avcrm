@@ -408,7 +408,7 @@ A suspension is only lifted by corporate, never by the automatic refresh.
 | GET | `/customers/:id` | any | |
 | GET | `/customers/:id/properties` | any | |
 | PATCH | `/customers/:id` | any | |
-| DELETE | `/customers/:id` | any | |
+| DELETE | `/customers/:id?confirm=DELETE` | any | Takes their contracts, invoices and payments too: corporate or the branch sign-in only, once anything is signed |
 | GET | `/properties` | any | `customer_id`, `priority_flag`, `search` |
 | GET | `/properties/check-duplicate` | any | Warns before the rep signs |
 | POST | `/properties` | any | 409 with details if the address exists |

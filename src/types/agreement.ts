@@ -35,6 +35,13 @@ export interface AgreementFieldSpec {
    * November to March (see agreementRewrites).
    */
   offPdf?: true;
+  /**
+   * A box the PDF still has but the contract no longer uses: never drawn on
+   * screen, never printed on the signed copy. The phone-type boxes, and the
+   * customer notes — which are the crew's, kept in the CRM (the address's
+   * access notes) and never shown to the customer.
+   */
+  offContract?: true;
 }
 
 /**
@@ -51,8 +58,8 @@ export const AGREEMENT_FIELDS: readonly AgreementFieldSpec[] = [
   { name: 'customer_province', label: 'Province', kind: 'text' },
   { name: 'customer_postal', label: 'Postal code', kind: 'text' },
   { name: 'customer_phone', label: 'Phone', kind: 'tel' },
-  { name: 'phone_type_cell', label: 'Phone is a cell', kind: 'check' },
-  { name: 'phone_type_home', label: 'Phone is a home line', kind: 'check' },
+  { name: 'phone_type_cell', label: 'Phone is a cell', kind: 'check', offContract: true },
+  { name: 'phone_type_home', label: 'Phone is a home line', kind: 'check', offContract: true },
   { name: 'customer_email', label: 'Email', kind: 'email' },
   { name: 'term_type', label: 'Term of service', kind: 'choice', options: TERM_TYPES, offPdf: true },
   { name: 'term_start', label: 'Service starts on', kind: 'day', offPdf: true },
@@ -68,7 +75,7 @@ export const AGREEMENT_FIELDS: readonly AgreementFieldSpec[] = [
   { name: 'addon_deck', label: 'Add-on: Deck', kind: 'check' },
   { name: 'addon_vehicle_clearing', label: 'Add-on: Vehicle clearing', kind: 'check' },
   { name: 'addon_other_request', label: 'Add-on: Other request', kind: 'check' },
-  { name: 'customer_notes', label: 'Customer instructions / notes', kind: 'notes' },
+  { name: 'customer_notes', label: 'Notes for the crew', kind: 'notes', offContract: true },
   { name: 'customer_signature', label: 'Customer signature', kind: 'signature' },
   { name: 'customer_sign_date', label: 'Customer signature date', kind: 'date' },
   { name: 'provider_signature', label: 'Service provider signature', kind: 'signature' },
@@ -82,6 +89,21 @@ export const AGREEMENT_ADDONS = AGREEMENT_FIELDS.filter((f) => f.name.startsWith
   code: f.name.slice('addon_'.length),
   label: f.label.replace(/^Add-on: /, ''),
 }));
+
+/** Fields the contract never shows, by name. */
+export const OFF_CONTRACT_FIELDS: readonly string[] = AGREEMENT_FIELDS.filter((f) => f.offContract).map((f) => f.name);
+
+/**
+ * The agreement as the customer may see it: without the crew's notes or
+ * anything else that is not on the contract.
+ */
+export function contractValues(values: AgreementValues): AgreementValues {
+  const out: AgreementValues = {};
+  for (const [name, value] of Object.entries(values)) {
+    if (!OFF_CONTRACT_FIELDS.includes(name)) out[name] = value;
+  }
+  return out;
+}
 
 /** The fields someone types into, as opposed to signs or that fill themselves. */
 export const EDITABLE_AGREEMENT_FIELDS = AGREEMENT_FIELDS.filter(
@@ -101,13 +123,29 @@ export function agreementDate(when: Date): string {
   return `${day}/${month.replace('.', '')}/${year}`;
 }
 
+/** A day's YYYY-MM-DD as the wall clock reads it in Ontario, where the agreement is dated. */
+function localDay(when: Date): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Toronto',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(when);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
 /**
- * The season a sign-up today is for, as the agreement's two-digit years:
- * from April on it is the coming winter, before that the one under way.
+ * A seasonal term signed today: to March 31st, from today when the season is
+ * already under way, or from November 1st when it is signed before the
+ * season (April to October).
  */
-export function defaultAgreementYears(today: Date = new Date()): { start_year: string; end_year: string } {
-  const start = today.getMonth() >= 3 ? today.getFullYear() : today.getFullYear() - 1;
-  return { start_year: String(start % 100).padStart(2, '0'), end_year: String((start + 1) % 100).padStart(2, '0') };
+export function seasonTerm(today: Date = new Date()): { term_start: string; term_end: string } {
+  const day = localDay(today);
+  const year = Number(day.slice(0, 4));
+  const month = Number(day.slice(5, 7));
+  if (month >= 4 && month <= 10) return { term_start: `${year}-11-01`, term_end: `${year + 1}-03-31` };
+  return { term_start: day, term_end: `${month <= 3 ? year : year + 1}-03-31` };
 }
 
 /** Exact dates, or the season. An agreement from before the choice existed is seasonal. */
@@ -193,15 +231,35 @@ export interface AgreementRewrite {
 export const TERM_LINE = { page: 0, left: 46, top: 240.5, right: 556, bottom: 253, baseline: 249.28, size: 9 } as const;
 
 /**
- * The printed lines that say November to March, reworded for an exact-dates
- * term. A seasonal agreement prints as it is, so this is empty for one.
+ * The template's printed "□ Cell □ Home" beside PHONE, which the contract no
+ * longer asks: covered over, on screen and on the signed copy.
+ */
+export const PHONE_TYPE_BLANK: AgreementRewrite = {
+  page: 0,
+  left: 476,
+  top: 164.5,
+  right: 540,
+  bottom: 173.05,
+  baseline: 171.5,
+  size: 6,
+  text: '',
+};
+
+/**
+ * The printed lines that say November to March, reworded with the term's own
+ * dates: an exact-dates term, or a seasonal one with its dates worked out
+ * (see seasonTerm). A seasonal agreement from before that, which has the
+ * two-digit years instead, prints as it is, so this is empty for one.
  */
 export function agreementRewrites(values: AgreementValues): AgreementRewrite[] {
-  if (termTypeOf(values) !== 'Exact dates') return [];
+  const seasonalWithDates =
+    termTypeOf(values) === 'Seasonal' && isIsoDay(values.term_start) && isIsoDay(values.term_end);
+  if (termTypeOf(values) !== 'Exact dates' && !seasonalWithDates) return [PHONE_TYPE_BLANK];
   const start = isIsoDay(values.term_start) ? values.term_start : null;
   const end = isIsoDay(values.term_end) ? values.term_end : null;
   const length = start && end && end > start ? termLength(start, end) : '____';
   return [
+    PHONE_TYPE_BLANK,
     {
       ...TERM_LINE,
       term: true,

@@ -39,19 +39,35 @@ export interface PublicConfig {
 
 let cached: Promise<PublicConfig> | null = null;
 
+export interface PublicConfigState {
+  config: PublicConfig | null;
+  /** Why it could not be loaded; a screen waiting on it should say so, not spin. */
+  error: string | null;
+}
+
 /** Fetched once per page load; it only changes with a redeploy. */
-export function usePublicConfig(): PublicConfig | null {
-  const [config, setConfig] = React.useState<PublicConfig | null>(null);
+export function usePublicConfigState(): PublicConfigState {
+  const [state, setState] = React.useState<PublicConfigState>({ config: null, error: null });
   React.useEffect(() => {
     cached ??= publicGet<PublicConfig>('/public/config').catch((err: unknown) => {
       cached = null;
       throw err;
     });
     let live = true;
-    cached.then((c) => live && setConfig(c)).catch(() => undefined);
+    cached
+      .then((config) => live && setState({ config, error: null }))
+      .catch((err: unknown) => {
+        if (!live) return;
+        const message = err instanceof Error ? err.message : String(err);
+        setState({ config: null, error: `Could not load the server's settings: ${message}` });
+      });
     return () => {
       live = false;
     };
   }, []);
-  return config;
+  return state;
+}
+
+export function usePublicConfig(): PublicConfig | null {
+  return usePublicConfigState().config;
 }

@@ -10,6 +10,7 @@ import {
   agreementDate,
   agreementRewrites,
   isIsoDay,
+  seasonTerm,
   termTypeOf,
   termWithinLimit,
   type AgreementValues,
@@ -44,7 +45,6 @@ function templateBytes(): Buffer {
 }
 
 const text = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
-const yearOk = (v: string): boolean => /^\d{2}$/.test(v);
 const priceOf = (v: string): number | null => {
   const n = Number(v.replace(/[$,\s]/g, ''));
   return v !== '' && Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null;
@@ -97,13 +97,8 @@ export function assertAgreementComplete(values: AgreementValues): void {
         need('term_end', `An exact-dates term can run at most ${MAX_TERM_MONTHS} months`);
       }
     }
-  } else {
-    if (!yearOk(v('start_year'))) need('start_year', 'Enter the start year as two digits, e.g. 26');
-    if (!yearOk(v('end_year'))) need('end_year', 'Enter the end year as two digits, e.g. 27');
-    if (yearOk(v('start_year')) && yearOk(v('end_year')) && Number(v('end_year')) <= Number(v('start_year'))) {
-      need('end_year', 'The season has to end after it starts');
-    }
   }
+  // A seasonal term needs nothing typed: its dates come from the day it is signed.
   const pkg = v('package');
   if (pkg !== 'Basic' && pkg !== 'Premium') need('package', 'Choose the Basic or Premium package');
   else if (priceOf(v(pkg === 'Basic' ? 'price_basic' : 'price_premium')) === null) {
@@ -147,8 +142,14 @@ export interface AgreementDeal {
  * What the CRM keeps from a completed agreement. The agreement is monthly,
  * November to March for a seasonal term, or between the exact dates given.
  */
-export function dealFromAgreement(values: AgreementValues): AgreementDeal {
-  assertAgreementComplete(values);
+export function dealFromAgreement(input: AgreementValues, today: Date = new Date()): AgreementDeal {
+  assertAgreementComplete(input);
+  // Seasonal: from today (or November 1st, before the season) to March 31st,
+  // written into the agreement so the contract states the dates.
+  const values: AgreementValues =
+    termTypeOf(input) === 'Exact dates'
+      ? input
+      : { ...input, ...seasonTerm(today), start_year: '', end_year: '' };
   const v = (name: string) => text(values[name]);
   const exact = termTypeOf(values) === 'Exact dates';
   const names = v('customer_name').split(/\s+/);
@@ -176,8 +177,8 @@ export function dealFromAgreement(values: AgreementValues): AgreementDeal {
       initial_price: price,
       discounted_price: price,
       recurring_price: price,
-      season_start: exact ? v('term_start') : `20${v('start_year')}-11-01`,
-      season_end: exact ? v('term_end') : `20${v('end_year')}-03-31`,
+      season_start: v('term_start'),
+      season_end: v('term_end'),
       package: premium ? 'premium' : 'basic',
       addons: AGREEMENT_FIELDS.filter((f) => f.name.startsWith('addon_') && values[f.name] === true).map((f) =>
         f.name.slice('addon_'.length),
@@ -258,6 +259,12 @@ export async function renderAgreement(values: AgreementValues, signatures: Agree
   for (const spec of AGREEMENT_FIELDS) {
     if (spec.offPdf) continue;
     const field = form.getFieldMaybe(spec.name);
+    // Not part of the contract any more: printed blank, whatever is stored.
+    if (spec.offContract) {
+      if (field instanceof PDFCheckBox) field.uncheck();
+      else if (field instanceof PDFTextField) field.setText('');
+      continue;
+    }
     if (!field) {
       logger.warn({ field: spec.name }, 'The agreement PDF has no field by that name');
       continue;
@@ -273,7 +280,7 @@ export async function renderAgreement(values: AgreementValues, signatures: Agree
       if (spec.kind === 'date') {
         const signer = spec.name.startsWith('customer') ? signatures.customer : signatures.provider;
         value = signer ? when : '';
-      } else if (spec.kind === 'year' && rewrites.length) {
+      } else if (spec.kind === 'year' && rewrites.some((r) => r.term)) {
         // Exact dates: the season's years are not what was agreed.
         value = '';
       } else if (spec.kind !== 'signature') {
@@ -287,7 +294,8 @@ export async function renderAgreement(values: AgreementValues, signatures: Agree
 
   form.flatten();
 
-  // The lines that say November to March, reworded for an exact-dates term.
+  // The lines that say November to March reworded with the term's dates, and
+  // the phone-type boxes covered over.
   if (rewrites.length) {
     const font = await doc.embedFont(StandardFonts.Helvetica);
     for (const line of rewrites) {

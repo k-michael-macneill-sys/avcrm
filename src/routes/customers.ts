@@ -147,10 +147,18 @@ customersRouter.patch(
   }),
 );
 
+/** The word typed into the confirmation box, checked here too. */
+const deleteQuerySchema = z.object({
+  confirm: z.literal('DELETE', {
+    errorMap: () => ({ message: 'Type DELETE to confirm deleting this customer' }),
+  }),
+});
+
 customersRouter.delete(
   '/:id',
   asyncHandler(async (req, res) => {
     const { id } = parse(idParamSchema, req.params);
+    parse(deleteQuerySchema, { confirm: req.query.confirm });
     const scope = resolveBranchScope(req, req.query.branch_id as string | undefined);
     await deleteCustomer(id, scope, resolveDeleter(req));
     res.status(204).send();
