@@ -45,6 +45,8 @@ interface IntegrationSettings {
   is_enabled: boolean;
   settings: Record<string, string>;
   secrets_set: string[];
+  /** Saved before JWT_SECRET or SECRETS_KEY changed: has to be typed again. */
+  secrets_unreadable: boolean;
   updated_at: string | null;
 }
 
@@ -283,6 +285,14 @@ function IntegrationSection({
           <Field label="Last changed">{current.updated_at ? stamp(current.updated_at) : 'never'}</Field>
         </FieldList>
         {children}
+
+        {current.secrets_unreadable ? (
+          <div className="mt-4">
+            <ErrorNotice
+              message={`The saved ${current.provider === 'square' ? 'Square' : 'provider'} credentials can no longer be read, because the server's encryption key (JWT_SECRET or SECRETS_KEY) changed after they were saved. Until they are typed in again and saved, this is switched off. Enter every credential below again.`}
+            />
+          </div>
+        ) : null}
 
         <div className="mt-4 flex flex-col gap-1.5">
           <Label htmlFor={selectId}>Provider</Label>

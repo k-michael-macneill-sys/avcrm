@@ -1,7 +1,8 @@
 import type { Knex } from 'knex';
 import { db as defaultDb } from '../db/client';
 import { badRequest } from '../utils/errors';
-import { decryptSecret, encryptSecret } from '../utils/secrets';
+import { decryptSecret, encryptSecret, SecretUnreadable } from '../utils/secrets';
+import { logger } from '../utils/logger';
 import type { IntegrationSetting } from '../types/models';
 import { paymentProvider } from './paymentProviders';
 import { smsProvider, type ProviderField } from './smsProviders';
@@ -38,6 +39,11 @@ export interface PublicIntegration {
   settings: Record<string, string>;
   /** Which secret fields have a value stored, so the UI can say so. */
   secrets_set: string[];
+  /**
+   * Credentials are stored but cannot be decrypted — JWT_SECRET or
+   * SECRETS_KEY changed since they were saved. They have to be typed again.
+   */
+  secrets_unreadable: boolean;
   updated_by_user_id: string | null;
   updated_at: Date | null;
 }
@@ -50,6 +56,7 @@ function notConfigured(key: string): PublicIntegration {
     is_enabled: false,
     settings: {},
     secrets_set: [],
+    secrets_unreadable: false,
     updated_by_user_id: null,
     updated_at: null,
   };
@@ -78,7 +85,7 @@ export function publicView(key: string, row: IntegrationSetting | null): PublicI
 }
 
 export function toPublic(row: IntegrationSetting): SavedIntegration {
-  const stored = row.secret_ciphertext ? readSecrets(row) : {};
+  const stored = secretsIfReadable(row);
 
   return {
     id: row.id,
@@ -89,7 +96,8 @@ export function toPublic(row: IntegrationSetting): SavedIntegration {
     // The names only. Their values never leave this process.
     secrets_set: secretFields(row.key, row.provider)
       .map((f) => f.name)
-      .filter((name) => Boolean(stored[name])),
+      .filter((name) => Boolean(stored?.[name])),
+    secrets_unreadable: stored === null,
     updated_by_user_id: row.updated_by_user_id,
     updated_at: row.updated_at,
   };
@@ -99,6 +107,21 @@ export function toPublic(row: IntegrationSetting): SavedIntegration {
 export function readSecrets(row: IntegrationSetting): Record<string, string> {
   if (!row.secret_ciphertext) return {};
   return JSON.parse(decryptSecret(row.secret_ciphertext)) as Record<string, string>;
+}
+
+/**
+ * The stored credentials, or null when they cannot be decrypted because the
+ * key changed. Settings must still open and save in that state — it is the
+ * only way to put the credentials back — so these paths never throw for it.
+ */
+export function secretsIfReadable(row: IntegrationSetting): Record<string, string> | null {
+  try {
+    return readSecrets(row);
+  } catch (err) {
+    if (!(err instanceof SecretUnreadable)) throw err;
+    logger.error({ key: row.key, provider: row.provider }, err.message);
+    return null;
+  }
 }
 
 /** Configuration and credentials together, as the transport needs them. */
@@ -132,7 +155,10 @@ export async function saveIntegration(
   // Switching provider abandons the old credentials rather than carrying them
   // across — a Twilio token is not a Telnyx key, and keeping it would leave a
   // secret nobody can see and nobody meant to keep.
-  const carried = existing && existing.provider === input.provider ? readSecrets(existing) : {};
+  // Credentials that can no longer be decrypted are dropped: what is typed
+  // now replaces them, and a required one left blank is asked for below.
+  const carried =
+    existing && existing.provider === input.provider ? (secretsIfReadable(existing) ?? {}) : {};
   const secrets = { ...carried, ...input.secrets };
 
   // Blanks mean "clear this", not "store an empty credential".
