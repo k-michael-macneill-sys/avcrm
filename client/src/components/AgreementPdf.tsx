@@ -208,7 +208,7 @@ export function AgreementPdf({
       {rendered.pages.map((page, index) => (
         <div
           key={index}
-          className="relative w-full overflow-hidden rounded-lg bg-white shadow-lg ring-1 ring-black/10 [container-type:inline-size]"
+          className="relative w-full overflow-hidden rounded-lg bg-white shadow-lg ring-1 ring-black/10 @container"
           style={{ aspectRatio: `${page.width} / ${page.height}` }}
         >
           <img src={page.image} alt={`Agreement page ${index + 1}`} className="absolute inset-0 size-full select-none" draggable={false} />

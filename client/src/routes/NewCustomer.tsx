@@ -288,7 +288,7 @@ function AgreementSignup({
         />
       </div>
 
-      <div className="sticky bottom-0 z-10 mx-auto mt-4 w-full max-w-3xl rounded-xl border border-border bg-background/95 p-3 backdrop-blur max-[720px]:bottom-[calc(4.5rem+env(safe-area-inset-bottom))]">
+      <div className="sticky bottom-0 z-10 mx-auto mt-4 w-full max-w-3xl rounded-xl border border-border bg-background/95 p-3 backdrop-blur-sm max-[720px]:bottom-[calc(4.5rem+env(safe-area-inset-bottom))]">
         {problem ? (
           <div className="mb-3">
             <ErrorNotice message={problem} />
