@@ -60,11 +60,23 @@ const LABEL_REACH: Record<string, number> = {
  * groups at the point they come up on the page, so a phone never has to hit
  * a checkbox a few pixels wide.
  */
+/** The fields that only apply to the other kind of term, which Next skips. */
+const SEASON_ONLY = ['start_year', 'end_year'];
+const EXACT_ONLY = ['term_start', 'term_end'];
+const TERM_FIELDS = ['term_type', ...EXACT_ONLY];
+
+/** Tapping the term on the agreement goes to the contract period inputs above it. */
+function showTermInputs(): void {
+  const el = document.getElementById('contract-period');
+  el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el?.querySelector<HTMLElement>('button[aria-pressed="true"], input')?.focus({ preventScroll: true });
+}
+
 type Step = { kind: 'field'; name: string } | { kind: 'group'; title: string; names: string[]; single?: boolean };
 const STEPS: Step[] = (() => {
   const steps: Step[] = [];
-  for (const f of TYPED) {
-    if (f.name === 'term_start') steps.push({ kind: 'group', title: 'Term of service', names: ['term_type'], single: true });
+  // The term is chosen above the agreement, not in the walk-through.
+  for (const f of TYPED.filter((t) => !TERM_FIELDS.includes(t.name))) {
     steps.push({ kind: 'field', name: f.name });
     if (f.name === 'customer_phone') {
       steps.push({ kind: 'group', title: 'Phone type', names: ['phone_type_cell', 'phone_type_home'] });
@@ -90,10 +102,6 @@ const CHOICE_LABELS: Record<string, string> = {
   'Exact dates': 'Exact dates — a month or two, or any start and end',
 };
 
-/** The fields that only apply to the other kind of term, which Next skips. */
-const SEASON_ONLY = ['start_year', 'end_year'];
-const EXACT_ONLY = ['term_start', 'term_end'];
-const TERM_FIELDS = ['term_type', ...EXACT_ONLY];
 
 async function renderTemplate(): Promise<Rendered> {
   const pdfjs = await import('pdfjs-dist');
@@ -209,7 +217,7 @@ export function AgreementPdf({
             <button
               type="button"
               aria-label="Term of service"
-              onClick={() => setEditing('term_type')}
+              onClick={showTermInputs}
               className="absolute rounded-sm hover:bg-sky-200/30"
               style={lineBox(TERM_LINE, page)}
             />
@@ -253,7 +261,7 @@ export function AgreementPdf({
                 page={page}
                 editable={!!onChange && !!line.term}
                 bad={!!line.term && termBad}
-                onEdit={() => setEditing('term_type')}
+                onEdit={showTermInputs}
               />
             ))}
         </div>
