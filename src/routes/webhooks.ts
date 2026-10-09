@@ -64,9 +64,18 @@ webhooksRouter.post(
 
       case 'refund.created':
       case 'refund.updated': {
-        const refund = event.data.refund as { payment_id?: string; status?: string } | undefined;
+        const refund = event.data.refund as
+          | { payment_id?: string; status?: string; amount_money?: { amount?: number } }
+          | undefined;
         if (refund?.payment_id && refund.status === 'COMPLETED') {
-          await reconcilePayment(refund.payment_id, 'refunded', null);
+          const amount = refund.amount_money?.amount;
+          await reconcilePayment(
+            refund.payment_id,
+            'refunded',
+            null,
+            undefined,
+            typeof amount === 'number' ? amount : null,
+          );
         }
         break;
       }

@@ -1,16 +1,24 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Knex } from 'knex';
 import { config } from '../config';
+import { MIN_BRANCH_SIGN_IN_PASSWORD } from '../config/published';
 import { db as defaultDb } from '../db/client';
 import { SIGN_IN_CHOICES, type Branch, type PublicUser, type SignInChoice, type User } from '../types/models';
 import { forbidden, unauthorized } from '../utils/errors';
-import { hashPassword, PUBLIC_USER_COLUMNS, signToken, verifyPassword } from './auth';
+import {
+  hashPassword,
+  PUBLIC_USER_COLUMNS,
+  refusePublishedPassword,
+  signToken,
+  verifyPassword,
+} from './auth';
 
 /**
  * Signing in by branch, from the sign-in screen's dropdown.
  *
  * Choosing a branch signs in as that branch's own shared account with the
- * branch password (BRANCH_SIGN_IN_PASSWORD, `1234` unless set). The account
+ * branch password (BRANCH_SIGN_IN_PASSWORD; `1234` in development, and no
+ * default at all in production). The account
  * has the `branch` role: selling and dispatch in that branch, nothing of
  * corporate's. It is made the first time somebody signs in to it, and so is
  * the branch itself if it has gone missing.
@@ -53,6 +61,28 @@ export interface BranchSignInResult {
 /** How many corporate accounts ADMIN will try, so a wrong password stays cheap. */
 const MAX_ADMIN_ACCOUNTS = 25;
 
+/**
+ * The branch password, or why branch sign-in is switched off.
+ *
+ * On a public address it has a minimum length. It is shared by every branch
+ * and typed with no email in front of it, so it is the whole of the lock: a
+ * four-digit PIN falls to a few days of patient guessing even through the
+ * rate limit.
+ */
+function branchPassword(): string {
+  const password = config.branchSignInPassword;
+  if (!password) {
+    throw forbidden('Branch sign-in is switched off until BRANCH_SIGN_IN_PASSWORD is set on the server');
+  }
+  if (config.isPublicProduction && password.length < MIN_BRANCH_SIGN_IN_PASSWORD) {
+    throw forbidden(
+      `Branch sign-in is switched off: BRANCH_SIGN_IN_PASSWORD must be at least ` +
+        `${MIN_BRANCH_SIGN_IN_PASSWORD} characters. Sign in as ADMIN, or ask the owner to change it.`,
+    );
+  }
+  return password;
+}
+
 function sameSecret(given: string, expected: string): boolean {
   // Hashed first so the comparison is constant-time whatever the lengths.
   const a = createHash('sha256').update(given).digest();
@@ -69,6 +99,7 @@ export function branchAccountEmail(branchName: string): string {
 }
 
 async function adminSignIn(password: string, db: Knex): Promise<BranchSignInResult> {
+  refusePublishedPassword(password);
   const admins = (await db('users')
     .where({ role: 'corporate' })
     .orderBy('created_at', 'asc')
@@ -170,7 +201,7 @@ export async function signInByChoice(
 
   const setup = SIGN_IN_BRANCHES.find((b) => b.name === choice);
   if (!setup) throw unauthorized('Choose a branch to sign in to');
-  if (!sameSecret(password, config.branchSignInPassword)) {
+  if (!sameSecret(password, branchPassword())) {
     throw unauthorized(`That password is not right for ${setup.name}`);
   }
   return branchSignIn(setup, db);

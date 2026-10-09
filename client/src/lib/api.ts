@@ -227,3 +227,17 @@ export async function signIn(email: string, password: string): Promise<Session> 
   localStorage.removeItem(BRANCH_KEY);
   return session;
 }
+
+/**
+ * Changes the signed-in person's password. Every other session on the
+ * account stops working, so the fresh token that comes back replaces this
+ * one's; the branch, if any, is unchanged.
+ */
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  const session = await post<{ token: string; user: PublicUser }>('/auth/password', {
+    current_password: currentPassword,
+    new_password: newPassword,
+  });
+  localStorage.setItem(TOKEN_KEY, session.token);
+  localStorage.setItem(USER_KEY, JSON.stringify(session.user));
+}

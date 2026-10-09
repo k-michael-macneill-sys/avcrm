@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { config } from '../config';
-import { optionalAuth, requireAuth } from '../middleware/auth';
+import { optionalAuth, requireAuth, resolveActor } from '../middleware/auth';
+import { recordAudit } from '../services/audit';
 import { rateLimit, type RateLimitRule } from '../middleware/rateLimit';
-import { createUser, findUserById, login } from '../services/auth';
+import { changePassword, createUser, findUserById, login, MIN_PASSWORD_LENGTH } from '../services/auth';
 import { SIGN_IN_CHOICES, signInByChoice } from '../services/branchSignIn';
 import { asyncHandler } from '../utils/async';
 import { forbidden, unauthorized } from '../utils/errors';
@@ -13,7 +14,7 @@ export const authRouter = Router();
 
 const registerSchema = z.object({
   email: z.string().trim().email().max(255),
-  password: z.string().min(8).max(200),
+  password: z.string().min(MIN_PASSWORD_LENGTH).max(200),
   first_name: z.string().trim().min(1).max(100),
   last_name: z.string().trim().min(1).max(100),
   phone: z.string().trim().max(40).nullable().default(null),
@@ -159,6 +160,43 @@ authRouter.post(
   asyncHandler(async (req, res) => {
     const body = parse(signInSchema, req.body);
     res.json({ data: await signInByChoice(body.choice, body.password) });
+  }),
+);
+
+const changePasswordSchema = z.object({
+  current_password: z.string().min(1).max(200),
+  new_password: z.string().min(MIN_PASSWORD_LENGTH, `Use at least ${MIN_PASSWORD_LENGTH} characters`).max(200),
+});
+
+/**
+ * Wrong current passwords, per account. A stolen session must not become a
+ * free oracle for the password behind it.
+ */
+const changePasswordLimiter =
+  maxPerEmail > 0
+    ? rateLimit({
+        name: 'change-password-user',
+        windowMs,
+        max: maxPerEmail,
+        key: (req) => req.user?.id ?? null,
+        message: 'Too many wrong passwords. Try again shortly.',
+      })
+    : rateLimit();
+
+/**
+ * Changes the signed-in person's own password. Every other session on the
+ * account is signed out by it, so this one gets a fresh token back.
+ */
+authRouter.post(
+  '/password',
+  requireAuth,
+  changePasswordLimiter,
+  asyncHandler(async (req, res) => {
+    if (!req.user) throw unauthorized();
+    const body = parse(changePasswordSchema, req.body);
+    const result = await changePassword(req.user.id, body.current_password, body.new_password);
+    await recordAudit(resolveActor(req), { action: 'user.password_changed', entity_type: 'user', entity_id: req.user.id });
+    res.json({ data: result });
   }),
 );
 

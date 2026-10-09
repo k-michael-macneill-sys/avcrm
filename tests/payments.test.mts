@@ -111,6 +111,7 @@ describe('cards, charges and webhooks through Square configured from the environ
     const draft = await call(server, 'PUT', '/settings/payments', {
       token: corporate,
       body: {
+        current_password: 'Password123!',
         provider: 'square',
         is_enabled: false,
         settings: { environment: 'sandbox', application_id: 'draft', location_id: 'NOT_A_LOCATION' },

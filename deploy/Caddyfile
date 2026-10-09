@@ -15,12 +15,12 @@
 		max_size 30MB
 	}
 
+	# Content-Security-Policy, HSTS and the rest are the app's own (see
+	# src/middleware/securityHeaders.ts), so a deploy without Caddy — Render —
+	# sends the same ones. Setting them here as well would overwrite the app's
+	# per-page policies: the pay page loads Square's card form and the leads
+	# map loads Google Maps, and a blanket policy here would block both.
 	header {
-		# The app is same-origin and loads nothing external.
-		Content-Security-Policy "default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
-		X-Content-Type-Options "nosniff"
-		Referrer-Policy "same-origin"
 		-Server
 	}
 

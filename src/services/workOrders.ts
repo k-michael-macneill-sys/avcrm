@@ -15,6 +15,7 @@ import { applyBranchScope } from '../utils/scope';
 import { logger } from '../utils/logger';
 import { enqueueMessage } from './messages';
 import { assertOperatorAssignable } from './operators';
+import { assertAttachable } from './uploads';
 
 /**
  * Where a visit may go from where it is. `scheduled` straight to
@@ -322,6 +323,8 @@ export async function addServicePhoto(
     }
 
     await assertNearProperty(workOrder.property_id, input, trx);
+    // Drawn into the service report, which the caller can download.
+    await assertAttachable(input.file_url, 'service_photo', { user_id: actor.user_id, scope }, trx);
 
     try {
       const [photo] = await trx('service_photos')

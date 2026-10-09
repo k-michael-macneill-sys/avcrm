@@ -3,8 +3,9 @@ import { resolveDeleter } from '../middleware/auth';
 import { deleteUser } from '../services/deletion';
 import { z } from 'zod';
 import { db } from '../db/client';
-import { requireAuth, requireCorporate, resolveBranchScope } from '../middleware/auth';
-import { createUser, PUBLIC_USER_COLUMNS } from '../services/auth';
+import { requireAuth, requireCorporate, resolveActor, resolveBranchScope } from '../middleware/auth';
+import { recordAudit } from '../services/audit';
+import { createUser, MIN_PASSWORD_LENGTH, PUBLIC_USER_COLUMNS, setPassword } from '../services/auth';
 import { ONBOARDING_STATUSES, USER_ROLES } from '../types/models';
 import { asyncHandler } from '../utils/async';
 import { badRequest, notFound } from '../utils/errors';
@@ -26,7 +27,7 @@ const listQuerySchema = paginationSchema.extend({
 
 const createSchema = z.object({
   email: z.string().trim().email().max(255),
-  password: z.string().min(8).max(200),
+  password: z.string().min(MIN_PASSWORD_LENGTH).max(200),
   first_name: z.string().trim().min(1).max(100),
   last_name: z.string().trim().min(1).max(100),
   phone: z.string().trim().max(40).nullable().default(null),
@@ -41,6 +42,8 @@ const updateSchema = z.object({
   branch_id: z.string().uuid().nullable().optional(),
   is_active: z.boolean().optional(),
   onboarding_status: z.enum(ONBOARDING_STATUSES).optional(),
+  /** A temporary password for someone locked out; signs out their sessions. */
+  password: z.string().min(MIN_PASSWORD_LENGTH).max(200).optional(),
 });
 
 usersRouter.get(
@@ -103,10 +106,16 @@ usersRouter.patch(
       throw badRequest('Field staff must belong to a branch');
     }
 
-    const [user] = await db('users')
-      .where({ id })
-      .update(body)
-      .returning([...PUBLIC_USER_COLUMNS]);
+    const { password, ...fields } = body;
+    if (password !== undefined) {
+      await setPassword(id, password);
+      // Who set whose password, never what to.
+      await recordAudit(resolveActor(req), { action: 'user.password_reset', entity_type: 'user', entity_id: id });
+    }
+
+    const [user] = Object.keys(fields).length
+      ? await db('users').where({ id }).update(fields).returning([...PUBLIC_USER_COLUMNS])
+      : await db('users').where({ id }).select([...PUBLIC_USER_COLUMNS]);
 
     res.json({ data: user });
   }),

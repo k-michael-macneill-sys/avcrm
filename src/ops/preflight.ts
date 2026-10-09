@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import dotenv from 'dotenv';
+import { DEFAULT_SEED_PASSWORD, MIN_BRANCH_SIGN_IN_PASSWORD, PUBLISHED_SECRETS } from '../config/published';
 
 /**
  * Reads the .env a deployment is about to run on and says what is wrong with
@@ -70,6 +71,14 @@ export function inspect(env: Record<string, string | undefined>): Finding[] {
     }
   }
 
+  // Published values are worse than weak ones: nobody has to guess them.
+  // The application refuses to start with them on a public address.
+  for (const name of ['JWT_SECRET', 'SECRETS_KEY']) {
+    if (PUBLISHED_SECRETS.has(get(name))) {
+      error(name, 'is a value published in this repository — generate a new one with `npm run secrets`');
+    }
+  }
+
   const jwt = get('JWT_SECRET');
   const secretsKey = get('SECRETS_KEY');
   if (secretsKey === '') {
@@ -83,6 +92,28 @@ export function inspect(env: Record<string, string | undefined>): Finding[] {
     error('SECRETS_KEY', 'is the same value as JWT_SECRET, which defeats keeping them apart');
   } else if (looksWeak(secretsKey, 32)) {
     error('SECRETS_KEY', 'is short or repetitive enough to guess — generate a random one');
+  }
+
+  // --- signing in ---------------------------------------------------------
+  const seedPassword = get('SEED_PASSWORD');
+  if (seedPassword === '' || seedPassword === DEFAULT_SEED_PASSWORD) {
+    error(
+      'SEED_PASSWORD',
+      seedPassword === ''
+        ? 'is empty — the first admin account needs a password of your own'
+        : 'is the published development default — anyone could sign in as the first admin',
+    );
+  }
+
+  const branchSignIn = get('BRANCH_SIGN_IN_PASSWORD');
+  if (branchSignIn === '') {
+    warn('BRANCH_SIGN_IN_PASSWORD', 'is unset, so signing in by branch is switched off (ADMIN still works)');
+  } else if (branchSignIn.length < MIN_BRANCH_SIGN_IN_PASSWORD) {
+    error(
+      'BRANCH_SIGN_IN_PASSWORD',
+      `is shorter than ${MIN_BRANCH_SIGN_IN_PASSWORD} characters, so branch sign-in will refuse it — ` +
+        'one shared password is all that stands between the internet and every branch',
+    );
   }
 
   // --- the machine --------------------------------------------------------

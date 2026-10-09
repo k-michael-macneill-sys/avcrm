@@ -48,8 +48,10 @@ services:
     environment:
       # Caddy terminates TLS, so the client address arrives in a header. A
       # contract records the IP its signature came from, and that has to be
-      # the customer's rather than the proxy's.
-      TRUST_PROXY: 'true'
+      # the customer's rather than the proxy's. One hop — Caddy — and no
+      # more: `true` would believe any X-Forwarded-For a client sent, which
+      # forges signed_ip and walks around every per-address rate limit.
+      TRUST_PROXY: '1'
     volumes:
       - storage:/data/storage
     depends_on:

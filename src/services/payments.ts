@@ -428,16 +428,38 @@ export async function chargeInvoice(
 }
 
 /**
+ * Where a webhook may move a payment, and nowhere else.
+ *
+ * Refunded is final. Square sends `payment.updated` again after a refund —
+ * still COMPLETED, now with refunded_money on it — and webhooks arrive out of
+ * order, so taking every event at its word would flip refunded money back to
+ * "succeeded" and mark the invoice paid while the customer has it back. A
+ * completed payment never fails afterwards at Square either.
+ */
+const WEBHOOK_TRANSITIONS: Record<PaymentStatus, PaymentStatus[]> = {
+  pending: ['succeeded', 'failed'],
+  succeeded: ['refunded'],
+  failed: [],
+  refunded: [],
+};
+
+/**
  * Brings a payment into line with what the processor says asynchronously.
  * Idempotent by design: it is keyed on the processor's own transaction id and
  * does nothing when the state already matches, so a replayed webhook is
  * harmless.
+ *
+ * `refundedMinor` is how much a refund gave back. Less than the whole payment
+ * is left for the office: this table has no partial refund, and calling the
+ * whole payment refunded would put the full amount back on the customer's
+ * bill — and in front of the next automatic charge.
  */
 export async function reconcilePayment(
   transactionId: string,
   status: Extract<PaymentStatus, 'succeeded' | 'failed' | 'refunded'>,
   failureReason: string | null,
   db: Knex = defaultDb,
+  refundedMinor: number | null = null,
 ): Promise<void> {
   const payment = await db('payments')
     .where({ provider_transaction_id: transactionId })
@@ -448,6 +470,20 @@ export async function reconcilePayment(
     return;
   }
   if (payment.status === status) return;
+  if (!WEBHOOK_TRANSITIONS[payment.status as PaymentStatus].includes(status)) {
+    logger.info(
+      { payment_id: payment.id, from: payment.status, to: status },
+      'Webhook would move a payment backwards; ignored',
+    );
+    return;
+  }
+  if (status === 'refunded' && refundedMinor !== null && refundedMinor < toMinorUnits(payment.amount)) {
+    logger.warn(
+      { payment_id: payment.id, invoice_id: payment.invoice_id, refunded_minor: refundedMinor },
+      'Partial refund made at the processor; record it against the invoice by hand',
+    );
+    return;
+  }
 
   await db.transaction(async (trx) => {
     await trx('payments')

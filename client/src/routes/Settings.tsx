@@ -86,6 +86,7 @@ export function Settings(): JSX.Element {
 
       <IntegrationSection
         path="/settings/payments"
+        confirmWithPassword
         title="Card payments"
         enableLabel="Take card payments through this processor"
         statusOn="Taking payments"
@@ -158,8 +159,15 @@ function IntegrationSection({
   current,
   onSaved,
   children,
+  confirmWithPassword = false,
 }: {
   path: string;
+  /**
+   * Asks for the admin's own password with every save. Card payments set it:
+   * that form decides whose account customers pay, and the server will not
+   * change it on a session alone.
+   */
+  confirmWithPassword?: boolean;
   title: string;
   enableLabel: string;
   statusOn: string;
@@ -208,7 +216,11 @@ function IntegrationSection({
     setValues(Object.fromEntries(specs.map((s) => [s.name, s.value ?? ''])));
   }, [specs]);
 
-  const { run, pending, error } = useSubmit(onSaved);
+  const [password, setPassword] = React.useState('');
+  const { run, pending, error } = useSubmit(() => {
+    setPassword('');
+    onSaved();
+  });
 
   const save = (): void => {
     const settings: Record<string, string> = {};
@@ -219,7 +231,15 @@ function IntegrationSection({
       // A blank secret means "keep what is stored", so it is not sent at all.
       else if (value) secrets[f.name] = value;
     }
-    run(() => api.put(path, { provider: chosen, is_enabled: enabled, settings, secrets }));
+    run(() =>
+      api.put(path, {
+        provider: chosen,
+        is_enabled: enabled,
+        settings,
+        secrets,
+        ...(confirmWithPassword ? { current_password: password } : {}),
+      }),
+    );
   };
 
   const selectId = `${path.replace(/\W/g, '-')}-provider`;
@@ -271,6 +291,19 @@ function IntegrationSection({
           <Checkbox checked={enabled} onCheckedChange={(v) => setEnabled(v === true)} />
           {enableLabel}
         </label>
+
+        {confirmWithPassword ? (
+          <div className="mt-4 flex max-w-xs flex-col gap-1.5">
+            <Label htmlFor={`${selectId}-password`}>Your password, to confirm</Label>
+            <Input
+              id={`${selectId}-password`}
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
+        ) : null}
 
         {error ? <ErrorNotice message={error} /> : null}
         <div className="mt-3">

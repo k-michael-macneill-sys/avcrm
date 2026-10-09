@@ -6,6 +6,8 @@ export interface JwtPayload {
   email: string;
   role: UserRole;
   branch_id: string | null;
+  /** Issued-at, in seconds; set by jsonwebtoken. */
+  iat?: number;
 }
 
 /**
@@ -20,6 +22,7 @@ export interface AuthenticatedUser {
   branch_id: string | null;
   onboarding_status: OnboardingStatus;
   is_active: boolean;
+  password_changed_at: Date | null;
 }
 
 /**

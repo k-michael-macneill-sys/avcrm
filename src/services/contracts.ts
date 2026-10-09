@@ -16,6 +16,7 @@ import { recordAudit, type AuditActor } from './audit';
 import { generateInvoicesForContract } from './invoices';
 import { attachSignedAgreement } from './agreement';
 import { lock as lockQuote } from './quotes';
+import { assertAttachable } from './uploads';
 
 /** A quote is signable once it has been shown to the customer. */
 const SIGNABLE_QUOTE_STATUSES = ['presented', 'accepted'];
@@ -168,6 +169,10 @@ export async function createContract(
   db: Knex = defaultDb,
 ): Promise<ContractWithChecklist> {
   assertNotRawCard(input.payment_method_token);
+  // Both are drawn into the signed agreement, which the caller can download.
+  const who = { user_id: actor.user_id, scope };
+  await assertAttachable(input.signature_image_url, 'signature', who, db);
+  await assertAttachable(input.provider_signature_image_url, 'signature', who, db);
 
   return db.transaction(async (trx) => {
     const quote = await lockQuote(quoteId, scope, trx);
@@ -328,6 +333,7 @@ export async function updateContract(
   if (input.payment_method_token !== undefined) {
     assertNotRawCard(input.payment_method_token);
   }
+  await assertAttachable(input.pdf_url, 'contract_pdf', { user_id: actor.user_id, scope }, db);
 
   return db.transaction(async (trx) => {
     const before = await lock(id, scope, trx);

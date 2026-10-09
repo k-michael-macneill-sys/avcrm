@@ -1,6 +1,9 @@
 import path from 'node:path';
 import dotenv from 'dotenv';
 import { z } from 'zod';
+import { DEFAULT_SEED_PASSWORD, PUBLISHED_SECRETS } from './published';
+
+export { DEFAULT_SEED_PASSWORD };
 
 // Resolved from this file, not process.cwd(): the knex CLI chdirs to the
 // knexfile's directory, so a cwd-relative lookup would miss the root .env.
@@ -139,7 +142,7 @@ const envSchema = z.object({
   // How long an issued upload target stays usable.
   UPLOAD_URL_TTL_SECONDS: z.coerce.number().int().min(30).max(3600).default(900),
 
-  SEED_PASSWORD: z.string().min(8).default('Password123!'),
+  SEED_PASSWORD: z.string().min(8).default(DEFAULT_SEED_PASSWORD),
 
   /**
    * The browser key for the leads map. Public by design — it ships to every
@@ -161,6 +164,10 @@ const envSchema = z.object({
    * Regina) from the sign-in screen. One password, shared by every branch
    * sign-in — change it here to change it everywhere. The ADMIN choice keeps
    * the corporate accounts' own passwords.
+   *
+   * Development falls back to `1234`. Production has no fallback: unset means
+   * branch sign-in is off, and on a public address one shorter than
+   * MIN_BRANCH_SIGN_IN_PASSWORD (config/published.ts) is refused.
    */
   BRANCH_SIGN_IN_PASSWORD: blankIsUnset(z.string().min(1)),
 
@@ -201,12 +208,40 @@ const envSchema = z.object({
   WEATHER_SERVICE_HOUR: z.coerce.number().int().min(1).max(12).default(5),
 });
 
+const LOCAL_URL = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/i;
+
+/**
+ * Production on an address other people can reach. The local compose stack
+ * runs the production image on localhost, and it should still start with the
+ * example file's values; a real deploy has a public APP_BASE_URL (or Render's
+ * RENDER_EXTERNAL_URL) and must not.
+ */
+function isPublicProduction(env: { NODE_ENV: string; APP_BASE_URL?: string; RENDER_EXTERNAL_URL?: string }): boolean {
+  const base = env.APP_BASE_URL ?? env.RENDER_EXTERNAL_URL;
+  return env.NODE_ENV === 'production' && Boolean(base) && !LOCAL_URL.test(base ?? '');
+}
+
 /**
  * A real transport needs somewhere to send from and somewhere to send
  * through. Failing at startup beats discovering it when the first invoice
  * goes out.
  */
 const checkedSchema = envSchema.superRefine((env, ctx) => {
+  if (isPublicProduction(env)) {
+    for (const name of ['JWT_SECRET', 'SECRETS_KEY'] as const) {
+      const value = env[name];
+      if (value && PUBLISHED_SECRETS.has(value)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [name],
+          message:
+            'is a value published in this repository, so anyone can use it. ' +
+            'Generate a new one with `npm run secrets`.',
+        });
+      }
+    }
+  }
+
   if (env.MAIL_DRIVER !== 'smtp') return;
 
   if (!env.SMTP_HOST) {
@@ -247,6 +282,8 @@ function parseTrustProxy(value: string): boolean | number | string {
 export const config = {
   env: env.NODE_ENV,
   isProduction: env.NODE_ENV === 'production',
+  /** Production somewhere other than localhost: where defaults stop being safe. */
+  isPublicProduction: isPublicProduction(env),
   port: env.PORT,
   logLevel: env.LOG_LEVEL,
   trustProxy: parseTrustProxy(env.TRUST_PROXY),
@@ -313,7 +350,7 @@ export const config = {
     googleApiKey: env.GOOGLE_MAPS_API_KEY ?? null,
   },
   branchPassword: env.BRANCH_PASSWORD ?? null,
-  branchSignInPassword: env.BRANCH_SIGN_IN_PASSWORD ?? '1234',
+  branchSignInPassword: env.BRANCH_SIGN_IN_PASSWORD ?? (env.NODE_ENV === 'production' ? null : '1234'),
   meta: {
     pageAccessToken: env.META_PAGE_ACCESS_TOKEN ?? null,
     appSecret: env.META_APP_SECRET ?? null,

@@ -35,8 +35,27 @@ services:
         value: log
       - key: ALLOW_SELF_REGISTRATION
         value: 'false'
+      # Render's proxy is reported to pass a client's own X-Forwarded-For
+      # through, in which case `true` lets anyone choose the IP recorded on a
+      # contract. Sign-in, card and pay-link limits also key on things that
+      # cannot be forged (the account, the branch, the link), so they hold
+      # either way. To pin it: send a request with a made-up X-Forwarded-For
+      # and set this to the hop count that still records your real address.
       - key: TRUST_PROXY
         value: 'true'
+      # The first admin's password, used once on an empty database and to
+      # replace the published default on an install that still has it.
+      - key: SEED_PASSWORD
+        sync: false
+      # The shared branch sign-in password. Unset turns branch sign-in off;
+      # under 10 characters is refused.
+      - key: BRANCH_SIGN_IN_PASSWORD
+        sync: false
+      # The owner's password for adding a branch. Unset locks it.
+      - key: BRANCH_PASSWORD
+        sync: false
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
       # Square. Set these in Render's Environment tab — a local .env file is
       # never uploaded to Render. sandbox-sq0idb-… IDs pair with sandbox.
       - key: SQUARE_ENVIRONMENT

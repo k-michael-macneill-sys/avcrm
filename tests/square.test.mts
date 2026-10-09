@@ -61,6 +61,7 @@ describe('Square', () => {
     return call(server, 'PUT', '/settings/payments', {
       token: corporate,
       body: {
+        current_password: 'Password123!',
         provider: 'square',
         is_enabled: enabled,
         settings: {
@@ -97,6 +98,25 @@ describe('Square', () => {
       assert.equal(reply.status, 403);
     });
 
+    it('asks for the admin’s password again, since a session alone could redirect every payment', async () => {
+      const body = {
+        provider: 'square',
+        is_enabled: false,
+        settings: { environment: 'sandbox' },
+        secrets: { access_token: 'EAAA-someone-elses-account' },
+      };
+      const without = await call(server, 'PUT', '/settings/payments', { token: corporate, body });
+      assert.equal(without.status, 400);
+
+      const wrong = await call(server, 'PUT', '/settings/payments', {
+        token: corporate,
+        body: { ...body, current_password: 'not-the-password' },
+      });
+      // 403, so the screen stays signed in to try again.
+      assert.equal(wrong.status, 403);
+      assert.equal(await db('integration_settings').where({ key: 'payments' }).first(), undefined);
+    });
+
     it('stores the token encrypted and never hands it back', async () => {
       const saved = await connectSquare();
       assert.equal(saved.status, 200);
@@ -114,7 +134,7 @@ describe('Square', () => {
     it('will not switch on without the fields Square needs', async () => {
       const reply = await call(server, 'PUT', '/settings/payments', {
         token: corporate,
-        body: { provider: 'square', is_enabled: true, settings: { environment: 'sandbox' }, secrets: {} },
+        body: { current_password: 'Password123!', provider: 'square', is_enabled: true, settings: { environment: 'sandbox' }, secrets: {} },
       });
       assert.equal(reply.status, 400);
       assert.match(reply.body.error.message, /Application ID/);
@@ -123,7 +143,7 @@ describe('Square', () => {
     it('refuses an environment that is not one of the choices', async () => {
       const reply = await call(server, 'PUT', '/settings/payments', {
         token: corporate,
-        body: { provider: 'square', is_enabled: false, settings: { environment: 'staging' }, secrets: {} },
+        body: { current_password: 'Password123!', provider: 'square', is_enabled: false, settings: { environment: 'staging' }, secrets: {} },
       });
       assert.equal(reply.status, 400);
     });
@@ -141,6 +161,7 @@ describe('Square', () => {
       await call(server, 'PUT', '/settings/payments', {
         token: corporate,
         body: {
+          current_password: 'Password123!',
           provider: 'square',
           is_enabled: true,
           settings: { environment: 'sandbox', application_id: 'app', location_id: SQUARE_LOCATION },
@@ -448,6 +469,52 @@ describe('Square', () => {
       assert.equal(row?.status, 'refunded');
       const after = await db('invoices').where({ id: invoice.id }).first();
       assert.equal(after?.status, 'sent');
+    });
+
+    it('does not let the payment.updated Square sends after a refund undo it', async () => {
+      const { invoice, payment } = await paidOnline();
+      const send = async (body: object) => {
+        const payload = JSON.stringify(body);
+        const reply = await call(server, 'POST', '/webhooks/square', { headers: signed(payload), raw: payload });
+        assert.equal(reply.status, 200);
+      };
+
+      await send({
+        event_id: 'evt-refund',
+        type: 'refund.updated',
+        data: { object: { refund: { payment_id: payment.provider_transaction_id, status: 'COMPLETED', amount_money: { amount: 14950, currency: 'CAD' } } } },
+      });
+      // Square follows a refund with the payment itself, still COMPLETED.
+      await send({
+        event_id: 'evt-payment',
+        type: 'payment.updated',
+        data: { object: { payment: { id: payment.provider_transaction_id, status: 'COMPLETED' } } },
+      });
+
+      const row = await db('payments').where({ id: payment.id }).first();
+      assert.equal(row?.status, 'refunded');
+      const after = await db('invoices').where({ id: invoice.id }).first();
+      assert.equal(after?.amount_paid, '0.00');
+      assert.notEqual(after?.status, 'paid');
+    });
+
+    it('leaves a partial refund for the office rather than refunding the lot on paper', async () => {
+      const { invoice, payment } = await paidOnline();
+      const payload = JSON.stringify({
+        event_id: 'evt-partial',
+        type: 'refund.updated',
+        data: { object: { refund: { payment_id: payment.provider_transaction_id, status: 'COMPLETED', amount_money: { amount: 5000, currency: 'CAD' } } } },
+      });
+
+      const reply = await call(server, 'POST', '/webhooks/square', { headers: signed(payload), raw: payload });
+      assert.equal(reply.status, 200);
+
+      // Calling the whole payment refunded would put $149.50 back on the bill
+      // and in front of the next automatic charge.
+      const row = await db('payments').where({ id: payment.id }).first();
+      assert.equal(row?.status, 'succeeded');
+      const after = await db('invoices').where({ id: invoice.id }).first();
+      assert.equal(after?.status, 'paid');
     });
 
     it('refuses a webhook that is not signed with the saved key', async () => {

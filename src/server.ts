@@ -4,6 +4,7 @@ import { runMigrations } from './db/migrate';
 import { seed } from './db/seeds/001_sample_data';
 import { createApp } from './app';
 import { sweepRateLimits } from './middleware/rateLimit';
+import { retirePublishedPassword } from './services/auth';
 import { logger } from './utils/logger';
 
 /**
@@ -19,11 +20,16 @@ import { logger } from './utils/logger';
  */
 async function seedIfEmpty(): Promise<void> {
   const existingUser = await db('users').first('id');
-  if (existingUser) return;
+  if (existingUser) {
+    // An install made before the published default was refused may still
+    // have it; this swaps it for SEED_PASSWORD, or says how to.
+    await retirePublishedPassword(db);
+    return;
+  }
 
   logger.warn('No users found — installing the first login so this install can be signed into');
   await seed(db);
-  logger.warn('Installed. Sign in as corporate@avcrm.test and change the password.');
+  logger.warn('Installed. Sign in as ADMIN with SEED_PASSWORD, then change it under your name in the menu.');
 }
 
 async function main(): Promise<void> {

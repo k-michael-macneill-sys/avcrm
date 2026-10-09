@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth, requireCorporate, resolveActor } from '../middleware/auth';
+import { rateLimit } from '../middleware/rateLimit';
 import { recordAudit } from '../services/audit';
+import { confirmPassword } from '../services/auth';
 import { envGateway, squareGateway } from '../services/gateway';
 import {
   PAYMENTS_KEY,
@@ -177,16 +179,36 @@ settingsRouter.get(
   }),
 );
 
+const paymentsSaveSchema = saveSchema.extend({
+  /** The admin's own password, asked again: see below. */
+  current_password: z.string().min(1, 'Enter your password to change card payments').max(200),
+});
+
+/** Wrong passwords on the payments form, per account. */
+const confirmLimiter = rateLimit({
+  name: 'settings-confirm-user',
+  windowMs: config.auth.rateLimit.windowMs,
+  max: Math.max(config.auth.rateLimit.maxPerEmail, 1),
+  key: (req) => (config.auth.rateLimit.maxPerEmail > 0 ? (req.user?.id ?? null) : null),
+  message: 'Too many wrong passwords. Try again shortly.',
+});
+
 /**
  * Connects a processor. This decides whose account every card payment goes
  * into, so it is audited like the SMS switch — without the credentials, which
  * are not in the public view.
+ *
+ * It is also the one setting that turns a stolen session into stolen money:
+ * swap in another Square account's token and every customer pays a stranger.
+ * So it asks for the admin's password again, not only a session.
  */
 settingsRouter.put(
   '/payments',
+  confirmLimiter,
   asyncHandler(async (req, res) => {
-    const body = parse(saveSchema, req.body);
+    const { current_password, ...body } = parse(paymentsSaveSchema, req.body);
     if (!req.user) throw unauthorized();
+    await confirmPassword(req.user.id, current_password);
 
     const before = publicView(PAYMENTS_KEY, await readIntegration(PAYMENTS_KEY));
     const saved = await saveIntegration(PAYMENTS_KEY, body, req.user.id);

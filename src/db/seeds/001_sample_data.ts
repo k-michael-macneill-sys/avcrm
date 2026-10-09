@@ -1,6 +1,6 @@
 import type { Knex } from 'knex';
-import { config } from '../../config';
-import { hashPassword } from '../../services/auth';
+import { config, DEFAULT_SEED_PASSWORD } from '../../config';
+import { hashPassword, retirePublishedPassword, SEED_ADMIN_EMAIL } from '../../services/auth';
 import { installAppConfig } from '../appConfig';
 
 /**
@@ -30,8 +30,18 @@ export async function seed(knex: Knex): Promise<void> {
     const existingUser = await knex('users').first('id');
     if (existingUser) {
       await installAppConfig(knex);
+      await retirePublishedPassword(knex);
       console.log('Production database already has users: installed new config only, wiped nothing.');
       return;
+    }
+
+    // The default is printed in this repository. A first admin created with
+    // it on a public address is an admin anybody can sign in as.
+    if (config.isPublicProduction && config.seed.password === DEFAULT_SEED_PASSWORD) {
+      throw new Error(
+        'SEED_PASSWORD is not set. Set it on the server to the password the first admin ' +
+          `account (${SEED_ADMIN_EMAIL}) should have, then deploy again.`,
+      );
     }
   }
 
@@ -74,7 +84,7 @@ export async function seed(knex: Knex): Promise<void> {
   const password_hash = await hashPassword(config.seed.password);
 
   await knex('users').insert({
-    email: 'corporate@avcrm.test',
+    email: SEED_ADMIN_EMAIL,
     password_hash,
     first_name: 'ADMIN',
     last_name: '',
