@@ -140,6 +140,8 @@ function AgreementSignup({
       startingCity(prefill, branchCity),
     ),
   );
+  // The branch the customer will belong to: the one picked here, or the lead's or sign-in's own.
+  const agreementBranch = branches.find((b) => b.id === (isCorporate ? branchId : (sessionBranch?.id ?? branchId)));
   const [signatures, setSignatures] = React.useState<Partial<Record<SignatureField, Signature>>>({});
   const [signing, setSigning] = React.useState<SignatureField | null>(null);
   const [invalid, setInvalid] = React.useState<string[]>([]);
@@ -303,6 +305,7 @@ function AgreementSignup({
           onSign={setSigning}
           invalid={invalid}
           locked={branchCity ? CITY_LOCKED : undefined}
+          branch={agreementBranch}
         />
       </div>
 

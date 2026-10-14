@@ -6,6 +6,7 @@ import {
   agreementDate,
   agreementRewrites,
   termTypeOf,
+  type AgreementBranch,
   type AgreementFieldSpec,
   type AgreementRewrite,
   type AgreementValues,
@@ -158,6 +159,7 @@ export function AgreementPdf({
   invalid = [],
   locked = NONE,
   signedAt,
+  branch,
 }: {
   values: AgreementValues;
   /** Absent for a read-only copy, as on the customer's own signing page. */
@@ -174,6 +176,8 @@ export function AgreementPdf({
    */
   locked?: string[];
   signedAt?: Date;
+  /** Whose agreement it is: the template says Kingston, and is reworded for any other branch. */
+  branch?: AgreementBranch | null;
 }): JSX.Element {
   const [rendered, setRendered] = React.useState<Rendered | null>(null);
   const [failed, setFailed] = React.useState<string | null>(null);
@@ -199,7 +203,7 @@ export function AgreementPdf({
 
   const set = (name: string, value: string | boolean): void => onChange?.({ ...values, [name]: value });
   const date = agreementDate(signedAt ?? new Date());
-  const rewrites = agreementRewrites(values);
+  const rewrites = agreementRewrites(values, branch);
   const termBad = invalid.some((name) => TERM_FIELDS.includes(name));
 
   return (
@@ -315,6 +319,7 @@ function Rewrite({
   onEdit: () => void;
 }): JSX.Element {
   const type = (pt: number): string => `${(pt / page.width) * 100}cqw`;
+  const css = (c: readonly [number, number, number]): string => `rgb(${c.map((v) => Math.round(v * 255)).join(' ')})`;
   return (
     <button
       type="button"
@@ -322,7 +327,8 @@ function Rewrite({
       disabled={!editable}
       onClick={onEdit}
       className={cn(
-        'absolute flex items-end overflow-hidden whitespace-nowrap bg-white text-left leading-none text-black',
+        'absolute flex items-end overflow-hidden whitespace-pre leading-none',
+        line.align === 'right' ? 'justify-end text-right' : 'text-left',
         editable && 'ring-1 ring-sky-400/60 hover:ring-sky-500',
         bad && 'ring-2 ring-red-500',
       )}
@@ -330,7 +336,9 @@ function Rewrite({
         ...lineBox(line, page),
         fontFamily: 'Helvetica, Arial, sans-serif',
         fontSize: type(line.size),
-        paddingLeft: type(0.8),
+        color: css(line.color ?? [0, 0, 0]),
+        backgroundColor: css(line.background ?? [1, 1, 1]),
+        paddingLeft: line.align === 'right' ? undefined : type(0.8),
         paddingBottom: type(Math.max(0, line.bottom - line.baseline - line.size * 0.21)),
       }}
     >

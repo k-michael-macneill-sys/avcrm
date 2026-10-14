@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { agreementRewrites, PHONE_TYPE_BLANK, termDate, termLength } from '../src/types/agreement';
+import { agreementRewrites, branchPlace, PHONE_TYPE_BLANK, termDate, termLength } from '../src/types/agreement';
 
 describe('the agreement term', () => {
   it('describes an exact-dates term the way the agreement words the season', () => {
@@ -34,5 +34,22 @@ describe('the agreement term', () => {
       season.find((l) => l.term)?.text,
       'This Agreement begins on December 15th, 2026 and ends on March 31st, 2027, a service period of 107 days.',
     );
+  });
+
+  it('says which branch is serving, where the template says Kingston', () => {
+    assert.equal(branchPlace({ name: 'Alberta', province: 'AB' }), 'Alberta');
+    assert.equal(branchPlace({ name: 'Regina', province: 'SK' }), 'Regina, Saskatchewan');
+    assert.equal(branchPlace({ name: 'Cranbrook', province: 'BC' }), 'Cranbrook, British Columbia');
+
+    const seasonal = { term_type: 'Seasonal', start_year: '26', end_year: '27' };
+    const lines = (name: string, province: string) =>
+      agreementRewrites(seasonal, { name, province }).map((l) => l.text).filter(Boolean);
+    assert.deepEqual(lines('Alberta', 'AB'), ['Serving Alberta', ' (Alberta)  (the “Contractor”)']);
+    assert.deepEqual(lines('Regina', 'SK'), [
+      'Serving Regina, Saskatchewan',
+      ' (Regina, Saskatchewan)  (the “Contractor”)',
+    ]);
+    assert.deepEqual(lines('Kingston', 'ON'), [], 'the template is already Kingston’s');
+    assert.deepEqual(agreementRewrites(seasonal, null), [PHONE_TYPE_BLANK]);
   });
 });

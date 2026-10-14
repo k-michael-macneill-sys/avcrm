@@ -1,3 +1,5 @@
+import { PROVINCE_NAMES } from './serviceAgreement';
+
 /**
  * The fillable fields of the signed agreement
  * (assets/contracts/snow-removal-agreement.pdf), by the names the PDF gives
@@ -225,6 +227,11 @@ export interface AgreementRewrite {
   text: string;
   /** The line that names the dates, which tapping on screen edits. */
   term?: true;
+  /** Set for a line that ends where `right` is rather than starting at `left`. */
+  align?: 'right';
+  /** RGB, 0 to 1. Black words on white unless the line sits somewhere else. */
+  color?: readonly [number, number, number];
+  background?: readonly [number, number, number];
 }
 
 /** Where page 1's "begins on November 1st … ends on March 31st" sentence sits. */
@@ -245,13 +252,75 @@ export const PHONE_TYPE_BLANK: AgreementRewrite = {
   text: '',
 };
 
+/** The branch an agreement is for, which the template prints as Kingston's. */
+export interface AgreementBranch {
+  name: string;
+  /** Two letters, as branches store it. */
+  province: string;
+}
+
+/**
+ * Where the branch is, the way the agreement names it: "Regina,
+ * Saskatchewan", or just "Alberta" for a branch named for its province.
+ */
+export function branchPlace(branch: AgreementBranch): string {
+  const province = PROVINCE_NAMES[branch.province] ?? branch.province;
+  return branch.name.toLowerCase() === province.toLowerCase() ? province : `${branch.name}, ${province}`;
+}
+
+const TEMPLATE_PLACE = 'Kingston, Ontario';
+
+/**
+ * The template is Kingston's: page 1's header says "Serving Kingston,
+ * Ontario" and page 2 names the Contractor as of Kingston. Every other
+ * branch has both reworded with its own place.
+ */
+export function branchRewrites(branch: AgreementBranch | null | undefined): AgreementRewrite[] {
+  if (!branch) return [];
+  const place = branchPlace(branch);
+  if (place === TEMPLATE_PLACE) return [];
+  return [
+    {
+      // Light grey, right-aligned, on the dark banner across the top.
+      page: 0,
+      left: 300,
+      top: 61,
+      right: 565.6,
+      bottom: 72,
+      baseline: 69.12,
+      size: 8.6,
+      text: `Serving ${place}`,
+      align: 'right',
+      color: [0.788235, 0.819608, 0.854902],
+      background: [0.090196, 0.090196, 0.090196],
+    },
+    {
+      // Follows the bold "Drift Property Services" under page 2's title.
+      page: 1,
+      left: 210.85,
+      top: 77,
+      right: 565.2,
+      bottom: 87.5,
+      baseline: 84.74,
+      size: 8.8,
+      text: ` (${place})  (the “Contractor”)`,
+      color: [0.419608, 0.447059, 0.501961],
+    },
+  ];
+}
+
+/** Every printed line the agreement changes: the term's, and the branch's. */
+export function agreementRewrites(values: AgreementValues, branch?: AgreementBranch | null): AgreementRewrite[] {
+  return [...termRewrites(values), ...branchRewrites(branch)];
+}
+
 /**
  * The printed lines that say November to March, reworded with the term's own
  * dates: an exact-dates term, or a seasonal one with its dates worked out
  * (see seasonTerm). A seasonal agreement from before that, which has the
  * two-digit years instead, prints as it is, so this is empty for one.
  */
-export function agreementRewrites(values: AgreementValues): AgreementRewrite[] {
+function termRewrites(values: AgreementValues): AgreementRewrite[] {
   const seasonalWithDates =
     termTypeOf(values) === 'Seasonal' && isIsoDay(values.term_start) && isIsoDay(values.term_end);
   if (termTypeOf(values) !== 'Exact dates' && !seasonalWithDates) return [PHONE_TYPE_BLANK];

@@ -31,6 +31,7 @@ interface Invitation {
   customer_first_name: string;
   customer_name: string;
   branch_name: string;
+  branch_province: string;
   address_line1: string;
   address_line2: string | null;
   city: string;
@@ -149,6 +150,7 @@ function Agreement({ token, invitation: inv }: { token: string; invitation: Invi
       <div className="my-4">
         <AgreementPdf
           values={inv.agreement}
+          branch={{ name: inv.branch_name, province: inv.branch_province }}
           signatures={{ customer_signature: signature?.url ?? null }}
           onSign={() => setSigning(true)}
           invalid={error && !signature ? ['customer_signature'] : []}

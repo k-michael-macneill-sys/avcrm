@@ -13,6 +13,7 @@ import {
   seasonTerm,
   termTypeOf,
   termWithinLimit,
+  type AgreementBranch,
   type AgreementValues,
 } from '../types/agreement';
 import type { Customer, Property, Quote } from '../types/models';
@@ -232,7 +233,11 @@ export interface AgreementSignatures {
 }
 
 /** The agreement filled in, signatures on their lines, and flattened so it cannot be edited after. */
-export async function renderAgreement(values: AgreementValues, signatures: AgreementSignatures = {}): Promise<Buffer> {
+export async function renderAgreement(
+  values: AgreementValues,
+  signatures: AgreementSignatures = {},
+  branch: AgreementBranch | null = null,
+): Promise<Buffer> {
   const doc = await PDFDocument.load(templateBytes());
   const form = doc.getForm();
   const when = agreementDate(signatures.signedAt ?? new Date());
@@ -254,7 +259,7 @@ export async function renderAgreement(values: AgreementValues, signatures: Agree
     lines.set(name, { page, box: widget.getRectangle() });
   }
 
-  const rewrites = agreementRewrites(values);
+  const rewrites = agreementRewrites(values, branch);
 
   for (const spec of AGREEMENT_FIELDS) {
     if (spec.offPdf) continue;
@@ -294,8 +299,8 @@ export async function renderAgreement(values: AgreementValues, signatures: Agree
 
   form.flatten();
 
-  // The lines that say November to March reworded with the term's dates, and
-  // the phone-type boxes covered over.
+  // The lines that say November to March reworded with the term's dates, the
+  // branch's own place for Kingston's, and the phone-type boxes covered over.
   if (rewrites.length) {
     const font = await doc.embedFont(StandardFonts.Helvetica);
     for (const line of rewrites) {
@@ -304,14 +309,15 @@ export async function renderAgreement(values: AgreementValues, signatures: Agree
       const words = printable(line.text);
       const room = line.right - line.left - 2;
       const size = Math.min(line.size, (line.size * room) / font.widthOfTextAtSize(words, line.size));
+      const x = line.align === 'right' ? line.right - font.widthOfTextAtSize(words, size) : line.left + 0.8;
       page.drawRectangle({
         x: line.left,
         y: height - line.bottom,
         width: line.right - line.left,
         height: line.bottom - line.top,
-        color: rgb(1, 1, 1),
+        color: rgb(...(line.background ?? [1, 1, 1])),
       });
-      page.drawText(words, { x: line.left + 0.8, y: height - line.baseline, size, font, color: rgb(0, 0, 0) });
+      page.drawText(words, { x, y: height - line.baseline, size, font, color: rgb(...(line.color ?? [0, 0, 0])) });
     }
   }
 
@@ -358,7 +364,10 @@ export async function attachSignedAgreement(
 ): Promise<string> {
   const customer = await readAll(storage.read(input.customerSignatureKey));
   const provider = input.providerSignatureKey ? await readAll(storage.read(input.providerSignatureKey)) : null;
-  const bytes = await renderAgreement(input.values, { customer, provider, signedAt: input.signedAt });
+  const branch = (await trx('branches').where({ id: input.branchId }).first('name', 'province')) as
+    | AgreementBranch
+    | undefined;
+  const bytes = await renderAgreement(input.values, { customer, provider, signedAt: input.signedAt }, branch ?? null);
 
   const key = keyFor('contract_pdf', 'application/pdf');
   const stored = await storage.put(key, Readable.from(bytes), 'application/pdf', ruleFor('contract_pdf').maxBytes);
