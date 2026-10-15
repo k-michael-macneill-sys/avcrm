@@ -161,6 +161,7 @@ export function ServiceAgreementDocument({
           <p className="text-[11px]">
             {model.plan_label} · {model.branch_name} · Ref {model.quote_id.slice(0, 8).toUpperCase()}
           </p>
+          {model.branch_contact ? <p className="text-[11px]">{model.branch_contact}</p> : null}
         </div>
       </header>
 

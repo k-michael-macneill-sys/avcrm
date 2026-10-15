@@ -615,6 +615,8 @@ export interface AgreementModel {
   plan_label: string;
   package_label: string;
   branch_name: string;
+  /** The branch's own phone and email, under the header's title. Null where it has none. */
+  branch_contact: string | null;
   customer: { name: string; email: string | null; phone: string | null; address: string[] };
   billing: { name: string; email: string | null; phone: string | null; address: string[] };
   scope: { label: string; checked: boolean }[];

@@ -52,4 +52,20 @@ describe('the agreement term', () => {
     assert.deepEqual(lines('Kingston', 'ON'), [], 'the template is already Kingston’s');
     assert.deepEqual(agreementRewrites(seasonal, null), [PHONE_TYPE_BLANK]);
   });
+
+  it('prints the branch’s own phone and email in the header, Kingston’s included', () => {
+    const seasonal = { term_type: 'Seasonal', start_year: '26', end_year: '27' };
+    const kingston = { name: 'Kingston', province: 'ON', phone: '(519) 221-6191', email: 'm.macneill@drift-ps.com' };
+    assert.deepEqual(
+      agreementRewrites(seasonal, kingston).map((l) => l.text).filter(Boolean),
+      ['Phone: (519) 221-6191', 'Email: m.macneill@drift-ps.com'],
+    );
+    const regina = { name: 'Regina', province: 'SK', phone: '(306) 570-5877', email: 'Carter.o@drift-ps.com' };
+    assert.deepEqual(agreementRewrites(seasonal, regina).map((l) => l.text).filter(Boolean).slice(0, 3), [
+      'Phone: (306) 570-5877',
+      'Email: Carter.o@drift-ps.com',
+      'Serving Regina, Saskatchewan',
+    ]);
+  });
 });
+

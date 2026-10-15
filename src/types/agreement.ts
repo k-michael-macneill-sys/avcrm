@@ -257,6 +257,9 @@ export interface AgreementBranch {
   name: string;
   /** Two letters, as branches store it. */
   province: string;
+  /** For the header's "[Phone number]" and "[Email address]". */
+  phone?: string | null;
+  email?: string | null;
 }
 
 /**
@@ -270,30 +273,36 @@ export function branchPlace(branch: AgreementBranch): string {
 
 const TEMPLATE_PLACE = 'Kingston, Ontario';
 
+/** Page 1's header lines: light grey, right-aligned, on the dark banner across the top. */
+const HEADER = {
+  page: 0,
+  left: 300,
+  right: 565.6,
+  size: 8.6,
+  align: 'right',
+  color: [0.788235, 0.819608, 0.854902],
+  background: [0.090196, 0.090196, 0.090196],
+} as const;
+
 /**
- * The template is Kingston's: page 1's header says "Serving Kingston,
- * Ontario" and page 2 names the Contractor as of Kingston. Every other
- * branch has both reworded with its own place.
+ * The template is Kingston's, with blanks for a phone and an email: page 1's
+ * header says "Serving Kingston, Ontario" and page 2 names the Contractor as
+ * of Kingston. Each branch gets its own phone, email and place.
  */
 export function branchRewrites(branch: AgreementBranch | null | undefined): AgreementRewrite[] {
   if (!branch) return [];
+  const lines: AgreementRewrite[] = [];
+  if (branch.phone) {
+    lines.push({ ...HEADER, top: 40, bottom: 50.3, baseline: 47.52, text: `Phone: ${branch.phone}` });
+  }
+  if (branch.email) {
+    lines.push({ ...HEADER, top: 50.8, bottom: 61, baseline: 58.32, text: `Email: ${branch.email}` });
+  }
   const place = branchPlace(branch);
-  if (place === TEMPLATE_PLACE) return [];
+  if (place === TEMPLATE_PLACE) return lines;
   return [
-    {
-      // Light grey, right-aligned, on the dark banner across the top.
-      page: 0,
-      left: 300,
-      top: 61,
-      right: 565.6,
-      bottom: 72,
-      baseline: 69.12,
-      size: 8.6,
-      text: `Serving ${place}`,
-      align: 'right',
-      color: [0.788235, 0.819608, 0.854902],
-      background: [0.090196, 0.090196, 0.090196],
-    },
+    ...lines,
+    { ...HEADER, top: 61, bottom: 72, baseline: 69.12, text: `Serving ${place}` },
     {
       // Follows the bold "Drift Property Services" under page 2's title.
       page: 1,

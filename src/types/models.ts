@@ -259,6 +259,9 @@ export interface Branch {
    * own sign-in writes. Null for a branch that covers several towns.
    */
   default_city: string | null;
+  /** The phone and email the branch's agreements print. */
+  contact_phone: string | null;
+  contact_email: string | null;
   manager_user_id: string | null;
   status: BranchStatus;
   created_at: Date;

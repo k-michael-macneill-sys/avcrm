@@ -364,9 +364,9 @@ export async function attachSignedAgreement(
 ): Promise<string> {
   const customer = await readAll(storage.read(input.customerSignatureKey));
   const provider = input.providerSignatureKey ? await readAll(storage.read(input.providerSignatureKey)) : null;
-  const branch = (await trx('branches').where({ id: input.branchId }).first('name', 'province')) as
-    | AgreementBranch
-    | undefined;
+  const branch = (await trx('branches')
+    .where({ id: input.branchId })
+    .first('name', 'province', 'contact_phone as phone', 'contact_email as email')) as AgreementBranch | undefined;
   const bytes = await renderAgreement(input.values, { customer, provider, signedAt: input.signedAt }, branch ?? null);
 
   const key = keyFor('contract_pdf', 'application/pdf');

@@ -234,6 +234,9 @@ function header(doc: Doc, model: AgreementModel): void {
       width: textWidth,
       align: 'right',
     });
+  if (model.branch_contact) {
+    doc.text(model.branch_contact, textX, doc.y + 1, { width: textWidth, align: 'right' });
+  }
   doc.y = MARGIN + height + GAP;
   doc.x = MARGIN;
 }
