@@ -62,6 +62,7 @@ export interface SigningInvitation {
   /** The branch's own, printed on the agreement's header. */
   branch_phone: string | null;
   branch_email: string | null;
+  branch_timezone: string;
   address_line1: string;
   address_line2: string | null;
   city: string;
@@ -99,6 +100,7 @@ interface QuoteRow {
   branch_province: string;
   branch_phone: string | null;
   branch_email: string | null;
+  branch_timezone: string;
   email: string | null;
   first_name: string;
   last_name: string;
@@ -144,6 +146,7 @@ const QUOTE_COLUMNS = [
   'branches.province as branch_province',
   'branches.contact_phone as branch_phone',
   'branches.contact_email as branch_email',
+  'branches.timezone as branch_timezone',
   'properties.address_line1',
   'properties.address_line2',
   'properties.city',
@@ -265,6 +268,7 @@ export async function openInvitation(
     branch_province: quote.branch_province,
     branch_phone: quote.branch_phone,
     branch_email: quote.branch_email,
+    branch_timezone: quote.branch_timezone,
     address_line1: quote.address_line1,
     address_line2: quote.address_line2,
     city: quote.city,

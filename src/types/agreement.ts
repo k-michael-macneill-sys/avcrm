@@ -112,11 +112,15 @@ export const EDITABLE_AGREEMENT_FIELDS = AGREEMENT_FIELDS.filter(
   (f) => f.kind !== 'signature' && f.kind !== 'date',
 );
 
-/** "29/Sep/2026", the DD/MMM/YYYY the agreement's date lines ask for. */
-export function agreementDate(when: Date): string {
-  const month = when.toLocaleString('en-CA', { month: 'short', timeZone: 'America/Toronto' });
+/**
+ * "29/Sep/2026", the DD/MMM/YYYY the agreement's date lines ask for, as the
+ * calendar reads where the branch is: a late signing in Regina is not dated
+ * tomorrow because it already is tomorrow in Ontario.
+ */
+export function agreementDate(when: Date, timeZone = 'America/Toronto'): string {
+  const month = when.toLocaleString('en-CA', { month: 'short', timeZone });
   const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Toronto',
+    timeZone,
     day: '2-digit',
     year: 'numeric',
   }).formatToParts(when);
@@ -260,6 +264,14 @@ export interface AgreementBranch {
   /** For the header's "[Phone number]" and "[Email address]". */
   phone?: string | null;
   email?: string | null;
+  /** IANA zone, which dates the signatures. */
+  timezone?: string | null;
+}
+
+/** "the Province of Alberta", or a territory by its name, for the governing-law clause. */
+function jurisdiction(province: string): string {
+  const name = PROVINCE_NAMES[province] ?? province;
+  return ['YT', 'NT', 'NU'].includes(province) ? name : `the Province of ${name}`;
 }
 
 /**
@@ -287,7 +299,8 @@ const HEADER = {
 /**
  * The template is Kingston's, with blanks for a phone and an email: page 1's
  * header says "Serving Kingston, Ontario" and page 2 names the Contractor as
- * of Kingston. Each branch gets its own phone, email and place.
+ * of Kingston, under Ontario law. Each branch gets its own phone, email,
+ * place and province's law.
  */
 export function branchRewrites(branch: AgreementBranch | null | undefined): AgreementRewrite[] {
   if (!branch) return [];
@@ -297,6 +310,19 @@ export function branchRewrites(branch: AgreementBranch | null | undefined): Agre
   }
   if (branch.email) {
     lines.push({ ...HEADER, top: 50.8, bottom: 61, baseline: 58.32, text: `Email: ${branch.email}` });
+  }
+  if (branch.province !== 'ON') {
+    // Page 2's clause 10, which the template words for Ontario.
+    lines.push({
+      page: 1,
+      left: 46,
+      top: 671,
+      right: 566,
+      bottom: 682.5,
+      baseline: 679.64,
+      size: 8.5,
+      text: `This Agreement is governed by the laws of ${jurisdiction(branch.province)}, without regard to its conflict of law principles.`,
+    });
   }
   const place = branchPlace(branch);
   if (place === TEMPLATE_PLACE) return lines;

@@ -147,6 +147,7 @@ function AgreementSignup({
     province: ownBranch.province,
     phone: ownBranch.contact_phone,
     email: ownBranch.contact_email,
+    timezone: ownBranch.timezone,
   };
   const [signatures, setSignatures] = React.useState<Partial<Record<SignatureField, Signature>>>({});
   const [signing, setSigning] = React.useState<SignatureField | null>(null);

@@ -34,6 +34,7 @@ interface Invitation {
   branch_province: string;
   branch_phone: string | null;
   branch_email: string | null;
+  branch_timezone: string;
   address_line1: string;
   address_line2: string | null;
   city: string;
@@ -157,6 +158,7 @@ function Agreement({ token, invitation: inv }: { token: string; invitation: Invi
             province: inv.branch_province,
             phone: inv.branch_phone,
             email: inv.branch_email,
+            timezone: inv.branch_timezone,
           }}
           signatures={{ customer_signature: signature?.url ?? null }}
           onSign={() => setSigning(true)}
