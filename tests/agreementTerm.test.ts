@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { agreementRewrites, branchPlace, PHONE_TYPE_BLANK, termDate, termLength } from '../src/types/agreement';
+import { agreementDate, agreementRewrites, branchPlace, PHONE_TYPE_BLANK, termDate, termLength } from '../src/types/agreement';
 
 describe('the agreement term', () => {
   it('describes an exact-dates term the way the agreement words the season', () => {
@@ -43,7 +43,9 @@ describe('the agreement term', () => {
 
     const seasonal = { term_type: 'Seasonal', start_year: '26', end_year: '27' };
     const lines = (name: string, province: string) =>
-      agreementRewrites(seasonal, { name, province }).map((l) => l.text).filter(Boolean);
+      agreementRewrites(seasonal, { name, province })
+        .map((l) => l.text)
+        .filter((text) => text && !text.includes('governed'));
     assert.deepEqual(lines('Alberta', 'AB'), ['Serving Alberta', ' (Alberta)  (the “Contractor”)']);
     assert.deepEqual(lines('Regina', 'SK'), [
       'Serving Regina, Saskatchewan',
@@ -52,4 +54,40 @@ describe('the agreement term', () => {
     assert.deepEqual(lines('Kingston', 'ON'), [], 'the template is already Kingston’s');
     assert.deepEqual(agreementRewrites(seasonal, null), [PHONE_TYPE_BLANK]);
   });
+
+  it('prints the branch’s own phone and email in the header, Kingston’s included', () => {
+    const seasonal = { term_type: 'Seasonal', start_year: '26', end_year: '27' };
+    const kingston = { name: 'Kingston', province: 'ON', phone: '(519) 221-6191', email: 'm.macneill@drift-ps.com' };
+    assert.deepEqual(
+      agreementRewrites(seasonal, kingston).map((l) => l.text).filter(Boolean),
+      ['Phone: (519) 221-6191', 'Email: m.macneill@drift-ps.com'],
+    );
+    const regina = { name: 'Regina', province: 'SK', phone: '(306) 570-5877', email: 'Carter.o@drift-ps.com' };
+    assert.deepEqual(agreementRewrites(seasonal, regina).map((l) => l.text).filter(Boolean).slice(0, 4), [
+      'Phone: (306) 570-5877',
+      'Email: Carter.o@drift-ps.com',
+      'This Agreement is governed by the laws of the Province of Saskatchewan, without regard to its conflict of law principles.',
+      'Serving Regina, Saskatchewan',
+    ]);
+  });
+
+  it('words the governing law for the branch’s province', () => {
+    const seasonal = { term_type: 'Seasonal', start_year: '26', end_year: '27' };
+    const law = (province: string) =>
+      agreementRewrites(seasonal, { name: 'X', province }).find((l) => l.text.includes('governed'))?.text;
+    assert.equal(
+      law('AB'),
+      'This Agreement is governed by the laws of the Province of Alberta, without regard to its conflict of law principles.',
+    );
+    assert.match(law('BC') ?? '', /Province of British Columbia,/);
+    assert.equal(law('ON'), undefined, 'the template already says Ontario');
+  });
+
+  it('dates a signature by the branch’s own calendar', () => {
+    // 11:30pm in Regina on 9 December is already 10 December in Ontario.
+    const late = new Date('2026-12-10T05:30:00Z');
+    assert.equal(agreementDate(late, 'America/Regina'), '09/Dec/2026');
+    assert.equal(agreementDate(late), '10/Dec/2026');
+  });
 });
+

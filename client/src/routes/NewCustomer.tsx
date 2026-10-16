@@ -141,7 +141,14 @@ function AgreementSignup({
     ),
   );
   // The branch the customer will belong to: the one picked here, or the lead's or sign-in's own.
-  const agreementBranch = branches.find((b) => b.id === (isCorporate ? branchId : (sessionBranch?.id ?? branchId)));
+  const ownBranch = branches.find((b) => b.id === (isCorporate ? branchId : (sessionBranch?.id ?? branchId)));
+  const agreementBranch = ownBranch && {
+    name: ownBranch.name,
+    province: ownBranch.province,
+    phone: ownBranch.contact_phone,
+    email: ownBranch.contact_email,
+    timezone: ownBranch.timezone,
+  };
   const [signatures, setSignatures] = React.useState<Partial<Record<SignatureField, Signature>>>({});
   const [signing, setSigning] = React.useState<SignatureField | null>(null);
   const [invalid, setInvalid] = React.useState<string[]>([]);

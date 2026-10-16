@@ -202,7 +202,7 @@ export function AgreementPdf({
   if (!rendered) return <Loading />;
 
   const set = (name: string, value: string | boolean): void => onChange?.({ ...values, [name]: value });
-  const date = agreementDate(signedAt ?? new Date());
+  const date = agreementDate(signedAt ?? new Date(), branch?.timezone ?? undefined);
   const rewrites = agreementRewrites(values, branch);
   const termBad = invalid.some((name) => TERM_FIELDS.includes(name));
 

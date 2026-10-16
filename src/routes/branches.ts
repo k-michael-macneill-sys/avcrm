@@ -23,6 +23,8 @@ const createSchema = z.object({
   // IANA zone name; drives scheduling and automation send times.
   timezone: z.string().trim().min(1).max(64).default('America/Toronto'),
   status: z.enum(BRANCH_STATUSES).default('active'),
+  contact_phone: z.string().trim().max(40).nullable().optional(),
+  contact_email: z.string().trim().email().max(200).nullable().optional(),
 });
 
 const updateSchema = z.object({
@@ -31,6 +33,8 @@ const updateSchema = z.object({
   timezone: z.string().trim().min(1).max(64).optional(),
   status: z.enum(BRANCH_STATUSES).optional(),
   manager_user_id: z.string().uuid().nullable().optional(),
+  contact_phone: z.string().trim().max(40).nullable().optional(),
+  contact_email: z.string().trim().email().max(200).nullable().optional(),
 });
 
 /** Operators see their own branch; corporate sees all of them. */

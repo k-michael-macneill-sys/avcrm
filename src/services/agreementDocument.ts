@@ -45,7 +45,13 @@ interface Context {
   };
   customer: Customer;
   property: Property;
-  branch: { name: string; province: string; timezone: string };
+  branch: {
+    name: string;
+    province: string;
+    timezone: string;
+    contact_phone: string | null;
+    contact_email: string | null;
+  };
   contract: Contract | null;
 }
 
@@ -54,7 +60,7 @@ async function contextFor(quoteId: string, db: Knex): Promise<Context> {
   if (!quote) throw notFound('Agreement not found');
   const property = (await db('properties').where({ id: quote.property_id }).first()) as Property;
   const customer = (await db('customers').where({ id: property.customer_id }).first()) as Customer;
-  const branch = (await db('branches').where({ id: customer.branch_id }).first('name', 'province', 'timezone')) as Context['branch'];
+  const branch = (await db('branches').where({ id: customer.branch_id }).first('name', 'province', 'timezone', 'contact_phone', 'contact_email')) as Context['branch'];
   const contract = ((await db('contracts').where({ quote_id: quoteId }).first()) as Contract | undefined) ?? null;
   return { quote, customer, property, branch, contract };
 }
@@ -158,6 +164,7 @@ export async function buildAgreementModel(quoteId: string, db: Knex): Promise<Ag
     plan_label: plan.label,
     package_label: quote.package === 'premium' ? 'Premium' : 'Basic',
     branch_name: branch.name,
+    branch_contact: [branch.contact_phone, branch.contact_email].filter(Boolean).join(' · ') || null,
     customer: { name, email: customer.email, phone, address: serviceAddress },
     billing: { name, email: customer.email, phone, address: billingAddress },
     scope: scopeRows
