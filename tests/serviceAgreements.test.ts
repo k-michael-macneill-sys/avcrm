@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { config } from '../src/config';
+import { localDate } from '../src/services/agreementTerms';
 import { generateInvoicesForContract, recomputeInvoiceTotals, today } from '../src/services/invoices';
 import { sendQueued } from '../src/services/messages';
 import { addDays, addMonths } from '../src/types/serviceAgreement';
@@ -458,7 +459,8 @@ describe('the service agreement', () => {
       const invoices = await table('invoices').where({ contract_id: body.data.id });
       assert.equal(invoices.length, 1);
       const [invoice] = invoices;
-      assert.equal(invoice.billing_period_start, today());
+      // Signed today by the branch's (Kingston's) calendar, which is not UTC's in the evening.
+      assert.equal(invoice.billing_period_start, localDate(new Date(), 'America/Toronto'));
       assert.equal(invoice.subtotal, '110.00');
       assert.equal(invoice.tax_amount, '14.30');
       assert.equal(invoice.amount_due, '124.30');
