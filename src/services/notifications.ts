@@ -28,6 +28,31 @@ export interface OutboundEmail {
   message_id?: string;
   /** A stored file, by its storage key, to attach. */
   attachment?: { key: string; name: string };
+  /** The branch it is sent for, which signs it and takes the replies. */
+  branch?: SendingBranch | null;
+}
+
+export interface SendingBranch {
+  name: string;
+  contact_email: string | null;
+}
+
+/**
+ * Who an email is from and where replies go. Always MAIL_FROM's address —
+ * the one domain the provider has verified — but named for the branch
+ * ("Drift Property Services – Regina"), with replies going to the branch's
+ * own inbox, else MAIL_REPLY_TO, else back to MAIL_FROM.
+ */
+export function senderFor(
+  branch: SendingBranch | null | undefined,
+  mail: { from: string; replyTo: string | null } = config.mail,
+): { from: string; replyTo: string | null } {
+  const replyTo = branch?.contact_email || mail.replyTo;
+  if (!branch) return { from: mail.from, replyTo };
+  const match = /^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/.exec(mail.from);
+  const address = match ? match[2]!.trim() : mail.from.trim();
+  const name = match?.[1]?.trim() || 'Drift Property Services';
+  return { from: `"${`${name} – ${branch.name}`.replace(/"/g, '')}" <${address}>`, replyTo };
 }
 
 interface MailTransport {
@@ -55,8 +80,18 @@ function recipientFor(email: OutboundEmail): { to: string; subject: string } {
 class LogTransport implements MailTransport {
   async send(email: OutboundEmail): Promise<SendResult> {
     const { to, subject } = recipientFor(email);
+    const { from, replyTo } = senderFor(email.branch);
     logger.info(
-      { driver: 'log', channel: 'email', to, subject, body: email.body, attachment: email.attachment?.name },
+      {
+        driver: 'log',
+        channel: 'email',
+        from,
+        reply_to: replyTo,
+        to,
+        subject,
+        body: email.body,
+        attachment: email.attachment?.name,
+      },
       'Email (not sent: MAIL_DRIVER=log)',
     );
     return { provider_message_id: `log-${randomUUID()}` };
@@ -91,11 +126,12 @@ class SmtpTransport implements MailTransport {
 
   async send(email: OutboundEmail): Promise<SendResult> {
     const { to, subject } = recipientFor(email);
+    const { from, replyTo } = senderFor(email.branch);
 
     try {
       const info = await this.connection().sendMail({
-        from: config.mail.from,
-        ...(config.mail.replyTo ? { replyTo: config.mail.replyTo } : {}),
+        from,
+        ...(replyTo ? { replyTo } : {}),
         to,
         subject,
         text: email.body,
@@ -147,8 +183,9 @@ export function sendEmail(
   body: string,
   messageId?: string,
   attachment?: { key: string; name: string },
+  branch?: SendingBranch | null,
 ): Promise<SendResult> {
-  return transport.send({ to, subject, body, message_id: messageId, attachment });
+  return transport.send({ to, subject, body, message_id: messageId, attachment, branch });
 }
 
 /** Lets a job exit instead of waiting on a pooled connection. */

@@ -20,7 +20,7 @@ process.env.SMTP_SECURE = 'false';
 const { db, resetDatabase } = await import('./helpers/database');
 const { buildWorld } = await import('./helpers/fixtures');
 const { sendQueued } = await import('../src/services/messages');
-const { closeTransport } = await import('../src/services/notifications');
+const { closeTransport, senderFor } = await import('../src/services/notifications');
 
 describe('delivering mail', () => {
   let branchId: string;
@@ -76,6 +76,25 @@ describe('delivering mail', () => {
     assert.ok(row?.provider_message_id);
   });
 
+  it('signs a branch’s email with its name and sends the replies to the branch', async () => {
+    await db('branches').where({ id: branchId }).update({ contact_email: 'kingston@drift.test' });
+    await queue();
+    await queue({ branch_id: null, recipient: 'office-copy@example.test' });
+    await sendQueued(10);
+
+    const mail = sink.received();
+    const branch = mail.find((m) => m.envelope_to[0] === 'harold@example.test');
+    // Encoded on the wire for its dash: "Drift – Kingston".
+    assert.match(branch?.from ?? '', /Drift_=E2=80=93_Kingston/);
+    assert.match(branch?.from ?? '', /billing@drift\.test/, 'still the verified address');
+    assert.equal(branch?.reply_to, 'kingston@drift.test');
+
+    // Nothing to do with a branch: the company's own name and reply-to.
+    const company = mail.find((m) => m.envelope_to[0] === 'office-copy@example.test');
+    assert.doesNotMatch(company?.from ?? '', /Kingston/);
+    assert.equal(company?.reply_to, 'office@drift.test');
+  });
+
   it('gives up on a mailbox that is gone', async () => {
     const id = await queue({ recipient: 'gone@example.test' });
     const summary = await sendQueued(10);
@@ -89,5 +108,18 @@ describe('delivering mail', () => {
     assert.equal(row?.status, 'failed');
     assert.equal(row?.attempts, 1);
     assert.match(row?.error ?? '', /550|mailbox/i);
+  });
+
+  it('names a bare MAIL_FROM for the company, and falls back to it for replies', () => {
+    const mail = { from: 'info@drift-ps.com', replyTo: null };
+    assert.deepEqual(senderFor({ name: 'Regina', contact_email: 'Carter.o@drift-ps.com' }, mail), {
+      from: '"Drift Property Services – Regina" <info@drift-ps.com>',
+      replyTo: 'Carter.o@drift-ps.com',
+    });
+    assert.deepEqual(senderFor({ name: 'Alberta', contact_email: null }, mail), {
+      from: '"Drift Property Services – Alberta" <info@drift-ps.com>',
+      replyTo: null,
+    });
+    assert.deepEqual(senderFor(null, mail), { from: 'info@drift-ps.com', replyTo: null });
   });
 });
