@@ -13,7 +13,7 @@ import { badRequest, notFound } from '../utils/errors';
 import { logger } from '../utils/logger';
 import { offsetOf, paginated, type Paginated, type Pagination } from '../utils/pagination';
 import { applyBranchScope } from '../utils/scope';
-import { SendFailure, sendEmail, sendSms } from './notifications';
+import { SendFailure, sendEmail, sendSms, type SendingBranch } from './notifications';
 
 /**
  * The outbound queue. Nothing in the application talks to a provider
@@ -189,6 +189,16 @@ export async function sendQueued(
   const claimed = await claim(limit, db);
   summary.claimed = claimed.length;
 
+  // Each branch signs its own emails and takes their replies.
+  const branchIds = [...new Set(claimed.map((m) => m.branch_id).filter((id): id is string => !!id))];
+  const branches = new Map<string, SendingBranch>(
+    branchIds.length
+      ? ((await db('branches').whereIn('id', branchIds).select('id', 'name', 'contact_email')) as (SendingBranch & {
+          id: string;
+        })[]).map(({ id, ...b }) => [id, b])
+      : [],
+  );
+
   for (const message of claimed) {
     try {
       const result =
@@ -202,6 +212,7 @@ export async function sendQueued(
               message.attachment_key
                 ? { key: message.attachment_key, name: message.attachment_name ?? 'attachment' }
                 : undefined,
+              message.branch_id ? branches.get(message.branch_id) : null,
             );
 
       await db('message_log').where({ id: message.id }).update({
