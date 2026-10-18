@@ -7,6 +7,8 @@ import {
   computePricing,
   DEFAULT_REFERRAL_CREDIT_CENTS,
   formatMoney,
+  longDate,
+  paymentSchedule,
   PricingError,
   SIGNATURE_BOXES,
   toCents,
@@ -16,7 +18,7 @@ import {
 import { badRequest, conflict, notFound } from '../utils/errors';
 import { applyBranchScope } from '../utils/scope';
 import { recordAudit, type AuditActor } from './audit';
-import { loadQuoteTerms } from './agreementTerms';
+import { loadQuoteTerms, localDate } from './agreementTerms';
 import { buildAgreementModel, renderAgreementPreview, SERVICE_AGREEMENT_TERMS_VERSION } from './agreementDocument';
 import { createContract, type ChecklistInput, type ContractWithChecklist } from './contracts';
 import { enqueueMessage } from './messages';
@@ -567,7 +569,11 @@ async function assertStored(key: string, purpose: 'signature' | 'contract_pdf', 
   if (!upload) throw badRequest(purpose === 'signature' ? 'Upload the signature first' : 'Upload the signed PDF first');
 }
 
-/** The signed PDF, by email, if the customer has an address to send it to. */
+/**
+ * The signed PDF, by email, if the customer has an address to send it to, and
+ * the welcome email a day later. Both are filled from the agreement itself
+ * and the branch's own phone and email.
+ */
 export async function emailSignedCopy(contractId: string, trx: Knex.Transaction): Promise<void> {
   const row = (await trx('contracts')
     .join('customers', 'customers.id', 'contracts.customer_id')
@@ -579,45 +585,125 @@ export async function emailSignedCopy(contractId: string, trx: Knex.Transaction)
     .first(
       'contracts.pdf_url',
       'contracts.quote_id',
+      'contracts.signed_at',
+      'quotes.package',
       'customers.id as customer_id',
       'customers.email',
       'customers.first_name',
       'customers.branch_id',
       'branches.name as branch_name',
+      'branches.timezone',
+      'branches.contact_phone',
+      'branches.contact_email',
       'properties.address_line1',
+      'properties.city',
       'contract_types.label as agreement_name',
     )) as
     | {
         pdf_url: string | null;
         quote_id: string;
+        signed_at: Date | null;
+        package: string | null;
         customer_id: string;
         email: string | null;
         first_name: string;
         branch_id: string;
         branch_name: string;
+        timezone: string;
+        contact_phone: string | null;
+        contact_email: string | null;
         address_line1: string;
+        city: string | null;
         agreement_name: string;
       }
     | undefined;
-  if (!row?.email || !row.pdf_url) return;
+  if (!row?.email) return;
   const terms = await loadQuoteTerms(row.quote_id, trx);
-  await enqueueMessage(
-    {
-      template_code: 'agreement_signed',
-      channel: 'email',
-      recipient: row.email,
-      branch_id: row.branch_id,
-      customer_id: row.customer_id,
-      context: {
-        customer_first_name: row.first_name,
-        address_line1: row.address_line1,
-        agreement_name: row.agreement_name,
-        first_payment: terms ? formatMoney(terms.pricing.first_payment_total) : '',
-        branch_name: row.branch_name,
+  const signedAt = row.signed_at ?? new Date();
+  const context = { ...welcomeContext(row, terms, localDate(signedAt, row.timezone)), agreement_name: row.agreement_name };
+  const base = {
+    channel: 'email' as const,
+    recipient: row.email,
+    branch_id: row.branch_id,
+    customer_id: row.customer_id,
+    context,
+  };
+
+  if (row.pdf_url) {
+    await enqueueMessage(
+      {
+        ...base,
+        template_code: 'agreement_signed',
+        attachment_key: row.pdf_url,
+        attachment_name: 'Drift-Service-Agreement.pdf',
       },
-      attachment_key: row.pdf_url,
-      attachment_name: 'Drift-Service-Agreement.pdf',
-    },
+      trx,
+    );
+  }
+  // The next day, so it does not land on top of the signed copy.
+  await enqueueMessage(
+    { ...base, template_code: 'customer_welcome', send_after: new Date(signedAt.getTime() + 24 * 60 * 60 * 1000) },
     trx,
   );
+}
+
+/** The merge fields the signed-copy and welcome emails use. */
+export function welcomeContext(
+  row: {
+    first_name: string;
+    branch_name: string;
+    contact_phone: string | null;
+    contact_email: string | null;
+    address_line1: string;
+    city: string | null;
+    agreement_name: string;
+    package: string | null;
+  },
+  terms: Awaited<ReturnType<typeof loadQuoteTerms>>,
+  signedOn: string,
+): Record<string, string> {
+  const contacts = [row.contact_phone, row.contact_email].filter((c): c is string => !!c);
+  const context: Record<string, string> = {
+    customer_first_name: row.first_name,
+    address_line1: row.address_line1,
+    property_address: [row.address_line1, row.city].filter(Boolean).join(', '),
+    service_type: `${row.agreement_name}${row.package === 'premium' ? ', Premium package' : row.package ? ', Basic package' : ''}`,
+    branch_name: row.branch_name,
+    sender_name: `The ${row.branch_name} team`,
+    contact_line: contacts.join(' | '),
+    contact_sentence: contacts.length ? `at ${contacts.join(' or ')}` : 'by replying to this email',
+    urgent_contact: row.contact_phone ? `call or text ${row.contact_phone}` : 'reply to this email',
+    start_date: '',
+    end_date: '',
+    snowfall_threshold: '',
+    billing_terms: '',
+    first_payment: '',
+    first_payment_date: '',
+    referral_line: '',
+  };
+  if (!terms) return context;
+
+  const schedule = paymentSchedule({ ...terms.schedule, signed_on: signedOn }, terms.pricing).filter((e) => !e.renewal);
+  const [first] = schedule;
+  const recurring = schedule.length - 1;
+  // Installments a month apart read "a month", whatever the plan is called.
+  const monthly = terms.plan.kind.startsWith('monthly') || schedule[1]?.months === 1;
+  context.start_date = longDate(terms.schedule.season_start);
+  context.end_date = longDate(terms.schedule.season_end);
+  context.snowfall_threshold = `${terms.trigger_cm} cm`;
+  if (first) {
+    context.first_payment = formatMoney(first.total);
+    context.first_payment_date = longDate(first.due_on);
+    context.billing_terms =
+      recurring > 0
+        ? `${formatMoney(first.total)} due ${longDate(first.due_on)}, then ${formatMoney(schedule[1]!.total)} ` +
+          `${monthly ? 'a month' : 'per payment'} for ${recurring} more payment${recurring === 1 ? '' : 's'} (tax included)`
+        : `${formatMoney(first.total)}, paid in full, due ${longDate(first.due_on)} (tax included)`;
+  }
+  if (terms.referral_credit > 0) {
+    context.referral_line =
+      `Know a neighbour who could use a hand? Send them our way, and you’ll get ${formatMoney(terms.referral_credit)} ` +
+      'off your monthly fee for every month they stay with us.\n\n';
+  }
+  return context;
 }

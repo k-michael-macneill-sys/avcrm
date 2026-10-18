@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Plus } from 'lucide-react';
+import { Pencil, Plus } from 'lucide-react';
 import type { Branch, PublicUser } from '../../../src/types/models';
 import { PageHeader } from '@/components/PageHeader';
 import { Button } from '@/components/ui/button';
@@ -103,6 +103,7 @@ export function Admin(): JSX.Element {
 
 function BranchCard({ branches, onDone }: { branches: Branch[]; onDone: () => void }): JSX.Element {
   const [open, setOpen] = React.useState(false);
+  const [editing, setEditing] = React.useState<Branch | null>(null);
 
   return (
     <Section title="Branches" className="mb-4">
@@ -120,8 +121,61 @@ function BranchCard({ branches, onDone }: { branches: Branch[]; onDone: () => vo
           { header: 'Province', cell: (b) => b.province },
           { header: 'Manager', cell: (b) => (b.manager_user_id ? 'Named' : '—') },
           { header: 'Status', cell: (b) => b.status },
+          { header: 'Phone', cell: (b) => b.contact_phone ?? '—' },
+          { header: 'Email', cell: (b) => b.contact_email ?? '—' },
+          {
+            header: '',
+            cell: (b) => (
+              <Button type="button" variant="secondary" size="sm" onClick={() => setEditing(b)}>
+                <Pencil className="size-4" /> Edit
+              </Button>
+            ),
+          },
         ]}
       />
+
+      <Dialog open={editing !== null} onOpenChange={(next) => !next && setEditing(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{editing?.name} contact details</DialogTitle>
+            <DialogDescription>
+              Printed on this branch’s contracts, and where replies to its emails go.
+            </DialogDescription>
+          </DialogHeader>
+          {editing ? (
+            <InlineForm
+              key={editing.id}
+              submitLabel="Save"
+              specs={[
+                {
+                  name: 'contact_phone',
+                  label: 'Phone',
+                  value: editing.contact_phone ?? '',
+                  placeholder: '(306) 570-5877',
+                },
+                {
+                  name: 'contact_email',
+                  label: 'Email',
+                  type: 'email',
+                  value: editing.contact_email ?? '',
+                  placeholder: 'branch@drift-ps.com',
+                  help: 'Leave blank to send replies to the company address instead.',
+                },
+              ]}
+              onSubmit={(values) =>
+                api.patch(`/branches/${editing.id}`, {
+                  contact_phone: values.contact_phone?.trim() || null,
+                  contact_email: values.contact_email?.trim() || null,
+                })
+              }
+              onDone={() => {
+                setEditing(null);
+                onDone();
+              }}
+            />
+          ) : null}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-lg">

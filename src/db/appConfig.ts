@@ -1,5 +1,6 @@
 import type { Knex } from 'knex';
 import { ensureSignInBranches } from '../services/branchSignIn';
+import { AGREEMENT_SIGNED_EMAIL, CUSTOMER_WELCOME_EMAIL } from '../types/welcomeEmails';
 import type {
   ChecklistRequirement,
   DocumentRequirement,
@@ -393,18 +394,8 @@ export const MESSAGE_TEMPLATES: MessageTemplateRow[] = [
         'vehicles outside the driveway tonight so we can perform a full ' +
         'clearance.\n\n— {{branch_name}}',
     },
-    {
-      code: 'agreement_signed',
-      channel: 'email',
-      branch_id: null,
-      subject: 'Your Drift Property Services agreement for {{address_line1}}',
-      body:
-        'Hi {{customer_first_name}},\n\nThank you for choosing Drift Property Services. ' +
-        'Your signed service agreement for {{address_line1}} is attached for your records.\n\n' +
-        'Agreement: {{agreement_name}}\nFirst payment: {{first_payment}}\n\n' +
-        'You may cancel within ten days of signing at no charge. Reply to this email with any questions.\n\n' +
-        '— {{branch_name}}',
-    },
+    { code: 'agreement_signed', channel: 'email', branch_id: null, ...AGREEMENT_SIGNED_EMAIL },
+    { code: 'customer_welcome', channel: 'email', branch_id: null, ...CUSTOMER_WELCOME_EMAIL },
     {
       code: 'payment_failed_internal',
       channel: 'email',

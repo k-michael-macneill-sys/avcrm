@@ -109,6 +109,8 @@ export interface EnqueueInput {
   /** A stored file to attach to an email, such as the signed agreement. */
   attachment_key?: string | null;
   attachment_name?: string | null;
+  /** Held in the queue until then; sent at the next pass after it. */
+  send_after?: Date | null;
 }
 
 /**
@@ -147,6 +149,7 @@ export async function enqueueMessage(
       body: renderTemplate(template.body, input.context, `${input.template_code}.body`),
       attachment_key: input.attachment_key ?? null,
       attachment_name: input.attachment_key ? (input.attachment_name ?? 'attachment') : null,
+      send_after: input.send_after ?? null,
       status: 'queued',
     })
     .returning('*');

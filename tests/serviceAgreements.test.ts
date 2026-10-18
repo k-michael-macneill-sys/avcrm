@@ -5,6 +5,7 @@ import { localDate } from '../src/services/agreementTerms';
 import { generateInvoicesForContract, recomputeInvoiceTotals, today } from '../src/services/invoices';
 import { sendQueued } from '../src/services/messages';
 import { addDays, addMonths } from '../src/types/serviceAgreement';
+import { AGREEMENT_SIGNED_EMAIL, CUSTOMER_WELCOME_EMAIL } from '../src/types/welcomeEmails';
 import { db } from './helpers/database';
 import { harness } from './helpers/harness';
 import { makeCustomer } from './helpers/fixtures';
@@ -325,7 +326,14 @@ describe('the service agreement', () => {
   });
 
   describe('signing', () => {
+    /** The fixtures' stand-in wording replaced with the real emails. */
+    async function realWelcomeEmails(): Promise<void> {
+      await table('message_templates').where({ code: 'agreement_signed', channel: 'email' }).update(AGREEMENT_SIGNED_EMAIL);
+      await table('message_templates').where({ code: 'customer_welcome', channel: 'email' }).update(CUSTOMER_WELCOME_EMAIL);
+    }
+
     it('locks the signed PDF, records who, when and where from, and emails a copy', async () => {
+      await realWelcomeEmails();
       const { quote_id, token, customer_id } = await setup();
       const reply = await sign(token, quote_id);
       assert.equal(reply.status, 201, JSON.stringify(reply.body));
@@ -346,6 +354,33 @@ describe('the service agreement', () => {
       const email = await table('message_log').where({ customer_id, template_code: 'agreement_signed' }).first();
       assert.ok(email, 'a copy is queued for the customer');
       assert.equal(email.attachment_key, contract.pdf_url);
+      assert.equal(email.subject, 'Your Drift Property Services agreement is signed, welcome aboard');
+      assert.doesNotMatch(email.body, /\{\{/, 'every merge field filled');
+      assert.match(email.body, /Service period: \w{3} \d+, \d{4} to \w{3} \d+, \d{4}/);
+      assert.match(email.body, /Price \/ billing: \$[\d,.]+ /);
+      assert.match(email.body, /snowfall reaches \d+ cm or more/);
+
+      // The welcome follows a day later, not on top of the signed copy.
+      const welcome = await table('message_log').where({ customer_id, template_code: 'customer_welcome' }).first();
+      assert.ok(welcome, 'a welcome is queued');
+      assert.equal(welcome.subject, 'Welcome to Drift Property Services, Harold');
+      assert.doesNotMatch(welcome.body, /\{\{/);
+      const hours = (new Date(welcome.send_after).getTime() - Date.now()) / 3_600_000;
+      assert.ok(hours > 23 && hours <= 24, `held about a day, not ${hours} hours`);
+    });
+
+    it('signs the emails with the branch’s own phone and email', async () => {
+      await realWelcomeEmails();
+      await table('branches')
+        .where({ id: h.world().branches.kingston })
+        .update({ contact_phone: '(519) 221-6191', contact_email: 'kingston@drift.test' });
+      const { quote_id, token, customer_id } = await setup();
+      await sign(token, quote_id);
+      const email = await table('message_log').where({ customer_id, template_code: 'agreement_signed' }).first();
+      assert.match(email.body, /reach us directly at \(519\) 221-6191 or kingston@drift\.test\./);
+      assert.match(email.body, /The Kingston team\nDrift Property Services\n\(519\) 221-6191 \| kingston@drift\.test/);
+      const welcome = await table('message_log').where({ customer_id, template_code: 'customer_welcome' }).first();
+      assert.match(welcome.body, /For anything urgent, call or text \(519\) 221-6191\./);
     });
 
     it('refuses while a required box is empty', async () => {

@@ -133,6 +133,8 @@ export const TEMPLATE_CODES = [
   'snowfall_notice',
   // The signed service agreement, emailed to the customer with the PDF attached.
   'agreement_signed',
+  // The welcome email, sent the day after an agreement is signed.
+  'customer_welcome',
 ] as const;
 export type TemplateCode = (typeof TEMPLATE_CODES)[number];
 
