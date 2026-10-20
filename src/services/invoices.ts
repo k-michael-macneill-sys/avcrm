@@ -9,7 +9,7 @@ import { logger } from '../utils/logger';
 import { offsetOf, paginated, type Paginated, type Pagination } from '../utils/pagination';
 import { isPgError, PG_UNIQUE_VIOLATION } from '../utils/pg';
 import { applyBranchScope } from '../utils/scope';
-import { paymentSchedule, centsToDecimal } from '../types/serviceAgreement';
+import { centsToDecimal, formatMoney, longDate, paymentSchedule, toCents } from '../types/serviceAgreement';
 import { loadQuoteTerms, localDate, type QuoteTerms } from './agreementTerms';
 import { applyCredit, earnReferralCredit } from './credits';
 import { activeGateway } from './gateway';
@@ -478,6 +478,8 @@ export async function recomputeInvoiceTotals(
   // A referred customer paying their bill earns their referrer's credit.
   if (status === 'paid' && invoice.status !== 'paid') {
     await earnReferralCredit(invoiceId, db);
+    // A bill the customer's credit covered was never sent, and took no money.
+    if (paid > 0 && invoice.status !== 'draft') await queueReceipt(invoiceId, db);
   }
   return updated;
 }
@@ -520,12 +522,37 @@ interface InvoiceContext {
   customer_id: string;
 }
 
-/** Queued, never sent here: the customer's bill is not the API's problem. */
-async function enqueueInvoiceMessage(
+/** The messages about one invoice: the bill, the reminder, the receipt. */
+export type InvoiceTemplate = 'invoice_sent' | 'invoice_overdue' | 'payment_receipt';
+
+const METHOD_LABELS: Record<string, string> = {
+  card_on_file: 'Card on file',
+  online: 'Card, paid online',
+  etransfer: 'e-Transfer',
+  cheque: 'Cheque',
+  cash: 'Cash',
+};
+
+/** The short number a customer can quote back: the first block of the id. */
+export function invoiceNumber(id: string): string {
+  return id.slice(0, 8).toUpperCase();
+}
+
+const dollars = (amount: string | number): string => formatMoney(toCents(Number(amount).toFixed(2)) ?? 0);
+
+/**
+ * Queued, never sent here: the customer's bill is not the API's problem.
+ *
+ * `to` sends it to that address instead of wherever the customer prefers —
+ * an office resending a bill to a previous customer's new email, say.
+ * Returns who it went to, or null when there was nowhere to send it.
+ */
+export async function enqueueInvoiceMessage(
   invoiceId: string,
-  templateCode: 'invoice_sent' | 'invoice_overdue',
+  templateCode: InvoiceTemplate,
   db: Knex,
-): Promise<void> {
+  to: string | null = null,
+): Promise<string | null> {
   const row = (await db('invoices')
     .join('customers', 'customers.id', 'invoices.customer_id')
     .join('contracts', 'contracts.id', 'invoices.contract_id')
@@ -542,25 +569,86 @@ async function enqueueInvoiceMessage(
       'invoices.amount_due',
       'invoices.amount_paid',
       'invoices.due_date',
+      'invoices.paid_at',
       'invoices.billing_period_start',
       'invoices.billing_period_end',
       'branches.name as branch_name',
+      'branches.timezone as branch_timezone',
       'properties.address_line1',
-    ])) as (InvoiceContext & { amount_paid: string }) | undefined;
+      'properties.city',
+    ])) as
+    | (InvoiceContext & {
+        amount_paid: string;
+        paid_at: Date | null;
+        branch_timezone: string;
+        city: string | null;
+      })
+    | undefined;
 
-  if (!row) return;
-  const contact = contactFor({
-    preferred_contact: row.preferred_contact,
-    email: row.customer_email,
-    phone: row.customer_phone,
-  });
+  if (!row) return null;
+  const contact = to
+    ? { channel: 'email' as const, recipient: to }
+    : contactFor({
+        preferred_contact: row.preferred_contact,
+        email: row.customer_email,
+        phone: row.customer_phone,
+      });
   if (!contact) {
     logger.info({ invoice_id: invoiceId }, 'No customer email or phone on file; invoice not queued');
-    return;
+    return null;
   }
 
   const token = await ensurePortalToken(invoiceId, db);
   const takesPayments = (await activeGateway(db)).takesPortalPayments;
+  const outstanding = Number(row.amount_due) - Number(row.amount_paid);
+  const property = [row.address_line1, row.city].filter(Boolean).join(', ');
+  const period = `${longDate(row.billing_period_start)} to ${longDate(row.billing_period_end)}`;
+  const lines = (rows: [string, string][]): string => rows.map(([label, value]) => `${label}: ${value}`).join('\n');
+
+  let receipt: Record<string, string> = {};
+  if (templateCode === 'payment_receipt') {
+    const payment = (await db('payments')
+      .where({ invoice_id: invoiceId, status: 'succeeded' })
+      .orderBy('processed_at', 'desc')
+      .first('method', 'processed_at')) as { method: string; processed_at: Date | null } | undefined;
+    const paidAt = row.paid_at ?? payment?.processed_at ?? new Date();
+    receipt = {
+      amount_paid_text: dollars(row.amount_paid),
+      receipt_summary: lines([
+        ['Receipt for invoice', `#${invoiceNumber(invoiceId)}`],
+        ['Paid on', longDate(localDate(new Date(paidAt), row.branch_timezone))],
+        ['Amount paid', dollars(row.amount_paid)],
+        ...(payment ? ([['Payment method', METHOD_LABELS[payment.method] ?? payment.method]] as [string, string][]) : []),
+        ['Property', property],
+        ['Service period', period],
+        ['Balance', dollars(Math.max(outstanding, 0))],
+      ]),
+    };
+  }
+
+  const summary: [string, string][] =
+    templateCode === 'invoice_overdue'
+      ? [
+          ['Invoice', `#${invoiceNumber(invoiceId)}`],
+          ['Property', property],
+          ['Service period', period],
+          ['Invoice total', dollars(row.amount_due)],
+          ['Still owing', dollars(outstanding)],
+          ['Was due', longDate(row.due_date)],
+        ]
+      : [
+          ['Invoice', `#${invoiceNumber(invoiceId)}`],
+          ['Property', property],
+          ['Service period', period],
+          ['Amount due', dollars(row.amount_due)],
+          ...(Number(row.amount_paid) > 0
+            ? ([
+                ['Paid so far', dollars(row.amount_paid)],
+                ['Still owing', dollars(outstanding)],
+              ] as [string, string][])
+            : []),
+          ['Due date', longDate(row.due_date)],
+        ];
 
   await enqueueMessage(
     {
@@ -573,16 +661,67 @@ async function enqueueInvoiceMessage(
         address_line1: row.address_line1,
         branch_name: row.branch_name,
         amount_due: row.amount_due,
-        amount_outstanding: (Number(row.amount_due) - Number(row.amount_paid)).toFixed(2),
+        amount_outstanding: outstanding.toFixed(2),
+        outstanding: dollars(outstanding),
         due_date: row.due_date,
+        due_on: longDate(row.due_date),
         billing_period_start: row.billing_period_start,
         billing_period_end: row.billing_period_end,
         pay_url: payUrl(token),
         pay_prompt: takesPayments ? 'Pay online' : 'View it online',
+        pay_button: takesPayments ? 'Pay your invoice online' : 'View your invoice',
+        payment_note: takesPayments
+          ? 'If you have a card on file, we’ll charge it automatically on the due date, and you don’t need to do anything.'
+          : 'You can pay by e-Transfer, cheque or cash. Reply to this email if you need our payment details.',
+        invoice_summary: lines(summary),
+        ...receipt,
       },
     },
     db,
   );
+  return contact.recipient;
+}
+
+/**
+ * Sends the customer this invoice's email again — the bill, the reminder if
+ * it is late, or the receipt if it is paid — to their own address or `to`.
+ * A draft is sent for the first time, the way the Send button does it.
+ */
+export async function emailInvoice(
+  id: string,
+  scope: BranchScope,
+  to: string | null = null,
+  db: Knex = defaultDb,
+): Promise<{ sent_to: string; template_code: InvoiceTemplate }> {
+  return db.transaction(async (trx) => {
+    const invoice = await lock(id, scope, trx);
+    if (invoice.status === 'void') {
+      throw conflict('This invoice is void, so there is nothing to send');
+    }
+    if (invoice.status === 'draft') {
+      await trx('invoices').where({ id }).update({ status: 'sent', sent_at: new Date() });
+    }
+    const templateCode: InvoiceTemplate =
+      invoice.status === 'paid' ? 'payment_receipt' : invoice.status === 'overdue' ? 'invoice_overdue' : 'invoice_sent';
+
+    const sentTo = await enqueueInvoiceMessage(id, templateCode, trx, to);
+    if (!sentTo) {
+      throw badRequest('This customer has no email or phone on file. Enter an email address to send it to.');
+    }
+    return { sent_to: sentTo, template_code: templateCode };
+  });
+}
+
+/**
+ * The receipt, queued when an invoice is paid in full. Never allowed to undo
+ * the payment it is about: it runs in a savepoint, and a failure is logged.
+ */
+async function queueReceipt(invoiceId: string, db: Knex): Promise<void> {
+  try {
+    await db.transaction((sp) => enqueueInvoiceMessage(invoiceId, 'payment_receipt', sp));
+  } catch (err) {
+    logger.error({ err, invoice_id: invoiceId }, 'Could not queue the payment receipt');
+  }
 }
 
 export function assertTransition(from: InvoiceStatus, to: InvoiceStatus): void {
@@ -650,9 +789,9 @@ export async function createInvoice(
   if (!contract) {
     throw badRequest('contract_id does not match a contract you can access');
   }
-  if (contract.status !== 'active') {
-    throw conflict(`This contract is ${contract.status}, so it cannot be billed`);
-  }
+  // An ended contract can still be billed by hand: a previous customer's
+  // last visit, or damage found after the season. The nightly run never
+  // touches it; that only bills active contracts.
 
   try {
     const [invoice] = await db('invoices')

@@ -1,6 +1,13 @@
 import type { Knex } from 'knex';
 import { ensureSignInBranches } from '../services/branchSignIn';
 import { AGREEMENT_SIGNED_EMAIL, CUSTOMER_WELCOME_EMAIL } from '../types/welcomeEmails';
+import {
+  INVOICE_OVERDUE_EMAIL,
+  INVOICE_SENT_EMAIL,
+  PAYMENT_RECEIPT_EMAIL,
+  PAYMENT_RECEIPT_SMS,
+} from '../types/billingEmails';
+import { QUOTE_EMAIL } from '../types/quoteEmail';
 import type {
   ChecklistRequirement,
   DocumentRequirement,
@@ -248,16 +255,7 @@ export const MESSAGE_TEMPLATES: MessageTemplateRow[] = [
         'document expired. They are out of the assignable pool until it is ' +
         'replaced.',
     },
-    {
-      code: 'invoice_sent',
-      channel: 'email',
-      branch_id: null,
-      subject: 'Your invoice for {{address_line1}}',
-      body:
-        'Hi {{customer_first_name}},\n\nYour invoice for {{billing_period_start}} ' +
-        'to {{billing_period_end}} at {{address_line1}} comes to ${{amount_due}}, ' +
-        'due {{due_date}}.\n\n{{pay_prompt}}: {{pay_url}}\n\n— {{branch_name}}',
-    },
+    { code: 'invoice_sent', channel: 'email', branch_id: null, ...INVOICE_SENT_EMAIL },
     {
       code: 'invoice_sent',
       channel: 'sms',
@@ -276,17 +274,7 @@ export const MESSAGE_TEMPLATES: MessageTemplateRow[] = [
         '{{branch_name}}: ${{amount_outstanding}} for {{address_line1}} was due ' +
         '{{due_date}} and is still outstanding. {{pay_prompt}}: {{pay_url}}',
     },
-    {
-      code: 'invoice_overdue',
-      channel: 'email',
-      branch_id: null,
-      subject: 'Your {{address_line1}} invoice is past due',
-      body:
-        'Hi {{customer_first_name}},\n\n${{amount_outstanding}} for ' +
-        '{{address_line1}} was due on {{due_date}} and is still outstanding. ' +
-        'Service continues — please settle up when you can.\n\n' +
-        '{{pay_prompt}}: {{pay_url}}\n\n— {{branch_name}}',
-    },
+    { code: 'invoice_overdue', channel: 'email', branch_id: null, ...INVOICE_OVERDUE_EMAIL },
     {
       // The link the customer taps to put a card on file. Nobody reads a card
       // number or a CVV out loud on a doorstep.
@@ -396,6 +384,9 @@ export const MESSAGE_TEMPLATES: MessageTemplateRow[] = [
     },
     { code: 'agreement_signed', channel: 'email', branch_id: null, ...AGREEMENT_SIGNED_EMAIL },
     { code: 'customer_welcome', channel: 'email', branch_id: null, ...CUSTOMER_WELCOME_EMAIL },
+    { code: 'quote_sent', channel: 'email', branch_id: null, ...QUOTE_EMAIL },
+    { code: 'payment_receipt', channel: 'email', branch_id: null, ...PAYMENT_RECEIPT_EMAIL },
+    { code: 'payment_receipt', channel: 'sms', branch_id: null, ...PAYMENT_RECEIPT_SMS },
     {
       code: 'payment_failed_internal',
       channel: 'email',

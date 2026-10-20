@@ -10,6 +10,7 @@ import {
 } from '../middleware/auth';
 import {
   createInvoice,
+  emailInvoice,
   getInvoice,
   listInvoices,
   listPayments,
@@ -67,6 +68,10 @@ const createBodySchema = z
     billing_period_end: isoDate,
     amount_due: money,
     due_date: isoDate,
+    /** Email it to the customer as soon as it is raised. */
+    send: z.boolean().default(false),
+    /** Where to send it, instead of the customer's own contact. */
+    to: z.string().trim().email().nullable().default(null),
   })
   .refine((v) => v.billing_period_end > v.billing_period_start, {
     message: 'billing_period_end must fall after billing_period_start',
@@ -150,9 +155,15 @@ invoicesRouter.post(
   asyncHandler(async (req, res) => {
     const body = parse(createBodySchema, req.body);
     const scope = resolveBranchScope(req, branchOf(req));
-    const { contract_id, ...input } = body;
+    const { contract_id, send, to, ...input } = body;
 
-    res.status(201).json({ data: await createInvoice(contract_id, scope, input) });
+    const invoice = await createInvoice(contract_id, scope, input);
+    if (!send) {
+      res.status(201).json({ data: invoice });
+      return;
+    }
+    const sent = await emailInvoice(invoice.id, scope, to);
+    res.status(201).json({ data: { ...(await getInvoice(invoice.id, scope)), sent_to: sent.sent_to } });
   }),
 );
 
@@ -162,6 +173,24 @@ invoicesRouter.post(
   asyncHandler(async (req, res) => {
     const { id } = parse(idParamSchema, req.params);
     res.json({ data: await sendInvoice(id, resolveBranchScope(req, branchOf(req))) });
+  }),
+);
+
+const emailBodySchema = z.object({
+  to: z.string().trim().email().nullable().default(null),
+});
+
+/**
+ * Emails the customer this invoice again: the bill, the past-due reminder if
+ * it is late, or the receipt if it is paid. `to` sends it somewhere else.
+ */
+invoicesRouter.post(
+  '/:id/email',
+  requireCorporate,
+  asyncHandler(async (req, res) => {
+    const { id } = parse(idParamSchema, req.params);
+    const body = parse(emailBodySchema, req.body ?? {});
+    res.status(201).json({ data: await emailInvoice(id, resolveBranchScope(req, branchOf(req)), body.to) });
   }),
 );
 

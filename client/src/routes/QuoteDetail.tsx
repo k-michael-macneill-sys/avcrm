@@ -46,6 +46,9 @@ export function QuoteDetail(): JSX.Element {
   }, [id]);
 
   const { run, pending, error: actionError } = useSubmit(reload);
+  // Kept here, not in the panel: sending presents a draft, and the reload
+  // that shows it would throw away the panel's own state.
+  const [emailed, setEmailed] = React.useState<{ sent_to: string; url: string } | null>(null);
 
   if (loading) return <Loading />;
   if (error) return <ErrorNotice message={error} />;
@@ -113,6 +116,18 @@ export function QuoteDetail(): JSX.Element {
         )}
       </Section>
 
+      {!contract && quote.status !== 'declined' && quote.status !== 'expired' ? (
+        <EmailQuotePanel
+          quote={quote}
+          customer={customer}
+          emailed={emailed}
+          onSent={(sent) => {
+            setEmailed(sent);
+            reload();
+          }}
+        />
+      ) : null}
+
       {contract ? (
         <Section title="Signed">
           <p className="text-sm">
@@ -133,6 +148,63 @@ export function QuoteDetail(): JSX.Element {
         </Section>
       )}
     </>
+  );
+}
+
+/** Emails the customer the quote, with a link to accept it by signing. */
+function EmailQuotePanel({
+  quote,
+  customer,
+  emailed,
+  onSent,
+}: {
+  quote: Quote;
+  customer: Customer;
+  emailed: { sent_to: string; url: string } | null;
+  onSent: (sent: { sent_to: string; url: string }) => void;
+}): JSX.Element {
+  const [copied, setCopied] = React.useState(false);
+  const { run, pending, error } = useSubmit();
+
+  const send = (): void =>
+    run(async () => {
+      onSent(await api.post<{ sent_to: string; url: string }>(`/sales/quotes/${quote.id}/email`));
+    });
+
+  return (
+    <Section title="Email the quote" className="mb-4">
+      {emailed ? (
+        <p className="text-sm text-foreground">
+          Sent to <strong>{emailed.sent_to}</strong>. The email lays out the price and has a button to review and
+          accept, which takes them to sign and add their card. The link works for 14 days.
+        </p>
+      ) : customer.email ? (
+        <p className="text-sm text-muted-foreground">
+          Sends <strong>{customer.email}</strong> a branded email with the price and a link to accept and sign
+          {quote.status === 'draft' ? '. The quote is marked presented when it goes.' : '.'} Sending again replaces
+          the earlier link.
+        </p>
+      ) : (
+        <p className="text-sm text-muted-foreground">Add an email address to the customer to send them this quote.</p>
+      )}
+      {error ? <ErrorNotice message={error} /> : null}
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button type="button" disabled={pending || !customer.email} onClick={send}>
+          {pending ? 'Sending…' : emailed ? 'Send again' : 'Email quote'}
+        </Button>
+        {emailed ? (
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              void navigator.clipboard?.writeText(emailed.url).then(() => setCopied(true));
+            }}
+          >
+            {copied ? 'Link copied' : 'Copy link to text it'}
+          </Button>
+        ) : null}
+      </div>
+    </Section>
   );
 }
 

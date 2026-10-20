@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { db } from './helpers/database';
+import { INVOICE_SENT_EMAIL, PAYMENT_RECEIPT_EMAIL } from '../src/types/billingEmails';
 import { harness } from './helpers/harness';
 import { makeContract } from './helpers/fixtures';
 import { call, login } from './helpers/server';
@@ -184,6 +185,87 @@ describe('invoices and what can be done to them', () => {
       },
     });
     assert.equal(again.status, 409);
+  });
+
+  it('sends a receipt once an invoice is paid in full, and not before', async () => {
+    const { token, invoice } = await draft();
+    await call(h.server(), 'POST', `/invoices/${invoice.id}/send`, { token });
+    await db('message_templates').where({ code: 'payment_receipt', channel: 'email' }).update(PAYMENT_RECEIPT_EMAIL);
+
+    await call(h.server(), 'POST', `/invoices/${invoice.id}/payments`, {
+      token,
+      body: { amount: 100, method: 'etransfer', status: 'succeeded' },
+    });
+    assert.equal((await db('message_log').where({ template_code: 'payment_receipt' })).length, 0);
+
+    await call(h.server(), 'POST', `/invoices/${invoice.id}/payments`, {
+      token,
+      body: { amount: 49.5, method: 'etransfer', status: 'succeeded' },
+    });
+    const receipts = await db('message_log').where({ template_code: 'payment_receipt' });
+    assert.equal(receipts.length, 1);
+    assert.match(receipts[0]?.body ?? '', /Amount paid: \$149\.50/);
+    assert.match(receipts[0]?.body ?? '', /Payment method: e-Transfer/);
+    assert.doesNotMatch(receipts[0]?.body ?? '', /\{\{/);
+  });
+
+  it('lays out the bill in the invoice email', async () => {
+    const { token, invoice } = await draft();
+    await db('message_templates').where({ code: 'invoice_sent', channel: 'email' }).update(INVOICE_SENT_EMAIL);
+    await call(h.server(), 'POST', `/invoices/${invoice.id}/send`, { token });
+
+    const [queued] = await db('message_log').where({ template_code: 'invoice_sent' });
+    assert.match(queued?.body ?? '', /Amount due: \$149\.50/);
+    assert.match(queued?.body ?? '', /Due date: Jan 15, 2027/);
+    assert.match(queued?.body ?? '', /→ .+: http/);
+    assert.doesNotMatch(queued?.body ?? '', /\{\{/);
+  });
+
+  it('emails an invoice again, to another address if asked, as a receipt once paid', async () => {
+    const { token, invoice } = await draft();
+
+    // A draft goes out for the first time.
+    const first = await call(h.server(), 'POST', `/invoices/${invoice.id}/email`, { token, body: {} });
+    assert.equal(first.status, 201, JSON.stringify(first.body));
+    assert.equal(first.body.data.template_code, 'invoice_sent');
+    assert.equal((await db('invoices').where({ id: invoice.id }).first())?.status, 'sent');
+
+    const elsewhere = await call(h.server(), 'POST', `/invoices/${invoice.id}/email`, {
+      token,
+      body: { to: 'new-address@example.test' },
+    });
+    assert.equal(elsewhere.body.data.sent_to, 'new-address@example.test');
+
+    await call(h.server(), 'POST', `/invoices/${invoice.id}/payments`, {
+      token,
+      body: { amount: 149.5, method: 'cash', status: 'succeeded' },
+    });
+    const paid = await call(h.server(), 'POST', `/invoices/${invoice.id}/email`, { token, body: {} });
+    assert.equal(paid.body.data.template_code, 'payment_receipt');
+  });
+
+  it('bills a previous customer by hand, and can email it as it is raised', async () => {
+    const world = h.world();
+    const contract = await makeContract(world.branches.kingston, world.users.operator);
+    await db('contracts').where({ id: contract.contract_id }).update({ status: 'completed' });
+    const token = await login(h.server(), world.emails.corporate);
+
+    const created = await call(h.server(), 'POST', '/invoices', {
+      token,
+      body: {
+        contract_id: contract.contract_id,
+        billing_period_start: '2027-04-01',
+        billing_period_end: '2027-04-15',
+        amount_due: 75,
+        due_date: '2027-04-30',
+        send: true,
+        to: 'old-customer@example.test',
+      },
+    });
+
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    assert.equal(created.body.data.status, 'sent');
+    assert.equal(created.body.data.sent_to, 'old-customer@example.test');
   });
 
   it('is corporate work: an operator cannot raise a bill', async () => {

@@ -12,11 +12,12 @@ import {
   MessageSquareText,
   Pencil,
   Plus,
+  Receipt,
   Send,
   Settings2,
   UserRoundCheck,
 } from 'lucide-react';
-import type { MessageTemplate, Property } from '../../../src/types/models';
+import type { Invoice, MessageTemplate, Property } from '../../../src/types/models';
 import { PHONE_TYPES, type AgreementModel, type NoteKind, type PhoneType } from '../../../src/types/serviceAgreement';
 import { useAuth } from '@/auth/AuthContext';
 import { ConfirmDelete } from '@/components/ConfirmDelete';
@@ -72,6 +73,8 @@ export function CustomerSummary(): JSX.Element {
   const { data, loading, error, reload } = useQuery(() => api.get<Summary>(`/customers/${id}/summary`), [id]);
   const [propertyId, setPropertyId] = React.useState<string | null>(null);
   const [serviceInfoOpen, setServiceInfoOpen] = React.useState(false);
+  // Billing is corporate work, as on the Invoices screen.
+  const { isCorporate } = useAuth();
 
   if (loading && !data) return <Loading />;
   if (error) return <ErrorNotice message={error} />;
@@ -101,6 +104,13 @@ export function CustomerSummary(): JSX.Element {
                 <MapPinned className="size-4" /> Addresses
               </a>
             </Button>
+            {isCorporate ? (
+              <Button asChild variant="ghost" className="justify-start">
+                <a href="#invoices">
+                  <Receipt className="size-4" /> Invoice History
+                </a>
+              </Button>
+            ) : null}
           </CardContent>
         </Card>
       </nav>
@@ -145,6 +155,8 @@ export function CustomerSummary(): JSX.Element {
           <ContractsCard summary={data} newContract={newContract} />
           <SmsCard summary={data} onChanged={reload} />
         </div>
+
+        {isCorporate ? <InvoicesCard summary={data} /> : null}
 
         <NotesCard customerId={customer.id} />
 
@@ -532,6 +544,233 @@ function ContractsCard({ summary, newContract }: { summary: Summary; newContract
         />
       </CardContent>
     </Card>
+  );
+}
+
+// ── Invoices ──────────────────────────────────────────────────────────────
+
+const today = (): string => new Date().toLocaleDateString('en-CA');
+const inDays = (days: number): string => new Date(Date.now() + days * 86_400_000).toLocaleDateString('en-CA');
+
+/** Every bill this customer has had, on any contract, active or ended. */
+function InvoicesCard({ summary }: { summary: Summary }): JSX.Element {
+  const navigate = useNavigate();
+  const customerId = summary.customer.id;
+  const invoices = useQuery(() => api.list<Invoice>('/invoices', { customer_id: customerId, page_size: 100 }), [customerId]);
+  const [creating, setCreating] = React.useState(false);
+  const contracts = summary.contracts.filter((c) => c.contract_id);
+
+  const rows = invoices.data?.data ?? [];
+  const owing = rows
+    .filter((r) => r.status === 'sent' || r.status === 'overdue')
+    .reduce((sum, r) => sum + Number(r.amount_due) - Number(r.amount_paid), 0);
+  const paid = rows.reduce((sum, r) => sum + Number(r.amount_paid), 0);
+
+  return (
+    <Card id="invoices" className="min-w-0 scroll-mt-4">
+      <CardHeader className="flex-row flex-wrap items-center justify-between gap-2 space-y-0">
+        <div>
+          <CardTitle>Invoice History</CardTitle>
+          {rows.length ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              {money(paid)} paid · {money(owing)} owing
+            </p>
+          ) : null}
+        </div>
+        <Button size="sm" variant="secondary" disabled={!contracts.length} onClick={() => setCreating(true)}>
+          <Plus className="size-3.5" /> New Invoice
+        </Button>
+      </CardHeader>
+      <CardContent>
+        {invoices.error ? <ErrorNotice message={invoices.error} /> : null}
+        {invoices.loading && !invoices.data ? (
+          <Loading />
+        ) : (
+          <ListTable
+            rows={rows}
+            rowKey={(row) => row.id}
+            emptyMessage={
+              contracts.length ? 'Nothing billed yet.' : 'Nothing billed yet. Invoices are raised against a signed contract.'
+            }
+            initialSort={{ column: 1, direction: 'desc' }}
+            onRowClick={(row) => navigate(`/invoices/${row.id}`)}
+            columns={[
+              {
+                header: 'Invoice',
+                cell: (row) => (
+                  <Link className="text-primary hover:underline" to={`/invoices/${row.id}`} onClick={(e) => e.stopPropagation()}>
+                    #{row.id.slice(0, 8).toUpperCase()}
+                    <span className="block text-xs text-muted-foreground">
+                      {date(row.billing_period_start)} – {date(row.billing_period_end)}
+                    </span>
+                  </Link>
+                ),
+                searchValue: (row) => `${row.id.slice(0, 8)} ${date(row.billing_period_start)}`,
+              },
+              { header: 'Due', cell: (row) => date(row.due_date), sortValue: (row) => row.due_date },
+              { header: 'Amount', numeric: true, cell: (row) => money(row.amount_due), sortValue: (row) => Number(row.amount_due) },
+              { header: 'Paid', numeric: true, cell: (row) => money(row.amount_paid), sortValue: (row) => Number(row.amount_paid) },
+              { header: 'Status', cell: (row) => <StatusPill status={row.status} />, sortValue: (row) => row.status },
+            ]}
+          />
+        )}
+      </CardContent>
+      <NewInvoiceDialog
+        summary={summary}
+        open={creating}
+        onOpenChange={setCreating}
+        onCreated={(id) => navigate(`/invoices/${id}`)}
+      />
+    </Card>
+  );
+}
+
+/**
+ * A bill raised by hand, on any of the customer's contracts — a previous
+ * customer's ended one included — and optionally emailed straight away.
+ */
+function NewInvoiceDialog({
+  summary,
+  open,
+  onOpenChange,
+  onCreated,
+}: {
+  summary: Summary;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCreated: (invoiceId: string) => void;
+}): JSX.Element {
+  const contracts = summary.contracts.filter((c) => c.contract_id);
+  const blank = () => ({
+    contract_id: (summary.active_contract?.contract_id ?? contracts[0]?.contract_id) || '',
+    amount_due: '',
+    billing_period_start: today(),
+    billing_period_end: inDays(30),
+    due_date: inDays(14),
+    send: true,
+    to: '',
+  });
+  const [form, setForm] = React.useState(blank);
+  const { run, pending, error } = useSubmit();
+
+  React.useEffect(() => {
+    if (open) setForm(blank());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const set = <K extends keyof ReturnType<typeof blank>>(key: K, value: ReturnType<typeof blank>[K]) =>
+    setForm((f) => ({ ...f, [key]: value }));
+
+  const submit = (e: React.FormEvent): void => {
+    e.preventDefault();
+    run(async () => {
+      const created = await api.post<Invoice>('/invoices', {
+        contract_id: form.contract_id,
+        amount_due: Number(form.amount_due),
+        billing_period_start: form.billing_period_start,
+        billing_period_end: form.billing_period_end,
+        due_date: form.due_date,
+        send: form.send,
+        to: form.send && form.to.trim() ? form.to.trim() : null,
+      });
+      onOpenChange(false);
+      onCreated(created.id);
+    });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>New invoice</DialogTitle>
+          <DialogDescription>
+            For anything the season plan does not bill on its own, such as an extra visit or a previous customer’s
+            last charge.
+          </DialogDescription>
+        </DialogHeader>
+        <form className="flex flex-col gap-3" onSubmit={submit}>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="invoice-contract">Contract</Label>
+            <Select value={form.contract_id} onValueChange={(v) => set('contract_id', v)}>
+              <SelectTrigger id="invoice-contract">
+                <SelectValue placeholder="Choose a contract" />
+              </SelectTrigger>
+              <SelectContent>
+                {contracts.map((c) => (
+                  <SelectItem key={c.contract_id!} value={c.contract_id!}>
+                    {c.agreement} · {c.address_line1} ({c.status})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="invoice-amount">Amount ($)</Label>
+              <Input
+                id="invoice-amount"
+                type="number"
+                inputMode="decimal"
+                min="0.01"
+                step="0.01"
+                required
+                value={form.amount_due}
+                onChange={(e) => set('amount_due', e.target.value)}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="invoice-due">Due date</Label>
+              <Input id="invoice-due" type="date" required value={form.due_date} onChange={(e) => set('due_date', e.target.value)} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="invoice-start">Service from</Label>
+              <Input
+                id="invoice-start"
+                type="date"
+                required
+                value={form.billing_period_start}
+                onChange={(e) => set('billing_period_start', e.target.value)}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="invoice-end">Service to</Label>
+              <Input
+                id="invoice-end"
+                type="date"
+                required
+                value={form.billing_period_end}
+                onChange={(e) => set('billing_period_end', e.target.value)}
+              />
+            </div>
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox checked={form.send} onCheckedChange={(v) => set('send', v === true)} />
+            Email it to the customer now
+          </label>
+          {form.send ? (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="invoice-to">Different email (optional)</Label>
+              <Input
+                id="invoice-to"
+                type="email"
+                placeholder={summary.customer.email ?? 'name@example.com'}
+                value={form.to}
+                onChange={(e) => set('to', e.target.value)}
+              />
+            </div>
+          ) : null}
+          {error ? <ErrorNotice message={error} /> : null}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={pending || !form.contract_id}>
+              {pending ? 'Saving…' : form.send ? 'Create and email' : 'Create draft'}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 

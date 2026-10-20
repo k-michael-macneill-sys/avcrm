@@ -11,7 +11,7 @@ import { cleanAgreement, dealFromAgreement } from '../services/agreement';
 import { forcedCity } from '../services/branchSignIn';
 import { updateCustomer } from '../services/customers';
 import { openDeal, settleCollectedPayment } from '../services/sales';
-import { requestSignature } from '../services/signing';
+import { emailQuote, requestSignature } from '../services/signing';
 import { BILLING_TYPES, CUSTOMER_STATUSES, PREFERRED_CONTACTS } from '../types/models';
 import { asyncHandler } from '../utils/async';
 import { unauthorized } from '../utils/errors';
@@ -240,6 +240,24 @@ salesRouter.post(
     const result = await requestSignature(id, scope, req.user.id);
     res.status(201).json({
       data: { request: result.request, url: result.url, sent_to: result.request.sent_to },
+    });
+  }),
+);
+
+/**
+ * Emails the customer the quote itself — the price, laid out — with the same
+ * link to accept it by signing. Presents a draft.
+ */
+salesRouter.post(
+  '/quotes/:id/email',
+  asyncHandler(async (req, res) => {
+    const { id } = parse(idParamSchema, req.params);
+    if (!req.user) throw unauthorized();
+    const scope = resolveBranchScope(req, req.query.branch_id as string | undefined);
+
+    const result = await emailQuote(id, scope, { ...resolveActor(req), user_id: req.user.id });
+    res.status(201).json({
+      data: { url: result.url, sent_to: result.request.sent_to, expires_at: result.request.expires_at },
     });
   }),
 );

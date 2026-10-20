@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { QUOTE_EMAIL } from '../src/types/quoteEmail';
 import { describe, it } from 'node:test';
 import { generateInvoicesForContract } from '../src/services/invoices';
 import { db } from './helpers/database';
@@ -65,7 +66,7 @@ describe('opening a deal from the sales wizard', () => {
     assert.equal(property.address_line2, 'Unit 2');
     // The permanent notes live on the property, for every future visit.
     assert.equal(property.access_notes, 'Gate code 1234. Pile snow left.');
-    assert.equal(quote.status, 'presented');
+    assert.equal(quote?.status, 'presented');
     assert.equal(quote.recurring_price, '109.00');
     assert.equal(quote.addon_salt, true);
     assert.equal(quote.addon_vehicle, false);
@@ -215,6 +216,44 @@ describe('signing by emailed link', () => {
     const linkToken = url.split('/app/sign/')[1] ?? '';
     return { quoteId, linkToken, customerId: opened.body.data.customer.id as string };
   }
+
+  it('emails the quote with its price, and presents a draft', async () => {
+    const world = h.world();
+    const token = await login(h.server(), world.emails.sales);
+    const opened = await call(h.server(), 'POST', '/sales/deals', { token, body: deal() });
+    const quoteId = opened.body.data.quote.id as string;
+    await db('quotes').where({ id: quoteId }).update({ status: 'draft' });
+    // The fixtures stub every template; this one is about the real wording.
+    await db('message_templates').where({ code: 'quote_sent', channel: 'email' }).update(QUOTE_EMAIL);
+
+    const sent = await call(h.server(), 'POST', `/sales/quotes/${quoteId}/email`, { token });
+
+    assert.equal(sent.status, 201, JSON.stringify(sent.body));
+    assert.match(sent.body.data.url, /\/app\/sign\//);
+    const quote = await db('quotes').where({ id: quoteId }).first();
+    assert.equal(quote?.status, 'presented');
+    const queued = await db('message_log').where({ template_code: 'quote_sent' }).first();
+    assert.ok(queued, 'a quote_sent email should be queued');
+    assert.equal(queued.recipient, sent.body.data.sent_to);
+    assert.ok(queued.body.includes(`→ Review and accept your quote: ${sent.body.data.url}`));
+    assert.match(queued.body, /Each month after: \$109\.00/);
+    assert.doesNotMatch(queued.body, /\{\{/);
+  });
+
+  it('leaves a draft alone when the quote cannot be emailed', async () => {
+    const world = h.world();
+    const token = await login(h.server(), world.emails.sales);
+    const opened = await call(h.server(), 'POST', '/sales/deals', { token, body: deal() });
+    const quoteId = opened.body.data.quote.id as string;
+    await db('quotes').where({ id: quoteId }).update({ status: 'draft' });
+    await db('customers').where({ id: opened.body.data.customer.id }).update({ email: null, phone: '+13065550100', preferred_contact: 'sms' });
+
+    const sent = await call(h.server(), 'POST', `/sales/quotes/${quoteId}/email`, { token });
+
+    assert.equal(sent.status, 400, JSON.stringify(sent.body));
+    const quote = await db('quotes').where({ id: quoteId }).first();
+    assert.equal(quote?.status, 'draft');
+  });
 
   it('emails the customer their link', async () => {
     const { customerId } = await sentLink();
