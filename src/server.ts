@@ -1,5 +1,6 @@
 import { config } from './config';
 import { checkConnection, closeConnection, db } from './db/client';
+import { installAppConfig } from './db/appConfig';
 import { runMigrations } from './db/migrate';
 import { seed } from './db/seeds/001_sample_data';
 import { createApp } from './app';
@@ -21,6 +22,14 @@ import { logger } from './utils/logger';
 async function seedIfEmpty(): Promise<void> {
   const existingUser = await db('users').first('id');
   if (existingUser) {
+    // New message templates and the like, added without touching anything
+    // already there. The build's seed step does this too, but a deploy that
+    // only starts the server (the Docker image) never runs it, and a missing
+    // template is an error the moment something tries to send it.
+    const installed = await installAppConfig(db);
+    if (installed.message_templates) {
+      logger.info({ message_templates: installed.message_templates }, 'Installed missing message templates');
+    }
     // An install made before the published default was refused may still
     // have it; this swaps it for SEED_PASSWORD, or says how to.
     await retirePublishedPassword(db);
