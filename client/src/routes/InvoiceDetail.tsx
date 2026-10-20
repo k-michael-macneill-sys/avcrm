@@ -12,6 +12,9 @@ import { InlineForm } from '@/components/InlineForm';
 import { DownloadButton } from '@/components/FileWidgets';
 import { Field, FieldList, Loading, ErrorNotice } from '@/components/Misc';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Mail } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { useQuery } from '@/lib/useQuery';
 import { useSubmit } from '@/lib/useSubmit';
@@ -35,7 +38,8 @@ export function InvoiceDetail(): JSX.Element {
 
   const { run, pending, error: actionError } = useSubmit(reload);
 
-  if (loading) return <Loading />;
+  // Not on a reload: the email panel keeps its "Sent to" across it.
+  if (loading && !data) return <Loading />;
   if (error) return <ErrorNotice message={error} />;
   if (!data) return <Loading />;
 
@@ -80,11 +84,6 @@ export function InvoiceDetail(): JSX.Element {
         {actionError ? <ErrorNotice message={actionError} /> : null}
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <DownloadButton path={`/invoices/${id}/pdf`} fileName={`invoice-${id.slice(0, 8)}.pdf`} label="Download the invoice" />
-          {invoice.status === 'draft' ? (
-            <Button type="button" disabled={pending} onClick={() => run(() => api.post(`/invoices/${id}/send`))}>
-              Send to customer
-            </Button>
-          ) : null}
           {invoice.status !== 'void' && invoice.status !== 'paid' ? (
             <Button
               type="button"
@@ -97,6 +96,10 @@ export function InvoiceDetail(): JSX.Element {
           ) : null}
         </div>
       </Section>
+
+      {invoice.status !== 'void' ? (
+        <EmailInvoice invoice={invoice} customer={customer} onSent={reload} />
+      ) : null}
 
       {invoice.status === 'sent' || invoice.status === 'overdue' ? <PayLink invoiceId={id} /> : null}
 
@@ -171,6 +174,67 @@ export function InvoiceDetail(): JSX.Element {
         )}
       </Section>
     </>
+  );
+}
+
+/**
+ * Sends the customer this invoice's email again: the bill, the past-due
+ * reminder if it is late, or the receipt once it is paid. For a previous
+ * customer whose address has changed, it can go somewhere else.
+ */
+function EmailInvoice({
+  invoice,
+  customer,
+  onSent,
+}: {
+  invoice: Invoice;
+  customer: Customer;
+  onSent: () => void;
+}): JSX.Element {
+  const [to, setTo] = React.useState('');
+  const [sentTo, setSentTo] = React.useState<string | null>(null);
+  const { run, pending, error } = useSubmit(onSent);
+  const what =
+    invoice.status === 'paid' ? 'receipt' : invoice.status === 'overdue' ? 'past-due reminder' : 'invoice';
+  const action = invoice.status === 'draft' ? 'Send invoice' : `Email ${what}`;
+
+  const send = (): void =>
+    run(async () => {
+      const sent = await api.post<{ sent_to: string }>(`/invoices/${invoice.id}/email`, { to: to.trim() || null });
+      setSentTo(sent.sent_to);
+      setTo('');
+    });
+
+  return (
+    <Section title="Email the customer" className="mb-4">
+      <p className="text-sm text-muted-foreground">
+        Sends the {what} with a link to view {invoice.status === 'paid' ? 'it' : 'and pay it'} online
+        {customer.email ? (
+          <>
+            {' '}
+            to <strong>{customer.email}</strong>
+          </>
+        ) : null}
+        . To send it somewhere else, such as a previous customer’s new address, enter it below.
+      </p>
+      <div className="mt-3 flex flex-wrap items-end gap-2">
+        <div className="flex min-w-[240px] flex-1 flex-col gap-1.5">
+          <Label htmlFor="invoice-email-to">Different email (optional)</Label>
+          <Input
+            id="invoice-email-to"
+            type="email"
+            value={to}
+            placeholder={customer.email ?? 'name@example.com'}
+            onChange={(e) => setTo(e.target.value)}
+          />
+        </div>
+        <Button type="button" disabled={pending} onClick={send}>
+          <Mail className="size-4" /> {pending ? 'Sending…' : action}
+        </Button>
+      </div>
+      {sentTo ? <p className="mt-2 text-sm text-foreground">Sent to {sentTo}.</p> : null}
+      {error ? <ErrorNotice message={error} /> : null}
+    </Section>
   );
 }
 

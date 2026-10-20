@@ -137,6 +137,8 @@ export const TEMPLATE_CODES = [
   'customer_welcome',
   // A quote emailed to the customer, with a link to accept and sign it.
   'quote_sent',
+  // The receipt sent when an invoice is paid in full.
+  'payment_receipt',
 ] as const;
 export type TemplateCode = (typeof TEMPLATE_CODES)[number];
 
