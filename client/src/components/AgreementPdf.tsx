@@ -104,8 +104,10 @@ const CHOICE_LABELS: Record<string, string> = {
 
 
 async function renderTemplate(): Promise<Rendered> {
-  const pdfjs = await import('pdfjs-dist');
-  const worker = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
+  // The legacy build carries polyfills (e.g. Promise.withResolvers) for older
+  // Safari / iPad browsers that the modern build assumes.
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const worker = await import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url');
   pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
 
   const doc = await pdfjs.getDocument('/agreement-template.pdf').promise;
