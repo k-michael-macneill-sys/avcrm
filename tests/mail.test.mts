@@ -76,6 +76,17 @@ describe('delivering mail', () => {
     assert.ok(row?.provider_message_id);
   });
 
+  it('sends the branded HTML version, with the logo inline', async () => {
+    await queue({ body: 'Hi Harold,\n\nYour quote\n\nFirst month: $129.00\nEach month after: $109.00\n\n→ Review and accept your quote: https://crm.test/app/sign/abc' });
+    await sendQueued(10);
+
+    const body = sink.received()[0]?.body ?? '';
+    assert.match(body, /Content-Type: text\/plain/);
+    assert.match(body, /Content-Type: text\/html/);
+    assert.match(body, /Content-ID: <drift-logo@avcrm>/);
+    assert.match(body, /cid:drift-logo@avcrm/);
+  });
+
   it('signs a branch’s email with its name and sends the replies to the branch', async () => {
     await db('branches').where({ id: branchId }).update({ contact_email: 'kingston@drift.test' });
     await queue();

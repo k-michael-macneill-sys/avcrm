@@ -1,6 +1,7 @@
 import type { Knex } from 'knex';
 import { ensureSignInBranches } from '../services/branchSignIn';
 import { AGREEMENT_SIGNED_EMAIL, CUSTOMER_WELCOME_EMAIL } from '../types/welcomeEmails';
+import { QUOTE_EMAIL } from '../types/quoteEmail';
 import type {
   ChecklistRequirement,
   DocumentRequirement,
@@ -396,6 +397,7 @@ export const MESSAGE_TEMPLATES: MessageTemplateRow[] = [
     },
     { code: 'agreement_signed', channel: 'email', branch_id: null, ...AGREEMENT_SIGNED_EMAIL },
     { code: 'customer_welcome', channel: 'email', branch_id: null, ...CUSTOMER_WELCOME_EMAIL },
+    { code: 'quote_sent', channel: 'email', branch_id: null, ...QUOTE_EMAIL },
     {
       code: 'payment_failed_internal',
       channel: 'email',

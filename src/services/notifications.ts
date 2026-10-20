@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import nodemailer, { type Transporter } from 'nodemailer';
 import { config } from '../config';
 import { logger } from '../utils/logger';
+import { LOGO_CID, LOGO_PATH, renderEmailHtml } from './emailLayout';
 import { deliverSms } from './sms';
 import { storage } from './storage';
 import { SendFailure, type SendResult } from './transport';
@@ -135,9 +136,15 @@ class SmtpTransport implements MailTransport {
         to,
         subject,
         text: email.body,
-        ...(email.attachment
-          ? { attachments: [{ filename: email.attachment.name, content: storage.read(email.attachment.key) }] }
-          : {}),
+        html: renderEmailHtml(email.body, { subject: email.subject, branchName: email.branch?.name }),
+        attachments: [
+          // Inline, by Content-ID: a hosted image is blocked by most mail
+          // clients until the reader allows it, and the logo is the header.
+          { filename: 'drift-logo.jpg', path: LOGO_PATH, cid: LOGO_CID },
+          ...(email.attachment
+            ? [{ filename: email.attachment.name, content: storage.read(email.attachment.key) }]
+            : []),
+        ],
         ...(email.message_id
           ? { headers: { 'X-Avcrm-Message-Id': email.message_id } }
           : {}),

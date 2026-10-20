@@ -135,6 +135,8 @@ export const TEMPLATE_CODES = [
   'agreement_signed',
   // The welcome email, sent the day after an agreement is signed.
   'customer_welcome',
+  // A quote emailed to the customer, with a link to accept and sign it.
+  'quote_sent',
 ] as const;
 export type TemplateCode = (typeof TEMPLATE_CODES)[number];
 

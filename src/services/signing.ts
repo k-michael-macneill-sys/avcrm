@@ -17,9 +17,11 @@ import type { AgreementValues } from '../types/agreement';
 import { agreementFromDeal } from './agreement';
 import { contractValues } from '../types/agreement';
 import { enqueueMessage } from './messages';
-import type { AgreementModel, SignatureBox } from '../types/serviceAgreement';
+import { formatMoney, longDate, toCents, type AgreementModel, type SignatureBox } from '../types/serviceAgreement';
 import { buildAgreementModel, SERVICE_AGREEMENT_TERMS_VERSION } from './agreementDocument';
-import { loadQuoteTerms } from './agreementTerms';
+import { loadQuoteTerms, localDate, type QuoteTerms } from './agreementTerms';
+import type { AuditActor } from './audit';
+import { changeQuoteStatus, lock as lockQuote } from './quotes';
 import { emailSignedCopy, requiredBoxes } from './serviceAgreements';
 import { keyFor, ruleFor, storage } from './storage';
 
@@ -171,6 +173,8 @@ export async function requestSignature(
   scope: BranchScope,
   actorId: string,
   db: Knex = defaultDb,
+  /** quote_sent leads with the price; signing_request is just the link. */
+  templateCode: 'signing_request' | 'quote_sent' = 'signing_request',
 ): Promise<SigningRequestResult> {
   const quote = (await applyBranchScope(
     quoteQuery(db),
@@ -227,7 +231,7 @@ export async function requestSignature(
 
     await enqueueMessage(
       {
-        template_code: 'signing_request',
+        template_code: templateCode,
         channel: 'email',
         recipient: quote.email!,
         branch_id: quote.branch_id,
@@ -237,6 +241,7 @@ export async function requestSignature(
           address_line1: quote.address_line1,
           branch_name: quote.branch_name,
           signing_url: url,
+          ...(templateCode === 'quote_sent' ? quoteEmailContext(quote, terms, url, expiresAt) : {}),
         },
       },
       trx,
@@ -244,6 +249,89 @@ export async function requestSignature(
 
     return { request, url };
   });
+}
+
+/**
+ * Emails the customer their quote: the price, and a link to the same page
+ * requestSignature sends, where they accept it by signing. A draft is
+ * presented by being sent, and stays a draft if the email cannot go.
+ */
+export async function emailQuote(
+  quoteId: string,
+  scope: BranchScope,
+  actor: AuditActor & { user_id: string },
+  db: Knex = defaultDb,
+): Promise<SigningRequestResult> {
+  return db.transaction(async (trx) => {
+    const quote = await lockQuote(quoteId, scope, trx);
+    if (quote.status === 'draft') {
+      await changeQuoteStatus(quoteId, scope, 'presented', actor, trx);
+    }
+    return requestSignature(quoteId, scope, actor.user_id, trx, 'quote_sent');
+  });
+}
+
+/**
+ * The quote email's merge fields. quote_summary is "Label: value" lines,
+ * which the email layout draws as a table.
+ */
+function quoteEmailContext(
+  quote: QuoteRow,
+  terms: QuoteTerms | null,
+  url: string,
+  expiresAt: Date,
+): Record<string, string> {
+  const contacts = [quote.branch_phone, quote.branch_email].filter((c): c is string => !!c);
+  const rows: [string, string][] = [
+    ['Property', [quote.address_line1, quote.city].filter(Boolean).join(', ')],
+  ];
+
+  if (terms) {
+    const { pricing } = terms;
+    rows.push(
+      ['Service', terms.contract_type.label],
+      ['Billing', terms.plan.label],
+      ['Service period', `${longDate(terms.schedule.season_start)} to ${longDate(terms.schedule.season_end)}`],
+      [`Regular price (per ${pricing.unit})`, formatMoney(pricing.normal_price)],
+    );
+    if (terms.addons.length) {
+      rows.push(['Add-ons', terms.addons.map((a) => `${a.label} (${formatMoney(a.price)})`).join(', ')]);
+    }
+    if (pricing.discount) rows.push(['Discount', `-${formatMoney(pricing.discount)}`]);
+    rows.push(['First payment (incl. tax)', formatMoney(pricing.first_payment_total)]);
+    if (pricing.recurring_payment) {
+      const after = pricing.payments_count ? ` (${pricing.payments_count - 1} more)` : '';
+      rows.push([`Each payment after${after}`, `${formatMoney(pricing.recurring_total)} incl. tax`]);
+    }
+    if (pricing.payments_count) rows.push(['Total (incl. tax)', formatMoney(pricing.commitment_total)]);
+  } else {
+    const monthly = quote.billing_type === 'monthly';
+    const addons = [
+      quote.addon_salt && 'Salting',
+      quote.addon_vehicle && 'Clearing around vehicles',
+      quote.addon_stairs && 'Stairs and walkways',
+    ].filter((a): a is string => !!a);
+    rows.push(
+      ['Billing', monthly ? 'Monthly' : 'Seasonal, paid up front'],
+      ['Service period', `${longDate(quote.season_start)} to ${longDate(quote.season_end)}`],
+    );
+    if (addons.length) rows.push(['Includes', addons.join(', ')]);
+    if (toCents(quote.initial_price)! > toCents(quote.discounted_price)!) {
+      rows.push(['Regular price', formatMoney(toCents(quote.initial_price)!)]);
+    }
+    rows.push([monthly ? 'First month' : 'Your price', formatMoney(toCents(quote.discounted_price)!)]);
+    if (monthly && quote.recurring_price !== null) {
+      rows.push(['Each month after', formatMoney(toCents(quote.recurring_price)!)]);
+    }
+  }
+
+  return {
+    quote_url: url,
+    quote_summary: rows.map(([label, value]) => `${label}: ${value}`).join('\n'),
+    expires_on: longDate(localDate(expiresAt, quote.branch_timezone)),
+    contact_sentence: contacts.length ? `at ${contacts.join(' or ')}, or by replying to this email` : 'by replying to this email',
+    sender_name: `The ${quote.branch_name} team`,
+  };
 }
 
 /** What the public page shows before anyone signs anything. */
