@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { buffer } from 'node:stream/consumers';
 import nodemailer, { type Transporter } from 'nodemailer';
 import { config } from '../config';
 import { logger } from '../utils/logger';
@@ -16,9 +18,11 @@ export { SendFailure, type SendResult };
  * how a message actually leaves the building, and the queue worker is its
  * only caller.
  *
- * SMTP rather than a vendor's HTTP API on purpose. Postmark, SES, Mailgun and
- * SendGrid all issue SMTP credentials, so one driver covers any of them and
- * changing provider is a change to .env rather than to code.
+ * SMTP covers any provider: Postmark, SES, Mailgun and SendGrid all issue
+ * SMTP credentials, so changing provider is a change to .env rather than to
+ * code. SendGrid also has its own driver over its web API, because some hosts
+ * block the SMTP ports outright (Render's free instances do) and https is
+ * the one way out that is never blocked.
  */
 
 export interface OutboundEmail {
@@ -55,6 +59,9 @@ export function senderFor(
   const name = match?.[1]?.trim() || 'Drift Property Services';
   return { from: `"${`${name} – ${branch.name}`.replace(/"/g, '')}" <${address}>`, replyTo };
 }
+
+/** How long one send may take before it counts as failed and the queue moves on. */
+const SEND_TIMEOUT_MS = 15_000;
 
 interface MailTransport {
   send(email: OutboundEmail): Promise<SendResult>;
@@ -120,6 +127,11 @@ class SmtpTransport implements MailTransport {
       // rather than reconnecting per message.
       pool: true,
       maxConnections: 2,
+      // A host that drops the mail ports never answers at all, and the
+      // defaults would hold the queue for minutes before saying so.
+      connectionTimeout: SEND_TIMEOUT_MS,
+      greetingTimeout: SEND_TIMEOUT_MS,
+      socketTimeout: 2 * SEND_TIMEOUT_MS,
     });
 
     return this.transporter;
@@ -162,6 +174,88 @@ class SmtpTransport implements MailTransport {
   }
 }
 
+/** "Name <address>" or a bare address, as SendGrid's API takes it. */
+export function parseAddress(value: string): { email: string; name?: string } {
+  const match = /^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/.exec(value);
+  if (!match) return { email: value.trim() };
+  const name = match[1]!.trim();
+  return name ? { email: match[2]!.trim(), name } : { email: match[2]!.trim() };
+}
+
+/**
+ * SendGrid's web API, over https. The same mail as SmtpTransport sends —
+ * text, the branded HTML, the inline logo, any attachment — but on port
+ * 443, which no host blocks; Render's free instances silently drop the SMTP
+ * ports, and a send there never comes back.
+ */
+class SendGridTransport implements MailTransport {
+  async send(email: OutboundEmail): Promise<SendResult> {
+    const { to, subject } = recipientFor(email);
+    const { from, replyTo } = senderFor(email.branch);
+    const { apiKey, apiBase } = config.mail.sendgrid;
+
+    const attachments = [
+      {
+        content: (await readFile(LOGO_PATH)).toString('base64'),
+        filename: 'drift-logo.jpg',
+        type: 'image/jpeg',
+        disposition: 'inline',
+        content_id: LOGO_CID,
+      },
+      ...(email.attachment
+        ? [
+            {
+              content: (await buffer(storage.read(email.attachment.key))).toString('base64'),
+              filename: email.attachment.name,
+              disposition: 'attachment',
+            },
+          ]
+        : []),
+    ];
+
+    let response: Response;
+    try {
+      response = await fetch(`${apiBase}/v3/mail/send`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          personalizations: [{ to: [parseAddress(to)] }],
+          from: parseAddress(from),
+          ...(replyTo ? { reply_to: parseAddress(replyTo) } : {}),
+          subject,
+          content: [
+            { type: 'text/plain', value: email.body },
+            { type: 'text/html', value: renderEmailHtml(email.body, { subject: email.subject, branchName: email.branch?.name }) },
+          ],
+          attachments,
+          ...(email.message_id ? { headers: { 'X-Avcrm-Message-Id': email.message_id } } : {}),
+        }),
+        signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+      });
+    } catch (err) {
+      // Timed out or never connected: worth another go.
+      throw new SendFailure(
+        `Could not reach SendGrid: ${err instanceof Error ? err.message : String(err)}`,
+        false,
+        (err as { name?: string }).name,
+      );
+    }
+
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      // 400 and 413 are this message, and will be the same message next time.
+      // A bad key (401) or an unverified sender (403) is the account, which
+      // somebody can fix, so those keep their retries.
+      const permanent = response.status === 400 || response.status === 413;
+      throw new SendFailure(`SendGrid refused the email (${response.status}): ${detail.slice(0, 500)}`, permanent, String(response.status));
+    }
+
+    return { provider_message_id: response.headers.get('x-message-id') ?? `sendgrid-${randomUUID()}` };
+  }
+
+  async close(): Promise<void> {}
+}
+
 /**
  * Turns a transport error into the one thing the queue needs to know.
  *
@@ -182,7 +276,11 @@ function classify(err: unknown): SendFailure {
 }
 
 const transport: MailTransport =
-  config.mail.driver === 'smtp' ? new SmtpTransport() : new LogTransport();
+  config.mail.driver === 'sendgrid'
+    ? new SendGridTransport()
+    : config.mail.driver === 'smtp'
+      ? new SmtpTransport()
+      : new LogTransport();
 
 export function sendEmail(
   to: string,

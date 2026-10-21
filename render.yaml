@@ -39,7 +39,8 @@ services:
         scope: build
       # Email through Twilio SendGrid: set SENDGRID_API_KEY and MAIL_FROM (a
       # sender verified in SendGrid) and leave MAIL_DRIVER unset — the key
-      # switches it to smtp. MAIL_DRIVER=log keeps every email in the log.
+      # sends through SendGrid's web API over https, which free instances do
+      # not block. MAIL_DRIVER=log keeps every email in the log.
       - key: MAIL_DRIVER
         sync: false
       - key: MAIL_FROM

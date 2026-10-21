@@ -197,13 +197,16 @@ export function inspect(env: Record<string, string | undefined>): Finding[] {
 
   // --- what actually reaches a customer -----------------------------------
   const sendgrid = get('SENDGRID_API_KEY') !== '';
-  const mailDriver = get('MAIL_DRIVER') || (sendgrid ? 'smtp' : 'log');
-  if (mailDriver !== 'smtp') {
+  const mailDriver = get('MAIL_DRIVER') || (sendgrid ? (get('SMTP_HOST') === '' ? 'sendgrid' : 'smtp') : 'log');
+  if (mailDriver === 'log') {
     error(
       'MAIL_DRIVER',
-      'is not smtp, so invoices, review requests and expiry warnings are written ' +
+      'is log, so invoices, review requests and expiry warnings are written ' +
         'to the log instead of being sent.',
     );
+  }
+  if (mailDriver === 'sendgrid' && !sendgrid) {
+    error('SENDGRID_API_KEY', 'is empty, but MAIL_DRIVER is sendgrid');
   }
   if (get('MAIL_FROM') === '') error('MAIL_FROM', 'is empty — the app refuses to start without it');
 

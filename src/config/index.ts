@@ -81,9 +81,12 @@ const envSchema = z.object({
   // Outbound mail. `log` writes to the log and is the default so a dev box
   // and the test suite never need a mail server; `smtp` is a real transport,
   // and every provider worth using (Postmark, SES, Mailgun, SendGrid) speaks
-  // it, so one driver covers all of them.
-  // Unset means `log`, or `smtp` when SENDGRID_API_KEY is set.
-  MAIL_DRIVER: blankIsUnset(z.enum(['log', 'smtp'])),
+  // it, so one driver covers all of them. `sendgrid` is SendGrid's web API,
+  // over https: hosts that block the mail ports (Render's free instances
+  // drop 25, 465 and 587) still let it through.
+  // Unset means `log`, or `sendgrid` when SENDGRID_API_KEY is set (`smtp`
+  // if SMTP_HOST is set too).
+  MAIL_DRIVER: blankIsUnset(z.enum(['log', 'smtp', 'sendgrid'])),
   MAIL_FROM: z.string().trim().min(3).optional(),
   MAIL_REPLY_TO: z.string().trim().min(3).optional(),
   /**
@@ -111,10 +114,13 @@ const envSchema = z.object({
 
   /**
    * Twilio SendGrid, the shortcut: an API key with Mail Send permission is
-   * all it takes. It stands in for SMTP_HOST/USER/PASSWORD (smtp.sendgrid.net,
-   * user "apikey") and switches MAIL_DRIVER to smtp unless that is set.
+   * all it takes. Mail goes through SendGrid's web API (MAIL_DRIVER=sendgrid)
+   * unless MAIL_DRIVER=smtp, where the key stands in for SMTP_HOST/USER/
+   * PASSWORD (smtp.sendgrid.net, user "apikey").
    */
   SENDGRID_API_KEY: blankIsUnset(z.string().trim().min(1)),
+  /** Points the web API at the test suite's stand-in. Leave unset. */
+  SENDGRID_API_BASE: z.string().trim().url().default('https://api.sendgrid.com'),
 
   /**
    * Texting through Twilio from the environment, the way SQUARE_* gives a
@@ -265,8 +271,14 @@ function isPublicProduction(env: { NODE_ENV: string; APP_BASE_URL?: string; REND
   return env.NODE_ENV === 'production' && Boolean(base) && !LOCAL_URL.test(base ?? '');
 }
 
-function mailDriverOf(env: { MAIL_DRIVER?: 'log' | 'smtp'; SENDGRID_API_KEY?: string }): 'log' | 'smtp' {
-  return env.MAIL_DRIVER ?? (env.SENDGRID_API_KEY ? 'smtp' : 'log');
+function mailDriverOf(env: {
+  MAIL_DRIVER?: 'log' | 'smtp' | 'sendgrid';
+  SENDGRID_API_KEY?: string;
+  SMTP_HOST?: string;
+}): 'log' | 'smtp' | 'sendgrid' {
+  if (env.MAIL_DRIVER) return env.MAIL_DRIVER;
+  if (!env.SENDGRID_API_KEY) return 'log';
+  return env.SMTP_HOST ? 'smtp' : 'sendgrid';
 }
 
 /**
@@ -302,9 +314,17 @@ const checkedSchema = envSchema.superRefine((env, ctx) => {
     }
   }
 
-  if (mailDriverOf(env) !== 'smtp') return;
+  const driver = mailDriverOf(env);
+  if (driver === 'log') return;
 
-  if (!env.SMTP_HOST && !env.SENDGRID_API_KEY) {
+  if (driver === 'sendgrid' && !env.SENDGRID_API_KEY) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['SENDGRID_API_KEY'],
+      message: 'is required when MAIL_DRIVER=sendgrid',
+    });
+  }
+  if (driver === 'smtp' && !env.SMTP_HOST && !env.SENDGRID_API_KEY) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['SMTP_HOST'],
@@ -315,7 +335,7 @@ const checkedSchema = envSchema.superRefine((env, ctx) => {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['MAIL_FROM'],
-      message: 'is required when MAIL_DRIVER=smtp',
+      message: `is required when MAIL_DRIVER=${driver}`,
     });
   }
 });
@@ -386,6 +406,10 @@ export const config = {
     from: env.MAIL_FROM ?? 'avcrm@localhost',
     replyTo: env.MAIL_REPLY_TO ?? null,
     redirectTo: env.MAIL_REDIRECT_TO ?? null,
+    sendgrid: {
+      apiKey: env.SENDGRID_API_KEY ?? null,
+      apiBase: env.SENDGRID_API_BASE.replace(/\/+$/, ''),
+    },
     // SendGrid's SMTP relay takes the literal user "apikey" and the key as
     // the password. An explicit SMTP_HOST still wins.
     smtp:
