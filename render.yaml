@@ -15,6 +15,12 @@ services:
         isFile: false
       - key: LOG_LEVEL
         value: info
+      # Runs the scheduled jobs inside the web service: the message queue
+      # (every email and text), billing, reminders and weather alerts.
+      # Render's web service is the only process, so without this nothing
+      # queued is ever sent. Needs an instance that does not sleep when idle.
+      - key: RUN_SCHEDULER
+        value: 'true'
       - key: STORAGE_LOCAL_DIR
         value: /data/storage
       - key: DOMAIN

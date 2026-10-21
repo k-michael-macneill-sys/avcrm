@@ -4,6 +4,8 @@ import { installAppConfig } from './db/appConfig';
 import { runMigrations } from './db/migrate';
 import { seed } from './db/seeds/001_sample_data';
 import { createApp } from './app';
+import { startScheduler } from './jobs/scheduler';
+import { closeTransport } from './services/notifications';
 import { sweepRateLimits } from './middleware/rateLimit';
 import { retirePublishedPassword } from './services/auth';
 import { logger } from './utils/logger';
@@ -57,9 +59,16 @@ async function main(): Promise<void> {
     }
   });
 
+  // Nothing queued reaches a customer until the message queue runs, so a host
+  // with only a web process runs the jobs here. See RUN_SCHEDULER.
+  const scheduler = config.jobs.runInWeb ? startScheduler() : null;
+
   const shutdown = (signal: string) => {
     logger.info({ signal }, 'Shutting down');
     server.close(async () => {
+      // Let a billing pass that is mid-run finish before the pool closes.
+      await scheduler?.drain(signal);
+      await closeTransport();
       await closeConnection();
       process.exit(0);
     });
