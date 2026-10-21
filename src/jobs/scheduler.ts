@@ -177,9 +177,15 @@ export function createScheduler(jobs: ScheduledJob[]): Scheduler {
   };
 }
 
-function main(): void {
+/** Arms every job. The web server calls this when RUN_SCHEDULER is on. */
+export function startScheduler(): Scheduler {
   const scheduler = createScheduler(JOBS);
   scheduler.start();
+  return scheduler;
+}
+
+function main(): void {
+  const scheduler = startScheduler();
 
   const stop = (signal: string): void => {
     void (async () => {

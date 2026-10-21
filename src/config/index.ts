@@ -225,6 +225,13 @@ const envSchema = z.object({
    * each postal region every hour, and texts or emails the active customers
    * there once the snow forecast before 5am passes the threshold.
    */
+  /**
+   * Runs the scheduled jobs (the message queue, billing, reminders, weather
+   * alerts) inside the web server. For a host that runs only the web process,
+   * such as Render's web service; the Docker Compose setup runs them in their
+   * own `scheduler` container instead, so leave this off there.
+   */
+  RUN_SCHEDULER: booleanish.default('false'),
   WEATHER_ALERTS_ENABLED: booleanish.default('true'),
   WEATHER_API_BASE: z.string().trim().url().default('https://api.open-meteo.com/v1'),
   WEATHER_GEOCODING_API_BASE: z
@@ -430,6 +437,9 @@ export const config = {
     appSecret: env.META_APP_SECRET ?? null,
     verifyToken: env.META_VERIFY_TOKEN ?? null,
     graphApiBase: env.META_GRAPH_API_BASE.replace(/\/+$/, ''),
+  },
+  jobs: {
+    runInWeb: env.RUN_SCHEDULER,
   },
   weather: {
     enabled: env.WEATHER_ALERTS_ENABLED,
