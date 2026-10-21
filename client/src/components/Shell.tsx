@@ -21,6 +21,8 @@ import {
   Mail,
   Megaphone,
   Radar,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
@@ -146,7 +148,7 @@ function sectionFor(pathname: string, items: NavItem[]): NavItem | undefined {
   );
 }
 
-function SectionLinks({ items }: { items: NavItem[] }): JSX.Element {
+function SectionLinks({ items, iconsOnly = false }: { items: NavItem[]; iconsOnly?: boolean }): JSX.Element {
   return (
     <nav aria-label="Sections" className="flex flex-col gap-0.5">
       {items.map(({ to, label, icon: Icon, end }) => (
@@ -154,19 +156,41 @@ function SectionLinks({ items }: { items: NavItem[] }): JSX.Element {
           key={to}
           to={to}
           end={end}
+          title={iconsOnly ? label : undefined}
+          aria-label={iconsOnly ? label : undefined}
           className={({ isActive }) =>
             cn(
               'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground max-[720px]:py-3 max-[720px]:text-sm',
+              iconsOnly && 'justify-center px-0',
               isActive && 'bg-primary/15 text-primary shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.35)] hover:bg-primary/15 hover:text-primary',
             )
           }
         >
           <Icon className="size-4 shrink-0" />
-          {label}
+          {iconsOnly ? null : label}
         </NavLink>
       ))}
     </nav>
   );
+}
+
+/** Whether the side menu is folded to icons, kept per browser. */
+const COLLAPSED_KEY = 'avcrm.sidebar.collapsed';
+
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeCollapsed(collapsed: boolean): void {
+  try {
+    localStorage.setItem(COLLAPSED_KEY, collapsed ? '1' : '0');
+  } catch {
+    // Blocked storage just forgets it next time.
+  }
 }
 
 /** Where each console was last left, so switching back lands there again. */
@@ -250,6 +274,12 @@ export function Shell(): JSX.Element {
   const { user } = useAuth();
   const { pathname } = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(readCollapsed);
+  const toggleCollapsed = (): void =>
+    setCollapsed((was) => {
+      writeCollapsed(!was);
+      return !was;
+    });
 
   // Picking a section from the menu navigates; the menu shouldn't linger
   // over the page it just opened.
@@ -265,20 +295,46 @@ export function Shell(): JSX.Element {
     .filter((item): item is NavItem => item !== undefined)
     .slice(0, PHONE_TAB_COUNT);
   const onTab = current !== undefined && tabs.includes(current);
+  // The door-knocking map is the whole page: no margins, no width cap.
+  const fullBleed = current?.to === '/leads';
 
   return (
-    <div className="grid min-h-screen grid-cols-[224px_minmax(0,1fr)] max-[720px]:grid-cols-1 max-[720px]:content-start">
-      <aside className="flex flex-col gap-6 border-r border-border bg-background/70 p-3.5 backdrop-blur-xl max-[720px]:hidden">
-        <div className="px-2">
-          <img src={logo} alt="Drift Property Services" className="h-9 w-auto rounded-md" />
-          {hasBusinessConsole(user.role) ? (
-            <p className="mt-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              {CONSOLE_LABEL[activeConsole]}
-            </p>
-          ) : null}
+    <div
+      className={cn(
+        'grid min-h-screen max-[720px]:grid-cols-1 max-[720px]:content-start',
+        collapsed ? 'grid-cols-[60px_minmax(0,1fr)]' : 'grid-cols-[224px_minmax(0,1fr)]',
+      )}
+    >
+      <aside
+        className={cn(
+          'sticky top-0 flex h-screen flex-col gap-6 overflow-y-auto border-r border-border bg-background/70 backdrop-blur-xl max-[720px]:hidden',
+          collapsed ? 'items-stretch p-2' : 'p-3.5',
+        )}
+      >
+        <div className={cn('flex items-start gap-2', collapsed ? 'justify-center' : 'justify-between px-2')}>
+          {collapsed ? null : (
+            <div>
+              <img src={logo} alt="Drift Property Services" className="h-9 w-auto rounded-md" />
+              {hasBusinessConsole(user.role) ? (
+                <p className="mt-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {CONSOLE_LABEL[activeConsole]}
+                </p>
+              ) : null}
+            </div>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-9 shrink-0"
+            onClick={toggleCollapsed}
+            aria-label={collapsed ? 'Expand menu' : 'Collapse menu'}
+            title={collapsed ? 'Expand menu' : 'Collapse menu'}
+          >
+            {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+          </Button>
         </div>
-        <SectionLinks items={items} />
-        <Account console={activeConsole} />
+        <SectionLinks items={items} iconsOnly={collapsed} />
+        {collapsed ? null : <Account console={activeConsole} />}
       </aside>
 
       {/* Phone: a slim bar on top saying where you are, tabs on the bottom. */}
@@ -318,7 +374,13 @@ export function Shell(): JSX.Element {
         </SheetContent>
       </Sheet>
 
-      <main className="max-w-[1160px] px-8 py-7 pb-16 max-[720px]:px-4 max-[720px]:pb-[calc(5rem+env(safe-area-inset-bottom))] max-[720px]:pt-4">
+      <main
+        className={
+          fullBleed
+            ? 'min-w-0 max-[720px]:pb-[calc(65px+env(safe-area-inset-bottom))]'
+            : 'max-w-[1160px] px-8 py-7 pb-16 max-[720px]:px-4 max-[720px]:pb-[calc(5rem+env(safe-area-inset-bottom))] max-[720px]:pt-4'
+        }
+      >
         <Outlet />
       </main>
 

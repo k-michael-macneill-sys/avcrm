@@ -64,6 +64,36 @@ describe('the leads map', () => {
     assert.equal(Number(property.latitude).toFixed(4), Number(made.body.data.latitude).toFixed(4));
   });
 
+  it('keeps a monitor pin with the same details a lead takes', async () => {
+    const token = await login(h.server(), h.world().emails.sales);
+
+    const made = await call(h.server(), 'POST', '/leads/pins', {
+      token,
+      body: knock({ status: 'monitor', lead: { first_name: 'Mo', last_name: 'Nitor', phone: '613-555-0199' } }),
+    });
+
+    assert.equal(made.status, 201, JSON.stringify(made.body));
+    assert.equal(made.body.data.status, 'monitor');
+    const customer = await db('customers').where({ id: made.body.data.customer_id }).first();
+    assert.equal(customer?.first_name, 'Mo');
+    assert.equal(customer?.status, 'lead');
+  });
+
+  it('never removes a signed customer\'s pin', async () => {
+    // The rep who dropped it, who could otherwise remove it.
+    const token = await login(h.server(), h.world().emails.sales);
+    const made = await call(h.server(), 'POST', '/leads/pins', {
+      token,
+      body: knock({ status: 'lead', lead: { first_name: 'Signed', last_name: 'Up', phone: '613-555-0111' } }),
+    });
+    await db('customers').where({ id: made.body.data.customer_id }).update({ status: 'active' });
+
+    const reply = await call(h.server(), 'DELETE', `/leads/pins/${made.body.data.id}`, { token });
+
+    assert.equal(reply.status, 403);
+    assert.ok(await db('lead_pins').where({ id: made.body.data.id }).first());
+  });
+
   it('refuses a lead with no way to reach them', async () => {
     const token = await login(h.server(), h.world().emails.sales);
 

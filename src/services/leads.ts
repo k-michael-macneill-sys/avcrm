@@ -186,6 +186,9 @@ export interface NewPinInput extends PinAddress {
   lead: LeadContact | null;
 }
 
+/** The outcomes that take the person's name and number down. */
+const takesContact = (status: PinStatus): boolean => status === 'lead' || status === 'monitor';
+
 export async function createPin(
   branchId: string,
   userId: string,
@@ -195,7 +198,7 @@ export async function createPin(
 ): Promise<LeadPin> {
   return db.transaction(async (trx) => {
     const customerId =
-      input.status === 'lead' && input.lead
+      takesContact(input.status) && input.lead
         ? await leadCustomer(branchId, userId, scope, input, input.lead, input.notes, trx)
         : null;
 
@@ -250,7 +253,7 @@ export async function updatePin(
     }
 
     const status = input.status ?? pin.status;
-    if (status === 'lead' && input.lead && !pin.customer_id) {
+    if (takesContact(status) && input.lead && !pin.customer_id) {
       patch.customer_id = await leadCustomer(
         pin.branch_id,
         userId,
@@ -310,6 +313,13 @@ export async function deletePin(
   const pin = await lockPin(id, scope, db);
   if (user.role !== 'corporate' && pin.created_by_user_id !== user.id) {
     throw forbidden('Only the rep who dropped this pin, or the office, can remove it');
+  }
+  // A signed customer's pin is their property, not a knock: nobody removes it from here.
+  if (pin.customer_id) {
+    const customer = await db('customers').where({ id: pin.customer_id }).first('status');
+    if (customer?.status === 'active') {
+      throw forbidden('This pin belongs to a signed customer and cannot be removed');
+    }
   }
   await db('lead_pins').where({ id }).del();
 }

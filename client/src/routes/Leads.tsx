@@ -3,7 +3,6 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Crosshair, X } from 'lucide-react';
 import type { Branch, LeadPin, PinStatus } from '../../../src/types/models';
 import { useAuth } from '@/auth/AuthContext';
-import { ConfirmDelete } from '@/components/ConfirmDelete';
 import { ErrorNotice, Loading } from '@/components/Misc';
 import { PageHeader } from '@/components/PageHeader';
 import { Button } from '@/components/ui/button';
@@ -11,7 +10,6 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 import * as api from '@/lib/api';
 import { relative } from '@/lib/format';
 import { addressAt, loadGoogleMaps, type GeocodedAddress } from '@/lib/googleMaps';
@@ -20,7 +18,6 @@ import { AGREEMENT_ADDONS } from '../../../src/types/agreement';
 import { ADDONS } from '@/lib/sales';
 import { useQuery } from '@/lib/useQuery';
 import { useSubmit } from '@/lib/useSubmit';
-import { cn } from '@/lib/utils';
 
 /**
  * The door-knocking map. Tap a house, say how it went. A tap on a pin already
@@ -51,16 +48,64 @@ interface CustomerPin {
 }
 
 type Layer = PinStatus | 'customer';
+/** The outcomes that take the person's name and number. */
+type ContactStatus = Extract<PinStatus, 'lead' | 'monitor'>;
 
-const LAYERS: { key: Layer; label: string; color: string }[] = [
-  { key: 'not_home', label: 'Not home', color: '#3b82f6' },
-  { key: 'not_interested', label: 'Not interested', color: '#374151' },
-  { key: 'lead', label: 'Lead', color: '#22c55e' },
-  // Purple, so a signed customer never reads as a lead.
-  { key: 'customer', label: 'Customer', color: '#a855f7' },
+/**
+ * Each kind of pin: its colour, and the white symbol drawn on it so a pin
+ * reads at a glance from the street. The symbols are Lucide's (minus, x,
+ * rotate-ccw, eye, house) as SVG paths on a 24-unit grid.
+ */
+const LAYERS: { key: Layer; label: string; color: string; glyph: string }[] = [
+  { key: 'not_home', label: 'Not home', color: '#3b82f6', glyph: '<path d="M5 12h14"/>' },
+  { key: 'not_interested', label: 'Not interested', color: '#374151', glyph: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>' },
+  // Come back to it.
+  {
+    key: 'lead',
+    label: 'Lead',
+    color: '#22c55e',
+    glyph: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>',
+  },
+  // Keeping an eye on it: taken down like a lead, not one yet.
+  {
+    key: 'monitor',
+    label: 'Monitor',
+    color: '#0891b2',
+    glyph:
+      '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/>' +
+      '<circle cx="12" cy="12" r="3"/>',
+  },
+  // Gold, so a signed customer never reads as a lead. Deep enough for the
+  // white house to stand out on it.
+  {
+    key: 'customer',
+    label: 'Customer',
+    color: '#ca8a04',
+    glyph:
+      '<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/>' +
+      '<path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  },
 ];
 const colorOf = (layer: Layer): string => LAYERS.find((l) => l.key === layer)?.color ?? '#94a3b8';
 const labelOf = (layer: Layer): string => LAYERS.find((l) => l.key === layer)?.label ?? layer;
+
+/** A pin big enough to tap with a glove on: a coloured disc with its symbol in white. */
+function pinIcon(maps: typeof google.maps, layer: Layer): google.maps.Icon {
+  const spec = LAYERS.find((l) => l.key === layer);
+  const size = layer === 'customer' ? 38 : 34;
+  const glyph = 20;
+  const offset = (size - glyph) / 2;
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">` +
+    `<circle cx="${size / 2}" cy="${size / 2}" r="${size / 2 - 1.5}" fill="${spec?.color ?? '#94a3b8'}" stroke="#ffffff" stroke-width="2.5"/>` +
+    `<g transform="translate(${offset} ${offset}) scale(${glyph / 24})" fill="none" stroke="#ffffff" stroke-width="2.75" ` +
+    `stroke-linecap="round" stroke-linejoin="round">${spec?.glyph ?? ''}</g></svg>`;
+  return {
+    url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+    scaledSize: new maps.Size(size, size),
+    anchor: new maps.Point(size / 2, size / 2),
+  };
+}
 
 type Selection =
   | { kind: 'new'; position: google.maps.LatLngLiteral; address: GeocodedAddress | null }
@@ -109,7 +154,6 @@ function LeadsMap({ apiKey, branches }: { apiKey: string; branches: Branch[] }):
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [pins, setPins] = React.useState<PinView[]>([]);
   const [customers, setCustomers] = React.useState<CustomerPin[]>([]);
-  const [shown, setShown] = React.useState<Set<Layer>>(() => new Set(LAYERS.map((l) => l.key)));
   const [selection, setSelection] = React.useState<Selection | null>(null);
   const [branchId, setBranchId] = React.useState(branches[0]?.id ?? '');
 
@@ -233,7 +277,6 @@ function LeadsMap({ apiKey, branches }: { apiKey: string; branches: Branch[] }):
 
     const wanted = new Map<string, { position: google.maps.LatLngLiteral; layer: Layer; onClick: () => void; title: string }>();
     for (const pin of pins) {
-      if (!shown.has(pin.status)) continue;
       wanted.set(`pin:${pin.id}`, {
         position: { lat: Number(pin.latitude), lng: Number(pin.longitude) },
         layer: pin.status,
@@ -241,15 +284,13 @@ function LeadsMap({ apiKey, branches }: { apiKey: string; branches: Branch[] }):
         onClick: () => setSelection({ kind: 'pin', pin }),
       });
     }
-    if (shown.has('customer')) {
-      for (const customer of customers) {
-        wanted.set(`customer:${customer.property_id}`, {
-          position: { lat: Number(customer.latitude), lng: Number(customer.longitude) },
-          layer: 'customer',
-          title: `${customer.customer_name} · ${customer.address_line1}`,
-          onClick: () => setSelection({ kind: 'customer', customer }),
-        });
-      }
+    for (const customer of customers) {
+      wanted.set(`customer:${customer.property_id}`, {
+        position: { lat: Number(customer.latitude), lng: Number(customer.longitude) },
+        layer: 'customer',
+        title: `${customer.customer_name} · ${customer.address_line1}`,
+        onClick: () => setSelection({ kind: 'customer', customer }),
+      });
     }
 
     const markers = markersRef.current;
@@ -266,19 +307,12 @@ function LeadsMap({ apiKey, branches }: { apiKey: string; branches: Branch[] }):
         position: spec.position,
         title: spec.title,
         zIndex: spec.layer === 'customer' ? 3 : 2,
-        icon: {
-          path: maps.SymbolPath.CIRCLE,
-          scale: spec.layer === 'customer' ? 10 : 8,
-          fillColor: colorOf(spec.layer),
-          fillOpacity: 1,
-          strokeColor: '#ffffff',
-          strokeWeight: 2,
-        },
+        icon: pinIcon(maps, spec.layer),
       });
       marker.addListener('click', spec.onClick);
       markers.set(key, marker);
     }
-  }, [maps, pins, customers, shown]);
+  }, [maps, pins, customers]);
 
   // The spot a rep has just tapped and not decided on yet.
   React.useEffect(() => {
@@ -297,39 +331,23 @@ function LeadsMap({ apiKey, branches }: { apiKey: string; branches: Branch[] }):
     void refresh().catch(() => undefined);
   };
 
-  const toggle = (layer: Layer): void =>
-    setShown((current) => {
-      const next = new Set(current);
-      if (next.has(layer)) next.delete(layer);
-      else next.add(layer);
-      return next;
-    });
-
   return (
     <>
-      <PageHeader title="Leads" subtitle="Tap a house to say how the door went" />
+      {/* The whole page is the map: between the top bar and the tabs on a
+          phone, so it owns every swipe and there is nothing to scroll; the
+          full window beside the menu otherwise. */}
+      <div className="relative h-screen min-h-[420px] overflow-hidden max-[720px]:h-[calc(100dvh-110px-env(safe-area-inset-top)-env(safe-area-inset-bottom))] max-[720px]:min-h-[300px]">
+        {loadError ? (
+          <div className="grid h-full place-items-center p-6 text-center text-sm text-muted-foreground">{loadError}</div>
+        ) : (
+          <div ref={containerRef} data-testid="leads-map" className="size-full" />
+        )}
 
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        {LAYERS.map((layer) => (
-          <button
-            key={layer.key}
-            type="button"
-            aria-pressed={shown.has(layer.key)}
-            onClick={() => toggle(layer.key)}
-            className={cn(
-              'flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-opacity',
-              shown.has(layer.key) ? 'border-border text-foreground' : 'border-border text-muted-foreground opacity-50',
-            )}
-          >
-            <span className="size-2.5 rounded-full" style={{ background: layer.color }} />
-            {layer.label}
-          </button>
-        ))}
         {isCorporate && branches.length > 1 ? (
-          <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="absolute left-3 top-3 flex items-center gap-2 rounded-lg border border-border bg-card/90 px-2.5 py-1.5 text-xs text-muted-foreground shadow-lg backdrop-blur">
             New pins go to
             <Select value={branchId} onValueChange={setBranchId}>
-              <SelectTrigger className="h-8 w-40">
+              <SelectTrigger className="h-8 w-36">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -342,16 +360,6 @@ function LeadsMap({ apiKey, branches }: { apiKey: string; branches: Branch[] }):
             </Select>
           </div>
         ) : null}
-      </div>
-
-      {/* On a phone the map owns every swipe, so it has to fit between the top bar
-          and the tabs: a map taller than the screen would leave no way to scroll. */}
-      <div className="relative h-[calc(100vh-13rem)] min-h-[420px] overflow-hidden rounded-xl border border-border max-[720px]:h-[calc(100dvh-18.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] max-[720px]:min-h-[300px]">
-        {loadError ? (
-          <div className="grid h-full place-items-center p-6 text-center text-sm text-muted-foreground">{loadError}</div>
-        ) : (
-          <div ref={containerRef} data-testid="leads-map" className="size-full" />
-        )}
 
         <Button
           type="button"
@@ -471,8 +479,8 @@ function NewKnock({
   onDone: () => void;
 }): JSX.Element {
   const navigate = useNavigate();
-  const [notes, setNotes] = React.useState('');
-  const [asLead, setAsLead] = React.useState(false);
+  // Lead and monitor both take the person's details before the pin saves.
+  const [taking, setTaking] = React.useState<ContactStatus | null>(null);
   const [contact, setContact] = React.useState<LeadContactForm>(EMPTY_CONTACT);
   const { run, pending, error } = useSubmit();
 
@@ -486,7 +494,7 @@ function NewKnock({
       province: address?.province ?? null,
       postal_code: address?.postal_code ?? null,
       status,
-      notes: notes.trim() || null,
+      notes: null,
       lead: withContact ? contactBody(contact) : null,
     });
 
@@ -496,29 +504,29 @@ function NewKnock({
         {address === null ? 'Finding the address…' : address.formatted ?? 'No address found here — the pin still saves.'}
       </p>
 
-      {asLead ? (
-        <ContactFields value={contact} onChange={setContact} />
-      ) : null}
-
-      {asLead ? (
-        <div className="mt-3 flex gap-2">
-          <Button type="button" variant="secondary" disabled={pending} onClick={() => setAsLead(false)}>
-            Back
-          </Button>
-          <Button
-            type="button"
-            className="flex-1"
-            disabled={pending}
-            onClick={() => run(async () => { await drop('lead', true); onDone(); })}
-          >
-            Save lead
-          </Button>
-        </div>
+      {taking ? (
+        <>
+          <ContactFields value={contact} onChange={setContact} />
+          <div className="mt-3 flex gap-2">
+            <Button type="button" variant="secondary" disabled={pending} onClick={() => setTaking(null)}>
+              Back
+            </Button>
+            <Button
+              type="button"
+              className="flex-1"
+              disabled={pending}
+              onClick={() => run(async () => { await drop(taking, true); onDone(); })}
+            >
+              Save {labelOf(taking).toLowerCase()}
+            </Button>
+          </div>
+        </>
       ) : (
         <div className="mt-3 flex flex-col gap-2">
           <OutcomeButton layer="not_home" disabled={pending} onClick={() => run(async () => { await drop('not_home', false); onDone(); })} />
           <OutcomeButton layer="not_interested" disabled={pending} onClick={() => run(async () => { await drop('not_interested', false); onDone(); })} />
-          <OutcomeButton layer="lead" disabled={pending} onClick={() => setAsLead(true)} />
+          <OutcomeButton layer="lead" disabled={pending} onClick={() => setTaking('lead')} />
+          <OutcomeButton layer="monitor" disabled={pending} onClick={() => setTaking('monitor')} />
           <Button
             type="button"
             disabled={pending}
@@ -536,14 +544,6 @@ function NewKnock({
         </div>
       )}
 
-      <Textarea
-        className="mt-3"
-        rows={2}
-        placeholder="Notes (monitor)"
-        value={notes}
-        onChange={(e) => setNotes(e.target.value)}
-      />
-
       {error ? <div className="mt-3"><ErrorNotice message={error} /></div> : null}
     </div>
   );
@@ -559,8 +559,7 @@ function ExistingPin({
   onDone: () => void;
 }): JSX.Element {
   const navigate = useNavigate();
-  const [notes, setNotes] = React.useState(pin.notes ?? '');
-  const [asLead, setAsLead] = React.useState(false);
+  const [taking, setTaking] = React.useState<ContactStatus | null>(null);
   const [contact, setContact] = React.useState<LeadContactForm>(EMPTY_CONTACT);
   const { run, pending, error } = useSubmit();
 
@@ -568,11 +567,12 @@ function ExistingPin({
     run(async () => {
       await api.patch(`/leads/pins/${pin.id}`, {
         status,
-        notes: notes.trim() || null,
         ...(withContact ? { lead: contactBody(contact) } : {}),
       });
       onDone();
     });
+  // A pin that already has the person's details just changes colour.
+  const take = (status: ContactStatus) => (pin.customer_id ? change(status) : setTaking(status));
 
   return (
     <div>
@@ -591,28 +591,30 @@ function ExistingPin({
         </Link>
       ) : null}
 
-      {asLead ? <ContactFields value={contact} onChange={setContact} /> : null}
+      {pin.notes ? (
+        <p className="mt-2 rounded-lg bg-accent/40 px-3 py-2 text-xs text-secondary-foreground">{pin.notes}</p>
+      ) : null}
 
-      {asLead ? (
-        <div className="mt-3 flex gap-2">
-          <Button type="button" variant="secondary" disabled={pending} onClick={() => setAsLead(false)}>
-            Back
-          </Button>
-          <Button type="button" className="flex-1" disabled={pending} onClick={() => change('lead', true)}>
-            Save lead
-          </Button>
-        </div>
+      {taking ? (
+        <>
+          <ContactFields value={contact} onChange={setContact} />
+          <div className="mt-3 flex gap-2">
+            <Button type="button" variant="secondary" disabled={pending} onClick={() => setTaking(null)}>
+              Back
+            </Button>
+            <Button type="button" className="flex-1" disabled={pending} onClick={() => change(taking, true)}>
+              Save {labelOf(taking).toLowerCase()}
+            </Button>
+          </div>
+        </>
       ) : (
         <>
           <p className="mt-3 text-xs text-muted-foreground">Knocked again?</p>
           <div className="mt-1.5 flex flex-col gap-2">
             <OutcomeButton layer="not_home" disabled={pending} onClick={() => change('not_home')} />
             <OutcomeButton layer="not_interested" disabled={pending} onClick={() => change('not_interested')} />
-            <OutcomeButton
-              layer="lead"
-              disabled={pending}
-              onClick={() => (pin.customer_id ? change('lead') : setAsLead(true))}
-            />
+            <OutcomeButton layer="lead" disabled={pending} onClick={() => take('lead')} />
+            <OutcomeButton layer="monitor" disabled={pending} onClick={() => take('monitor')} />
             <Button
               type="button"
               disabled={pending}
@@ -628,36 +630,20 @@ function ExistingPin({
             >
               Add customer
             </Button>
-          </div>
-          <Textarea
-            className="mt-3"
-            rows={2}
-            placeholder="Notes (monitor)"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-          />
-          <div className="mt-2 flex justify-between gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={pending}
-              onClick={() =>
-                run(async () => {
-                  await api.patch(`/leads/pins/${pin.id}`, { notes: notes.trim() || null });
-                  onDone();
-                })
-              }
-            >
-              Save notes
-            </Button>
             {canDelete ? (
-              <ConfirmDelete
-                what={pin.address_line1 ? `the pin at ${pin.address_line1}` : 'this pin'}
-                label="Remove pin"
-                onConfirm={() => api.del(`/leads/pins/${pin.id}`)}
-                onDeleted={onDone}
-              />
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={pending}
+                onClick={() =>
+                  run(async () => {
+                    await api.del(`/leads/pins/${pin.id}`);
+                    onDone();
+                  })
+                }
+              >
+                Remove pin
+              </Button>
             ) : null}
           </div>
         </>
