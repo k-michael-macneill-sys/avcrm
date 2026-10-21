@@ -191,7 +191,8 @@ export const SIGNING_REQUEST_STATUSES = [
 export type SigningRequestStatus = (typeof SIGNING_REQUEST_STATUSES)[number];
 
 /** How a door went. A signed customer is drawn from their property instead. */
-export const PIN_STATUSES = ['not_home', 'not_interested', 'lead'] as const;
+/** `monitor`: worth keeping an eye on, taken down like a lead but not one yet. */
+export const PIN_STATUSES = ['not_home', 'not_interested', 'lead', 'monitor'] as const;
 export type PinStatus = (typeof PIN_STATUSES)[number];
 
 /** Where a direct message came from. */
