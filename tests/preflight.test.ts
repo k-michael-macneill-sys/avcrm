@@ -29,6 +29,7 @@ function goodEnv(): Record<string, string> {
     SQUARE_APPLICATION_ID: 'sq0idp-realapp',
     SQUARE_LOCATION_ID: 'L_REAL',
     SQUARE_ACCESS_TOKEN: 'EAAAl_realtoken',
+    ANTHROPIC_API_KEY: 'sk-ant-realkey',
     BACKUP_OFFSITE_CMD: 'rclone copy "$1" remote:backups',
     SEED_PASSWORD: 'a-first-admin-password-of-our-own',
     BRANCH_SIGN_IN_PASSWORD: 'plough-the-north-lot',
@@ -152,5 +153,6 @@ describe('the deploy preflight', () => {
 
     assert.ok(warnings({ ...goodEnv(), TRUST_PROXY: 'false' }).includes('TRUST_PROXY'));
     assert.ok(warnings({ ...goodEnv(), SQUARE_ACCESS_TOKEN: '' }).includes('SQUARE_ACCESS_TOKEN'));
+    assert.ok(warnings({ ...goodEnv(), ANTHROPIC_API_KEY: '' }).includes('ANTHROPIC_API_KEY'));
   });
 });

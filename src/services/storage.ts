@@ -83,6 +83,12 @@ const RULES: Record<UploadPurpose, PurposeRule> = {
     contentTypes: ['application/pdf', 'image/jpeg', 'image/png'],
     maxBytes: 12 * 1024 * 1024,
   },
+  // The PDF from online banking, or the CSV export, which reads more reliably.
+  bank_statement: {
+    prefix: 'bank-statements',
+    contentTypes: ['application/pdf', 'text/csv'],
+    maxBytes: 20 * 1024 * 1024,
+  },
 };
 
 const EXTENSIONS: Record<string, string> = {
@@ -90,6 +96,7 @@ const EXTENSIONS: Record<string, string> = {
   'image/jpeg': 'jpg',
   'image/webp': 'webp',
   'application/pdf': 'pdf',
+  'text/csv': 'csv',
 };
 
 export function ruleFor(purpose: UploadPurpose): PurposeRule {

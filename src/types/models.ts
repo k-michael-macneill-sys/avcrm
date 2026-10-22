@@ -173,6 +173,8 @@ export const UPLOAD_PURPOSES = [
   'service_report_pdf',
   /** A photo or scan of a receipt, filed against a bookkeeping entry. */
   'receipt',
+  /** A bank or card statement, PDF or the CSV the bank exports, read for deductions. */
+  'bank_statement',
 ] as const;
 export type UploadPurpose = (typeof UPLOAD_PURPOSES)[number];
 
@@ -231,9 +233,29 @@ export const EXPENSE_CATEGORIES = [
   'rent_and_storage',
   'interest_and_bank_charges',
   'meals',
+  /** Equipment and vehicles bought outright: claimed through capital cost allowance, not as an expense. */
+  'capital_purchase',
   'other',
 ] as const;
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
+
+/** Filed counts in the books; review is waiting for someone to check what Claude read. */
+export const EXPENSE_STATUSES = ['filed', 'review'] as const;
+export type ExpenseStatus = (typeof EXPENSE_STATUSES)[number];
+
+/** How an expense got into the books. */
+export const EXPENSE_SOURCES = ['manual', 'receipt_scan', 'bank_statement'] as const;
+export type ExpenseSource = (typeof EXPENSE_SOURCES)[number];
+
+export const BANK_STATEMENT_STATUSES = ['processing', 'done', 'failed'] as const;
+export type BankStatementStatus = (typeof BANK_STATEMENT_STATUSES)[number];
+
+/**
+ * What a line on a bank statement turned out to be. Only `deductible` lines
+ * become expenses; `review` waits for a person to decide.
+ */
+export const BANK_TRANSACTION_CLASSES = ['deductible', 'personal', 'transfer', 'income', 'review'] as const;
+export type BankTransactionClass = (typeof BANK_TRANSACTION_CLASSES)[number];
 
 /** Where somebody said yes to hearing from us by email. */
 export const OPT_IN_SOURCES = ['google_ads', 'door_to_door'] as const;
@@ -860,7 +882,54 @@ export interface Expense {
   spent_on: string;
   receipt_key: string | null;
   receipt_file_name: string | null;
+  /** The GST/HST on the receipt, when it shows it: what an input tax credit is claimed from. */
+  gst_hst: string | null;
+  /** The business share, 0–100. Meals are 50; a capital purchase's is its business use. */
+  deductible_percent: number;
+  status: ExpenseStatus;
+  source: ExpenseSource;
+  /** Why it is waiting for review, or what Claude noticed. */
+  review_note: string | null;
+  /** The bank line it was filed from or matched to. */
+  bank_transaction_id: string | null;
   created_by_user_id: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface BankStatement {
+  id: string;
+  branch_id: string | null;
+  file_key: string;
+  file_name: string | null;
+  status: BankStatementStatus;
+  error: string | null;
+  account_label: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  transaction_count: number;
+  created_by_user_id: string | null;
+  processed_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface BankTransaction {
+  id: string;
+  statement_id: string;
+  branch_id: string | null;
+  posted_on: string;
+  description: string;
+  /** Always positive; `direction` says which way it went. */
+  amount: string;
+  direction: 'debit' | 'credit';
+  classification: BankTransactionClass;
+  category: ExpenseCategory | null;
+  deductible_percent: number;
+  vendor: string | null;
+  note: string | null;
+  /** The expense it was filed as, or matched to. */
+  expense_id: string | null;
   created_at: Date;
   updated_at: Date;
 }
