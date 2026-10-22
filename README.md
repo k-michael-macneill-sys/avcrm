@@ -1757,7 +1757,65 @@ refused rather than rounded.
 The list sorts four ways — **Recent** (the default: newest receipt first),
 **Category** (alphabetically by label), **Amount: High-to-Low** and
 **Amount: Low-to-High** — and is a table on a desk and a list of cards on a
-phone.
+phone. Each entry carries the GST/HST on its receipt (what an input tax
+credit is claimed from) and its business share: 50% for meals, 100% for
+everything else unless changed. **Capital purchase (CCA)** is for equipment
+and vehicles bought outright: listed for the accountant, never deducted.
+
+**Scanning, with Claude.** With `ANTHROPIC_API_KEY` set, receipts and bank
+statements file themselves (`src/services/bookkeepingAi.ts`):
+
+- **Scan receipts** takes one photo or PDF or a pile of them. Each is sent to
+  Claude (`CLAUDE_MODEL`, default `claude-opus-5-5`, low effort, structured
+  outputs, refusals retried on Anthropic's default fallback model) with the
+  category list and the rules: vendor, date, total, GST/HST, category,
+  business share. Claude's answer is constrained to a JSON schema and checked
+  again here. It is filed, unless Claude was unsure, it looks personal, it is
+  in a foreign currency, it is a capital purchase, its date is odd, or it has
+  the same amount and date as an entry already filed: then it is filed with
+  `status = 'review'` and a note saying why. One with no readable total or
+  date is turned away (422) and the page offers **Add by hand** with the file
+  already attached.
+- **Import statement** takes the CSV a bank exports (most reliable) or a PDF
+  statement. It is read in the background (`202`, then the list polls), and
+  every line is kept in `bank_transactions`, classified `deductible`,
+  `personal`, `transfer`, `income` or `review`. A deductible line is matched
+  to a receipt already filed (same amount, five days before to two after,
+  since a card posts after the purchase) or filed as an expense of its own.
+  A line already recorded from an overlapping statement is skipped, so
+  importing the same statement twice adds nothing. A statement whose reading
+  is lost to a restart shows as failed after half an hour, with **Retry**.
+- **To review** lists both kinds of waiting item. Anything in it is out of
+  every total and out of the export until someone files it (`PATCH
+  /expenses/:id` with `status: 'filed'`, or `POST
+  /expenses/bank-transactions/:id/resolve`).
+
+Without a key the buttons are greyed out and everything else works as
+before. Receipts and statements go to Anthropic's API to be read; API
+traffic is not used for training by default.
+
+**Year-end export.** `GET /expenses/export?year=2026` (the **Year-end
+export** button) streams one ZIP for the accountant (`src/services/yearEndExport.ts`,
+written with the small stored-ZIP writer in `src/utils/zip.ts`):
+
+| File | What |
+| --- | --- |
+| `01-t2125-by-line.csv` | Gross sales (line 8000, from invoices issued) and each T2125 expense line |
+| `02-t2125-by-category.csv` | The same, by category: total paid, GST/HST, net, deductible, ITCs |
+| `03-gst-hst-summary.csv` | GST/HST return lines 101, 105, 108 and 109 |
+| `04-revenue.csv` | Invoices issued by branch, payments received by method |
+| `05-expenses.csv` | Every filed expense, with its receipt's file name in the ZIP |
+| `06-capital-purchases.csv` | Capital purchases, for CCA |
+| `07-bank-transactions.csv` | Every imported bank line and what it was classified as |
+| `08-not-yet-reviewed.csv` | What is still waiting, left out of every total |
+| `receipts/` | Every receipt for the year, named by date, vendor and amount |
+
+The business charges GST/HST, so it is treated as a registrant: an
+expense's deductible amount is its cost net of GST/HST times the business
+share, and the GST/HST times the business share is an input tax credit. An
+expense with no GST/HST recorded (a bank line with no receipt) counts in
+full with no ITC. Cells that start like a spreadsheet formula are escaped.
+A branch's own sign-in exports that branch only.
 
 ### Cold email
 

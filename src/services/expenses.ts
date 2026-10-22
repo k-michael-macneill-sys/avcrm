@@ -1,7 +1,7 @@
 import type { Knex } from 'knex';
 import { db as defaultDb } from '../db/client';
 import type { AuthenticatedUser, BranchScope } from '../types/auth';
-import type { Expense, ExpenseCategory } from '../types/models';
+import type { Expense, ExpenseCategory, ExpenseSource, ExpenseStatus } from '../types/models';
 import { badRequest, notFound } from '../utils/errors';
 import { recordAudit, type AuditActor } from './audit';
 
@@ -128,6 +128,12 @@ export const EXPENSE_CATEGORY_INFO: ExpenseCategoryInfo[] = [
     help: 'Generally only 50% deductible.',
   },
   {
+    code: 'capital_purchase',
+    label: 'Capital purchase (CCA)',
+    cra_line: 'CCA',
+    help: 'Trucks, plows, blowers and other equipment bought outright. Claimed through capital cost allowance, not as an expense: listed for the accountant, not deducted.',
+  },
+  {
     code: 'other',
     label: 'Other',
     cra_line: '9270',
@@ -140,6 +146,7 @@ export type ExpenseSort = (typeof EXPENSE_SORTS)[number];
 
 export interface ExpenseFilters {
   sort: ExpenseSort;
+  status?: ExpenseStatus;
   category?: ExpenseCategory;
   branch_id?: string;
   /** Inclusive YYYY-MM-DD. */
@@ -181,6 +188,7 @@ export async function listExpenses(
 ): Promise<ExpenseView[]> {
   const query = expenseQuery(db);
 
+  if (filters.status) query.where('expenses.status', filters.status);
   if (filters.category) query.where('expenses.category', filters.category);
   if (filters.branch_id) query.where('expenses.branch_id', filters.branch_id);
   if (filters.from) query.where('expenses.spent_on', '>=', filters.from);
@@ -223,6 +231,27 @@ export interface CreateExpenseInput {
   amount: number;
   spent_on: string | null;
   receipt_key: string | null;
+  /** The GST/HST on the receipt, if it shows it. */
+  gst_hst?: number | null;
+  /** Defaults to 50 for meals and 100 for everything else. */
+  deductible_percent?: number | null;
+  status?: ExpenseStatus;
+  source?: ExpenseSource;
+  review_note?: string | null;
+  bank_transaction_id?: string | null;
+}
+
+/** Half of a meal, all of anything else, unless someone says otherwise. */
+export function defaultDeductiblePercent(category: ExpenseCategory): number {
+  return category === 'meals' ? 50 : 100;
+}
+
+function assertTax(amount: number, gstHst: number | null | undefined): void {
+  if (gstHst !== null && gstHst !== undefined && (gstHst < 0 || gstHst > amount)) {
+    throw badRequest('The GST/HST cannot be more than the total', [
+      { path: 'gst_hst', message: 'More than the total' },
+    ]);
+  }
 }
 
 /**
@@ -230,7 +259,7 @@ export interface CreateExpenseInput {
  * receipt — otherwise any key they had seen (a signature, a crew member's
  * licence) could be filed against an expense and read back through it.
  */
-async function receiptFor(
+export async function receiptFor(
   key: string,
   user: AuthenticatedUser,
   db: Knex,
@@ -260,6 +289,8 @@ export async function createExpense(
     ]);
   }
 
+  assertTax(input.amount, input.gst_hst);
+
   return db.transaction(async (trx) => {
     const receipt = input.receipt_key ? await receiptFor(input.receipt_key, user, trx) : null;
 
@@ -274,6 +305,12 @@ export async function createExpense(
         ...(input.spent_on ? { spent_on: input.spent_on } : {}),
         receipt_key: input.receipt_key,
         receipt_file_name: receipt?.file_name ?? null,
+        gst_hst: input.gst_hst === null || input.gst_hst === undefined ? null : input.gst_hst.toFixed(2),
+        deductible_percent: input.deductible_percent ?? defaultDeductiblePercent(input.category),
+        status: input.status ?? 'filed',
+        source: input.source ?? 'manual',
+        review_note: input.review_note ?? null,
+        bank_transaction_id: input.bank_transaction_id ?? null,
         created_by_user_id: user.id,
       })
       .returning('*');
@@ -293,6 +330,74 @@ export async function createExpense(
 
     const created = (await expenseQuery(trx).where('expenses.id', row.id).first()) as ExpenseRow;
     return view(created);
+  });
+}
+
+export interface UpdateExpenseInput {
+  branch_id?: string | null;
+  category?: ExpenseCategory;
+  description?: string | null;
+  vendor?: string | null;
+  amount?: number;
+  spent_on?: string;
+  gst_hst?: number | null;
+  deductible_percent?: number;
+  /** `filed` approves an entry waiting for review. */
+  status?: ExpenseStatus;
+}
+
+/**
+ * Corrects an entry, or approves one Claude filed for review. Approving
+ * clears the review note: once a person has looked, it is their entry.
+ */
+export async function updateExpense(
+  id: string,
+  actor: AuditActor,
+  input: UpdateExpenseInput,
+  scope: BranchScope = { kind: 'all' },
+  db: Knex = defaultDb,
+): Promise<ExpenseView> {
+  return db.transaction(async (trx) => {
+    const before = (await trx('expenses').where({ id }).forUpdate().first()) as Expense | undefined;
+    if (!before || (scope.kind === 'branch' && before.branch_id !== scope.branchId)) {
+      throw notFound('No such expense');
+    }
+    const category = input.category ?? before.category;
+    const description = input.description !== undefined ? input.description : before.description;
+    if (category === 'other' && !description) {
+      throw badRequest('Say what the expense was when the category is Other', [
+        { path: 'description', message: 'Required for Other' },
+      ]);
+    }
+    const amount = input.amount ?? Number(before.amount);
+    const gstHst = input.gst_hst !== undefined ? input.gst_hst : before.gst_hst === null ? null : Number(before.gst_hst);
+    assertTax(amount, gstHst);
+
+    const patch: Record<string, unknown> = {
+      category,
+      description,
+      amount: amount.toFixed(2),
+      gst_hst: gstHst === null ? null : gstHst.toFixed(2),
+    };
+    if (input.vendor !== undefined) patch.vendor = input.vendor;
+    if (input.spent_on !== undefined) patch.spent_on = input.spent_on;
+    if (input.branch_id !== undefined && scope.kind === 'all') patch.branch_id = input.branch_id;
+    if (input.deductible_percent !== undefined) patch.deductible_percent = input.deductible_percent;
+    else if (input.category && input.category !== before.category) patch.deductible_percent = defaultDeductiblePercent(category);
+    if (input.status !== undefined) {
+      patch.status = input.status;
+      if (input.status === 'filed') patch.review_note = null;
+    }
+
+    const [after] = await trx('expenses').where({ id }).update(patch).returning('*');
+    await recordAudit(actor, {
+      action: before.status === 'review' && input.status === 'filed' ? 'expense.approved' : 'expense.updated',
+      entity_type: 'expense',
+      entity_id: id,
+      before,
+      after,
+    }, trx);
+    return view((await expenseQuery(trx).where('expenses.id', id).first()) as ExpenseRow);
   });
 }
 

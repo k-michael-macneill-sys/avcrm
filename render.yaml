@@ -47,6 +47,11 @@ services:
         sync: false
       - key: SENDGRID_API_KEY
         sync: false
+      # Bookkeeping: Claude reads scanned receipts and bank statements into
+      # the books. An API key from console.anthropic.com; unset leaves
+      # bookkeeping to manual entry.
+      - key: ANTHROPIC_API_KEY
+        sync: false
       # Texts through Twilio, with nothing to switch on under Settings.
       # TWILIO_FROM_NUMBER is a number on the account or a Messaging Service
       # SID (MG…).
