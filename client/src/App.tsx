@@ -15,7 +15,6 @@ import { AgreementSign } from '@/routes/AgreementSign';
 import { ContractLists } from '@/routes/ContractLists';
 import { Sign } from '@/routes/Sign';
 import { Leads } from '@/routes/Leads';
-import { Quotes } from '@/routes/Quotes';
 import { QuoteDetail } from '@/routes/QuoteDetail';
 import { Contracts } from '@/routes/Contracts';
 import { ContractDetail } from '@/routes/ContractDetail';
@@ -70,7 +69,6 @@ export default function App(): JSX.Element {
                 <Route path="agreements/:quoteId" element={<RoleOnly roles={SELLERS} title="Sales only" message="Customers, quotes and contracts are the sales side. Your visits are under Dispatch."><AgreementSign /></RoleOnly>} />
                 <Route path="agreements/:quoteId/edit" element={<RoleOnly roles={SELLERS} title="Sales only" message="Customers, quotes and contracts are the sales side. Your visits are under Dispatch."><ContractForm /></RoleOnly>} />
 
-                <Route path="quotes" element={<RoleOnly roles={SELLERS} title="Sales only" message="Customers, quotes and contracts are the sales side. Your visits are under Dispatch."><Quotes /></RoleOnly>} />
                 <Route path="quotes/:id" element={<RoleOnly roles={SELLERS} title="Sales only" message="Customers, quotes and contracts are the sales side. Your visits are under Dispatch."><QuoteDetail /></RoleOnly>} />
 
                 <Route path="contracts" element={<RoleOnly roles={SELLERS} title="Sales only" message="Customers, quotes and contracts are the sales side. Your visits are under Dispatch."><Contracts /></RoleOnly>} />

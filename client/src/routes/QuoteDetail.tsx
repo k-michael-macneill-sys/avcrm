@@ -70,7 +70,7 @@ export function QuoteDetail(): JSX.Element {
               contract ? 'The contract signed from it, with its invoices, payments and visits, is deleted too.' : undefined
             }
             onConfirm={() => api.del(`/quotes/${quote.id}`)}
-            onDeleted={() => navigate('/quotes')}
+            onDeleted={() => navigate(`/customers/${customer.id}`)}
           />
         }
       />
