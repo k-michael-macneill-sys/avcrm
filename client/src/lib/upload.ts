@@ -14,7 +14,7 @@ export type UploadPurpose =
   | 'contract_pdf'
   | 'invoice_pdf'
   | 'receipt'
-  | 'bank_statement';
+  | 'bookkeeping_document';
 
 interface UploadTarget {
   upload_id: string;

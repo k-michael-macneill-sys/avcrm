@@ -211,7 +211,7 @@ export async function authorizeRead(
     throw forbidden('Those documents are between that operator and corporate');
   }
   // The books are the branch's own sign-in's and corporate's, not the crew's.
-  if ((upload.purpose === 'receipt' || upload.purpose === 'bank_statement') && user.role !== 'branch') {
+  if ((upload.purpose === 'receipt' || upload.purpose === 'bookkeeping_document') && user.role !== 'branch') {
     throw forbidden('Receipts are kept in the Business Console');
   }
   if (upload.branch_id && upload.branch_id === user.branch_id) return upload;

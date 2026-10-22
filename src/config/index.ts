@@ -225,15 +225,6 @@ const envSchema = z.object({
   META_GRAPH_API_BASE: z.string().trim().url().default('https://graph.facebook.com/v19.0'),
 
   /**
-   * Claude, for bookkeeping: reading receipts and bank statements into
-   * expenses. Unset turns the scanning off and leaves manual entry as it was.
-   * The base is overridable so the suite can point it at a stand-in.
-   */
-  ANTHROPIC_API_KEY: blankIsUnset(z.string().trim().min(1)),
-  ANTHROPIC_API_BASE: z.string().trim().url().default('https://api.anthropic.com'),
-  CLAUDE_MODEL: z.string().trim().min(1).default('claude-opus-5-5'),
-
-  /**
    * The weather bot. Forecasts come from Open-Meteo, which needs no key; the
    * bases are overridable so the suite can point them at a stand-in. From
    * WEATHER_CHECK_HOUR (the branch's own local time) until midnight it checks
@@ -473,11 +464,6 @@ export const config = {
   },
   jobs: {
     runInWeb: env.RUN_SCHEDULER,
-  },
-  claude: {
-    apiKey: env.ANTHROPIC_API_KEY ?? null,
-    apiBase: env.ANTHROPIC_API_BASE.replace(/\/+$/, ''),
-    model: env.CLAUDE_MODEL,
   },
   weather: {
     enabled: env.WEATHER_ALERTS_ENABLED,
