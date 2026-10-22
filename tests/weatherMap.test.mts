@@ -12,7 +12,7 @@ process.env.WEATHER_API_BASE = weather.url;
 process.env.WEATHER_GEOCODING_API_BASE = weather.url;
 process.env.WEATHER_RADAR_API_BASE = weather.url;
 process.env.WEATHER_RADAR_TILE_HOST = 'https://tiles.example.test';
-process.env.WEATHER_SNOWFALL_THRESHOLD_CM = '3';
+process.env.WEATHER_SNOWFALL_THRESHOLD_CM = '5';
 
 const { db } = await import('./helpers/database');
 const { makeContract, makeWorkOrder } = await import('./helpers/fixtures');
@@ -65,7 +65,7 @@ describe('the snow summary', () => {
     assert.equal(summary.snow.next_24h_cm, 6);
     assert.equal(summary.snow.next_48h_cm, 6);
     assert.equal(summary.snow.depth_cm, 12);
-    assert.equal(summary.snow.trigger_cm, 3);
+    assert.equal(summary.snow.trigger_cm, 5);
     assert.equal(summary.ice.level, 'none');
     assert.equal(summary.stale, false);
   });
@@ -241,7 +241,7 @@ describe('the dispatch layer', () => {
     assert.equal(status(idle.property_id)?.status, 'unscheduled');
     assert.equal(status(tomorrow.property_id)?.status, 'unscheduled');
     assert.equal(status(nowhere.property_id), undefined, 'no coordinates, not on the map');
-    assert.equal(status(idle.property_id)?.trigger_cm, 3);
+    assert.equal(status(idle.property_id)?.trigger_cm, 5);
     assert.equal(status(idle.property_id)?.driveway_size_cars, 2);
     assert.deepEqual(map.properties.features[0]?.geometry.coordinates.length, 2);
 

@@ -1815,7 +1815,7 @@ and Instagram *messages* inbox below is a separate, API-only feature.)
 ## The weather bot
 
 Every evening it checks the forecast for each postal region a branch serves,
-and when **more than 3 cm** of snow is forecast before the crews go out at
+and when **more than 5 cm** of snow is forecast before the crews go out at
 **5am**, it tells every active customer in that region, by text, email or both
 as they prefer:
 
@@ -1856,14 +1856,14 @@ decision the bot has made.
 | Variable | Default | What it is |
 | --- | --- | --- |
 | `WEATHER_ALERTS_ENABLED` | `true` | The off switch |
-| `WEATHER_SNOWFALL_THRESHOLD_CM` | `3` | Alert when the forecast is *more* than this |
+| `WEATHER_SNOWFALL_THRESHOLD_CM` | `5` | Alert when the forecast is *more* than this |
 | `WEATHER_CHECK_HOUR` | `18` | Local hour the evening checks start |
 | `WEATHER_SERVICE_HOUR` | `5` | Local hour the crews go out; the window ends here |
 | `WEATHER_API_BASE` | Open-Meteo | Overridable for the test suite's stand-in |
 | `WEATHER_GEOCODING_API_BASE` | Open-Meteo | Likewise |
 
 `tests/weather.test.mts` runs the bot against a stand-in Open-Meteo
-(`tests/helpers/weatherApi.ts`): the threshold (exactly 3 cm does not alert),
+(`tests/helpers/weatherApi.ts`): the threshold (exactly 5 cm does not alert),
 the window, one alert per region per morning, per-region forecasts, the
 geocoder fallback, preferred channels, the evening-only schedule and a
 forecast that is down.

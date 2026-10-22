@@ -73,7 +73,7 @@ export const SIGNATURE_BOX_LABELS: Record<SignatureBox, string> = {
 /** The default season: November 1st to March 31st. */
 export const SEASON_START_MONTH_DAY = '11-01';
 export const SEASON_END_MONTH_DAY = '03-31';
-export const DEFAULT_TRIGGER_CM = 3;
+export const DEFAULT_TRIGGER_CM = 5;
 export const DEFAULT_REFERRAL_CREDIT_CENTS = 1000;
 
 // ── Money ────────────────────────────────────────────────────────────────

@@ -134,7 +134,7 @@ function buildSample(): { properties: MapCollection<MapPropertyProps>; crews: Ma
           visit_status: visitStatus,
           scheduled_for: status === 'unscheduled' ? null : scheduled.toISOString(),
           crew_name: crew,
-          trigger_cm: 3,
+          trigger_cm: 5,
           sample: true,
         },
       });
