@@ -55,7 +55,6 @@ export interface AgreementFormValues {
   contract_type_id: string;
   billing_plan_id: string;
   package: 'basic' | 'premium';
-  trigger_cm: number;
   season_start: string;
   season_end: string;
   assigned_operator_id: string | null;

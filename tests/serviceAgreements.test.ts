@@ -56,14 +56,16 @@ describe('the service agreement', () => {
     return target.body.data.key as string;
   }
 
-  /** The form as the rep fills it in: $500 a season, a $100 add-on, $50 off, 13% HST. */
+  /** The form as the rep fills it in: $500 a season, a $100 add-on, $50 off, 13% HST, by credit card. */
   async function form(propertyId: string, overrides: Record<string, unknown> = {}) {
+    // The pay-in-full plan goes with YIA as the payment type, as the form keeps them.
+    const yia = overrides.billing_plan_id === (await idOf('billing_plans', 'seasonal_yia'));
     return {
       property_id: propertyId,
       contract_type_id: await idOf('contract_types', 'seasonal_1_electronic'),
       billing_plan_id: await idOf('billing_plans', 'seasonal_monthly'),
       package: 'premium',
-      trigger_cm: 5,
+      payment_type: 'credit_card',
       season_start: SEASON_START,
       season_end: SEASON_END,
       scope_item_ids: [await idOf('scope_items', 'driveway'), await idOf('scope_items', 'front_walkway')],
@@ -77,6 +79,7 @@ describe('the service agreement', () => {
       driveway_width: 'double',
       property_notes: 'Pile snow left of the garage.',
       auto_renew: true,
+      ...(yia ? { payment_type: 'yia' } : {}),
       ...overrides,
     };
   }
@@ -428,6 +431,22 @@ describe('the service agreement', () => {
       assert.equal(doc.payment_type_label, 'Visa debit');
       const unsigned = await sign(card.token, card.quote_id, ['commitment', 'service_commitment']);
       assert.equal(unsigned.status, 400, 'a card payer still signs the card authorization');
+    });
+
+    it('asks for a payment type before signing an agreement written without one', async () => {
+      const { quote_id, token } = await setup();
+      await table('quotes').where({ id: quote_id }).update({ payment_type: null });
+      const signed = await sign(token, quote_id);
+      assert.equal(signed.status, 400);
+      assert.match(signed.body.error.message, /payment type/);
+      const sent = await call(h.server(), 'POST', `/agreements/${quote_id}/send`, { token });
+      assert.equal(sent.status, 400);
+    });
+
+    it('is always for 5 cm, whatever the request says', async () => {
+      const { form: saved, quote_id } = await setup({ trigger_cm: 2 });
+      assert.equal(saved.trigger_cm, undefined, 'the form no longer has the field');
+      assert.equal(Number((await table('quotes').where({ id: quote_id }).first()).trigger_cm), 5);
     });
 
     it('refuses while a required box is empty', async () => {

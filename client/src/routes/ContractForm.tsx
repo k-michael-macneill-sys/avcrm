@@ -102,7 +102,6 @@ function startingValues(summary: CustomerSummary, lookups: Lookups): AgreementFo
     contract_type_id: lookups.contract_types[0]?.id ?? '',
     billing_plan_id: plan?.id ?? '',
     package: 'basic',
-    trigger_cm: DEFAULT_TRIGGER_CM,
     ...defaultSeason(isoDate()),
     assigned_operator_id: null,
     service_route_id: null,
@@ -270,18 +269,7 @@ function Form({
                 ariaLabel="Package"
               />
             </div>
-            <div className={field}>
-              <Label htmlFor="trigger">Service Frequency: per snowfall of at least (cm)</Label>
-              <Input
-                id="trigger"
-                type="number"
-                min={0}
-                max={100}
-                step={0.5}
-                value={values.trigger_cm}
-                onChange={(e) => set('trigger_cm', Number(e.target.value))}
-              />
-            </div>
+            <ReadOnly label="Service Frequency" value={`Every snowfall of ${DEFAULT_TRIGGER_CM} cm or more`} />
             <div className={field}>
               <Label htmlFor="season-start">Season Start</Label>
               <Input id="season-start" type="date" value={values.season_start} onChange={(e) => set('season_start', e.target.value)} />
