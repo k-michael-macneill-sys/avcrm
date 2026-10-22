@@ -12,7 +12,7 @@ import { startWeatherApi, type FakeWeatherApi } from './helpers/weatherApi';
 const weather: FakeWeatherApi = await startWeatherApi();
 process.env.WEATHER_API_BASE = weather.url;
 process.env.WEATHER_GEOCODING_API_BASE = weather.url;
-process.env.WEATHER_SNOWFALL_THRESHOLD_CM = '3';
+process.env.WEATHER_SNOWFALL_THRESHOLD_CM = '5';
 process.env.WEATHER_CHECK_HOUR = '18';
 process.env.WEATHER_SERVICE_HOUR = '5';
 
@@ -28,9 +28,9 @@ const EVENING = new Date('2026-12-10T01:00:00Z');
 /** 2pm the same day: too early for the bot to act. */
 const AFTERNOON = new Date('2026-12-09T19:00:00Z');
 
-/** Half a centimetre an hour from 9pm to 3am: 3.5 cm before the crews go out. */
+/** 0.8 cm an hour from 9pm to 3am: 5.6 cm before the crews go out. */
 const overnightStorm = (_lat: number, _lng: number, hour: string): number =>
-  hour >= '2026-12-09T21:00' && hour <= '2026-12-10T03:00' ? 0.5 : 0;
+  hour >= '2026-12-09T21:00' && hour <= '2026-12-10T03:00' ? 0.8 : 0;
 
 after(() => weather.close());
 
@@ -85,7 +85,7 @@ describe('the weather bot', () => {
     assert.equal(serviceWindow(new Date('2026-12-10T07:00:00Z'), 'America/Toronto').service_date, '2026-12-10');
   });
 
-  it('alerts every active customer when more than 3 cm is coming', async () => {
+  it('alerts every active customer when more than 5 cm is coming', async () => {
     const harold = await makeCustomer(h.world().branches.kingston, h.world().users.corporate);
     // Not yet a customer, and a former one: neither is on the roster.
     const lead = await makeCustomer(h.world().branches.kingston, h.world().users.corporate, { email: 'lead@example.test' });
@@ -102,7 +102,7 @@ describe('the weather bot', () => {
 
     const run = await db('weather_alert_runs').where({ region: 'K7L' }).first();
     assert.equal(run.triggered, true);
-    assert.equal(run.snowfall_cm, '3.50');
+    assert.equal(run.snowfall_cm, '5.60');
     assert.equal(run.service_date, '2026-12-10');
     assert.equal(run.notified, 1);
 
@@ -123,10 +123,10 @@ describe('the weather bot', () => {
     assert.equal(weather.forecasts().length, 1, 'an alerted region is not even looked up again');
   });
 
-  it('counts only the snow before the crews go out, and exactly 3 cm is not enough', async () => {
+  it('counts only the snow before the crews go out, and exactly 5 cm is not enough', async () => {
     await makeCustomer(h.world().branches.kingston, h.world().users.corporate);
     weather.snow((_lat, _lng, hour) => {
-      if (hour >= '2026-12-09T21:00' && hour <= '2026-12-10T02:00') return 0.5; // 3.0 cm in the window
+      if (hour >= '2026-12-09T21:00' && hour <= '2026-12-10T01:00') return 1; // 5.0 cm in the window
       if (hour === '2026-12-10T08:00') return 10; // after the crews are out
       if (hour === '2026-12-09T17:00') return 10; // before the evening window
       return 0;
@@ -135,7 +135,7 @@ describe('the weather bot', () => {
     await runWeatherAlerts(EVENING);
     assert.deepEqual(await notices(), []);
     const run = await db('weather_alert_runs').where({ region: 'K7L' }).first();
-    assert.equal(run.snowfall_cm, '3.00');
+    assert.equal(run.snowfall_cm, '5.00');
     assert.equal(run.triggered, false);
 
     // The 10pm forecast is worse: a region below the line is looked at again.
@@ -208,7 +208,7 @@ describe('the weather bot', () => {
     assert.equal(await db('weather_alert_runs').first(), undefined, 'looking writes nothing');
 
     const settings = await call(h.server(), 'GET', '/weather/settings', { token });
-    assert.equal(settings.body.data.threshold_cm, 3);
+    assert.equal(settings.body.data.threshold_cm, 5);
 
     const sales = await login(h.server(), h.world().emails.sales);
     const refused = await call(h.server(), 'POST', '/weather/check', {

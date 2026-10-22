@@ -11,7 +11,7 @@ import { enqueueMessage } from './messages';
  * Every evening it asks the forecast how much snow will fall, region by
  * region, overnight — from the evening check until the hour the crews go
  * out (5am). Where that is more
- * than the threshold (3 cm), every active customer in the region is told to
+ * than the threshold (5 cm), every active customer in the region is told to
  * move their cars off the driveway tonight — by text, email, or both,
  * whichever they said they prefer.
  *

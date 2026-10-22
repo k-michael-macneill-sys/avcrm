@@ -245,7 +245,7 @@ const envSchema = z.object({
     .trim()
     .url()
     .default('https://geocoding-api.open-meteo.com/v1'),
-  WEATHER_SNOWFALL_THRESHOLD_CM: z.coerce.number().min(0).max(100).default(3),
+  WEATHER_SNOWFALL_THRESHOLD_CM: z.coerce.number().min(0).max(100).default(5),
   WEATHER_CHECK_HOUR: z.coerce.number().int().min(0).max(23).default(18),
   /** The hour the crews start: the forecast window runs up to it. */
   WEATHER_SERVICE_HOUR: z.coerce.number().int().min(1).max(12).default(5),

@@ -63,7 +63,7 @@ describe('the service agreement', () => {
       contract_type_id: await idOf('contract_types', 'seasonal_1_electronic'),
       billing_plan_id: await idOf('billing_plans', 'seasonal_monthly'),
       package: 'premium',
-      trigger_cm: 3,
+      trigger_cm: 5,
       season_start: SEASON_START,
       season_end: SEASON_END,
       scope_item_ids: [await idOf('scope_items', 'driveway'), await idOf('scope_items', 'front_walkway')],
@@ -303,7 +303,7 @@ describe('the service agreement', () => {
       assert.equal(lines['Recurring incl. Tax'], '$124.30');
       assert.equal(lines['Add-ons (per season)'], '$100.00');
       assert.equal(lines['Total incl. Tax'], '$621.50');
-      assert.match(doc.wording.agreement_period, /3 cm/);
+      assert.match(doc.wording.agreement_period, /5 cm/);
       assert.match(doc.wording.commitment, /\$75\.00/);
       assert.ok(doc.rep_name, 'the rep who wrote it is named');
     });
