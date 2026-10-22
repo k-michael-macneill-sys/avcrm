@@ -235,7 +235,7 @@ function ServiceAgreementSigning({
           signer_name: signerName,
         },
       );
-      if (result.card_url && model.plan_kind !== 'seasonal_yia') {
+      if (result.card_url && model.takes_card) {
         window.location.assign(result.card_url);
         return;
       }
@@ -294,7 +294,7 @@ function ServiceAgreementSigning({
         </div>
         <p className="mt-3 text-xs text-muted-foreground">
           By signing you agree to this agreement, including the terms and conditions.{' '}
-          {model.plan_kind === 'seasonal_yia'
+          {!model.takes_card
             ? ''
             : "Next you'll add a card on our payment provider's secure page — we never see your card number."}
         </p>
@@ -307,7 +307,7 @@ function ServiceAgreementSigning({
           </div>
         ) : null}
         <Button type="button" className="mt-5 w-full" disabled={pending || !signerName.trim()} onClick={() => void submit()}>
-          {pending ? 'Signing…' : model.plan_kind === 'seasonal_yia' ? 'Sign agreement' : 'Sign and continue to payment'}
+          {pending ? 'Signing…' : !model.takes_card ? 'Sign agreement' : 'Sign and continue to payment'}
         </Button>
       </Panel>
 

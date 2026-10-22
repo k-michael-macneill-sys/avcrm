@@ -12,7 +12,7 @@ import {
   signAgreement,
   updateAgreement,
 } from '../services/serviceAgreements';
-import { SIGNATURE_BOXES } from '../types/serviceAgreement';
+import { PAYMENT_TYPES, SIGNATURE_BOXES } from '../types/serviceAgreement';
 import { asyncHandler } from '../utils/async';
 import { sendPdf } from '../utils/pdfResponse';
 import { parse } from '../utils/validate';
@@ -44,6 +44,7 @@ export const agreementBodySchema = z.object({
   scope_item_ids: z.array(z.string().uuid()).max(100),
   addons: z.array(z.object({ addon_service_id: z.string().uuid(), price: money })).max(100).default([]),
   tag_ids: z.array(z.string().uuid()).max(50).default([]),
+  payment_type: z.enum(PAYMENT_TYPES).nullable().default(null),
   normal_price: money,
   discount: money.default('0'),
   referral_credit: money.nullable().default(null),

@@ -80,7 +80,7 @@ const TABLES: { table: keyof Lookups; title: string; help: string; extras: Extra
   {
     table: 'contract_tags',
     title: 'Tags',
-    help: 'YIA switches the agreement to pay-in-full; Referral credits the customer who referred them.',
+    help: 'No longer shown on the contract form: YIA is set by choosing YIA as the payment type.',
     extras: [
       {
         name: 'kind',

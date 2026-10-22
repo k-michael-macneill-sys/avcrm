@@ -87,7 +87,7 @@ export function AgreementSign(): JSX.Element {
     return (
       <>
         {header}
-        <AfterSigning contractId={contractId} />
+        <AfterSigning contractId={contractId} model={model} />
         <div className="mt-4">
           <ServiceAgreementDocument model={model} />
         </div>
@@ -125,7 +125,7 @@ function ElectronicSigning({
   model: AgreementModel;
   onSigned: (contract: Contract) => void;
 }): JSX.Element {
-  const required = SIGNATURE_BOXES.filter((box) => box !== 'card_authorization' || model.plan_kind !== 'seasonal_yia');
+  const required = SIGNATURE_BOXES.filter((box) => box !== 'card_authorization' || model.takes_card);
   const [signature, setSignature] = React.useState<{ blob: Blob; url: string } | null>(null);
   const [boxes, setBoxes] = React.useState<Record<SignatureBox, boolean>>({
     commitment: false,
@@ -277,8 +277,8 @@ function PaperUpload({
   );
 }
 
-/** Signed: the locked PDF, then the card for autopay, the same way every sign-up takes it. */
-function AfterSigning({ contractId }: { contractId: string }): JSX.Element {
+/** Signed: the locked PDF, then the card for autopay where a card pays. */
+function AfterSigning({ contractId, model }: { contractId: string; model: AgreementModel }): JSX.Element {
   const contract = useQuery(() => api.get<Contract>(`/contracts/${contractId}`), [contractId]);
   const { config, error: configError } = usePublicConfigState();
   const [cardUrl, setCardUrl] = React.useState<string | null>(null);
@@ -304,7 +304,13 @@ function AfterSigning({ contractId }: { contractId: string }): JSX.Element {
             <Link to={`/contracts/${contractId}`}>Open the contract</Link>
           </Button>
         </div>
-        {c?.payment_method_last4 ? (
+        {!model.takes_card ? (
+          <p className="text-muted-foreground">
+            {model.paid_in_full
+              ? 'Paid in full (YIA): there are no monthly payments, so no card is needed.'
+              : `Paid by ${(model.payment_type_label ?? 'hand').toLowerCase()}: no card is needed.`}
+          </p>
+        ) : c?.payment_method_last4 ? (
           <p>
             Card on file: {c.payment_method_brand ?? 'card'} ending {c.payment_method_last4}.
           </p>

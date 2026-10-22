@@ -11,8 +11,10 @@ import {
   paymentSchedule,
   PricingError,
   SIGNATURE_BOXES,
+  takesCard,
   toCents,
   type AgreementModel,
+  type PaymentType,
   type SignatureBox,
 } from '../types/serviceAgreement';
 import { badRequest, conflict, notFound } from '../utils/errors';
@@ -48,6 +50,8 @@ export interface AgreementInput {
   scope_item_ids: string[];
   addons: { addon_service_id: string; price: string }[];
   tag_ids: string[];
+  /** How the customer pays. YIA goes with the pay-in-full billing plan, and only with it. */
+  payment_type: PaymentType | null;
   /** Per season for a seasonal plan, per month for a monthly one. */
   normal_price: string;
   discount: string;
@@ -169,6 +173,13 @@ async function resolve(
     if (billing.kind !== 'seasonal_yia' && tagged('yia')) {
       need('tag_ids', 'YIA means paid in full: choose the YIA billing plan, or untick YIA');
     }
+    // The payment type's YIA is the same fact again, said the way the rep says it.
+    if (input.payment_type === 'yia' && billing.kind !== 'seasonal_yia') {
+      need('payment_type', 'YIA means paid in full: choose the YIA billing plan, or another payment type');
+    }
+    if (billing.kind === 'seasonal_yia' && input.payment_type !== null && input.payment_type !== 'yia') {
+      need('payment_type', 'The YIA billing plan is paid in full: choose YIA as the payment type');
+    }
   }
 
   // The referral credit goes to whoever referred this customer.
@@ -262,6 +273,7 @@ async function resolve(
       assigned_operator_id: input.assigned_operator_id,
       service_route_id: input.service_route_id,
       route_code: input.route_code,
+      payment_type: input.payment_type,
       referral_credit: referralCredit,
       referred_by_customer_id: referredBy,
       driveway_car_lengths: input.driveway_car_lengths,
@@ -405,6 +417,7 @@ async function formOf(quoteId: string, db: Knex): Promise<AgreementForm> {
     scope_item_ids: scopeIds,
     addons,
     tag_ids: tagIds,
+    payment_type: quote.payment_type,
     normal_price: centsToDecimal((toCents(quote.initial_price) ?? 0) - addonsTotal),
     discount: quote.discount,
     referral_credit: quote.referral_credit,
@@ -453,9 +466,12 @@ export interface SignInput {
   checklist: ChecklistInput[];
 }
 
-/** Which boxes must be signed. A YIA customer has already paid, so there is no card to authorize. */
-export function requiredBoxes(planKind: BillingPlan['kind']): SignatureBox[] {
-  return SIGNATURE_BOXES.filter((box) => box !== 'card_authorization' || planKind !== 'seasonal_yia');
+/**
+ * Which boxes must be signed. The card authorization only where a card pays:
+ * a YIA customer has already paid, and cheque, e-transfer and cash are paid by hand.
+ */
+export function requiredBoxes(planKind: BillingPlan['kind'], paymentType: PaymentType | null): SignatureBox[] {
+  return SIGNATURE_BOXES.filter((box) => box !== 'card_authorization' || takesCard(planKind, paymentType));
 }
 
 /**
@@ -476,7 +492,7 @@ export async function signAgreement(
   if (terms.contract_type.agreement_medium === 'paper') {
     throw conflict('This is a paper agreement: upload the signed scan instead');
   }
-  const missing = requiredBoxes(terms.plan.kind).filter((box) => !input.boxes.includes(box));
+  const missing = requiredBoxes(terms.plan.kind, terms.payment_type).filter((box) => !input.boxes.includes(box));
   if (missing.length) {
     throw badRequest(
       'Every signature box has to be signed',

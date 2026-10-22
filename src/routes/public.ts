@@ -59,7 +59,7 @@ publicRouter.post(
     const { token } = parse(tokenParamSchema, req.params);
     const body = parse(signBodySchema, req.body);
 
-    const { contract, branch_id: branchId } = await completeInvitation(
+    const { contract, branch_id: branchId, takes_card: takesCard } = await completeInvitation(
       token,
       body,
       req.ip ?? null,
@@ -67,10 +67,11 @@ publicRouter.post(
 
     // Straight on to the card, while they are still on the page. The
     // contract stands either way: a card link that could not be made is the
-    // office's to chase, not a reason to throw away a signature.
+    // office's to chase, not a reason to throw away a signature. Only where
+    // a card pays: cheque, e-transfer, cash and YIA have nothing to put on file.
     let cardUrl: string | null = null;
     const gateway = await activeGateway();
-    if (gateway.canCharge) {
+    if (takesCard && gateway.canCharge) {
       try {
         const scope = { kind: 'branch' as const, branchId };
         cardUrl = (await requestCard(contract.id, scope, null)).url;

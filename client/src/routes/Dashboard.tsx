@@ -51,7 +51,7 @@ function SalesDashboard(): JSX.Element {
         subtitle={isBranch ? 'Deals signed from this branch’s sign-in' : 'Your deals'}
         actions={
           <Button asChild>
-            <Link to="/customers/new">Add customer</Link>
+            <Link to="/customers/add">Add customer</Link>
           </Button>
         }
       />

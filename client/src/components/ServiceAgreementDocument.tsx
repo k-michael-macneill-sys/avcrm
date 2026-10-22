@@ -317,7 +317,9 @@ export function ServiceAgreementDocument({
             </div>
             <SignatureArea box="service_commitment" model={model} signing={signing} />
           </div>
+          {model.takes_card ? (
           <div className="flex flex-col gap-2 border p-2" style={{ borderColor: NAVY }}>
+            {model.payment_type_label ? <p className="font-semibold">Payment Type: {model.payment_type_label}</p> : null}
             <p className="font-semibold">Credit/Debit Card or Acct#:</p>
             <p className="text-sm tracking-wide">{model.card.label}</p>
             {model.card.brand ? <p className="text-[11px] text-[#5a6782]">{model.card.brand}</p> : null}
@@ -327,6 +329,17 @@ export function ServiceAgreementDocument({
             </p>
             <SignatureArea box="card_authorization" model={model} signing={signing} />
           </div>
+          ) : (
+            <div className="flex flex-col gap-2 border p-2" style={{ borderColor: NAVY }}>
+              <p className="font-semibold">Payment Type:</p>
+              <p className="text-sm">{model.payment_type_label ?? 'Paid in full'}</p>
+              <p className="text-[10.5px] text-[#5a6782]">
+                {model.paid_in_full
+                  ? 'The season is paid in full up front. There are no monthly payments and no card on file.'
+                  : `Paid directly to ${COMPANY.name} for the payments in the Payment Schedule. No card is kept on file.`}
+              </p>
+            </div>
+          )}
         </div>
       </section>
 

@@ -439,7 +439,32 @@ function cardBox(
   model: AgreementModel,
   image: Buffer | null | undefined,
 ): number {
-  doc.font('Helvetica-Bold').fontSize(8).fillColor(INK).text('Credit/Debit Card or Acct#:', x + 6, top + 4, { width: width - 12 });
+  // Paid by hand or up front: what they pay with, and no card to authorize.
+  if (!model.takes_card) {
+    doc.font('Helvetica-Bold').fontSize(8).fillColor(INK).text('Payment Type:', x + 6, top + 4, { width: width - 12 });
+    doc.font('Helvetica').fontSize(10).text(model.payment_type_label ?? 'Paid in full', x + 6, doc.y + 2, { width: width - 12 });
+    doc
+      .font('Helvetica')
+      .fontSize(7)
+      .fillColor(MUTED)
+      .text(
+        model.paid_in_full
+          ? 'The season is paid in full up front. There are no monthly payments and no card on file.'
+          : `Paid directly to ${COMPANY.name} for the payments in the Payment Schedule. No card is kept on file.`,
+        x + 6,
+        doc.y + 4,
+        { width: width - 12 },
+      );
+    const bottom = doc.y + 4;
+    doc.lineWidth(0.8).rect(x, top, width, bottom - top + 4).stroke(NAVY);
+    return bottom + 4;
+  }
+  let textTop = top;
+  if (model.payment_type_label) {
+    doc.font('Helvetica-Bold').fontSize(8).fillColor(INK).text(`Payment Type: ${model.payment_type_label}`, x + 6, top + 4, { width: width - 12 });
+    textTop = doc.y - 1;
+  }
+  doc.font('Helvetica-Bold').fontSize(8).fillColor(INK).text('Credit/Debit Card or Acct#:', x + 6, textTop + 4, { width: width - 12 });
   doc.font('Helvetica').fontSize(10).text(model.card.label, x + 6, doc.y + 2, { width: width - 12 });
   if (model.card.brand) {
     doc.fontSize(7.5).fillColor(MUTED).text(model.card.brand, x + 6, doc.y + 1, { width: width - 12 });

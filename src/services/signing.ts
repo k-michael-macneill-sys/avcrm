@@ -17,7 +17,7 @@ import type { AgreementValues } from '../types/agreement';
 import { agreementFromDeal } from './agreement';
 import { contractValues } from '../types/agreement';
 import { enqueueMessage } from './messages';
-import { formatMoney, longDate, toCents, type AgreementModel, type SignatureBox } from '../types/serviceAgreement';
+import { formatMoney, longDate, takesCard, toCents, type AgreementModel, type SignatureBox } from '../types/serviceAgreement';
 import { buildAgreementModel, SERVICE_AGREEMENT_TERMS_VERSION } from './agreementDocument';
 import { loadQuoteTerms, localDate, type QuoteTerms } from './agreementTerms';
 import type { AuditActor } from './audit';
@@ -394,7 +394,7 @@ async function serviceAgreementFor(
 ): Promise<{ service_agreement: AgreementModel | null; required_boxes: SignatureBox[] }> {
   const terms = await loadQuoteTerms(quoteId, db);
   if (!terms) return { service_agreement: null, required_boxes: [] };
-  return { service_agreement: await buildAgreementModel(quoteId, db), required_boxes: requiredBoxes(terms.plan.kind) };
+  return { service_agreement: await buildAgreementModel(quoteId, db), required_boxes: requiredBoxes(terms.plan.kind, terms.payment_type) };
 }
 
 export interface RemoteSignatureInput {
@@ -422,7 +422,7 @@ export async function completeInvitation(
   input: RemoteSignatureInput,
   ipAddress: string | null,
   db: Knex = defaultDb,
-): Promise<{ contract: ContractWithChecklist; branch_id: string }> {
+): Promise<{ contract: ContractWithChecklist; branch_id: string; takes_card: boolean }> {
   const request = await verified(token, db);
   const bytes = decodeSignature(input.signature_png);
 
@@ -431,7 +431,7 @@ export async function completeInvitation(
   let service: { signer_name: string; boxes: Record<string, string> } | null = null;
   if (terms) {
     const boxes = input.boxes ?? [];
-    const missing = requiredBoxes(terms.plan.kind).filter((box) => !boxes.includes(box));
+    const missing = requiredBoxes(terms.plan.kind, terms.payment_type).filter((box) => !boxes.includes(box));
     if (missing.length) {
       throw badRequest(
         'Every signature box has to be signed',
@@ -516,7 +516,9 @@ export async function completeInvitation(
     // Their locked copy, by email, the same as signing in person.
     if (service) await emailSignedCopy(contract.id, trx);
 
-    return { contract, branch_id: request.branch_id };
+    // The older PDF agreement always went on to a card.
+    const card = terms ? takesCard(terms.plan.kind, terms.payment_type) : true;
+    return { contract, branch_id: request.branch_id, takes_card: card };
   });
 }
 

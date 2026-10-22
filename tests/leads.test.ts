@@ -138,6 +138,30 @@ describe('the leads map', () => {
     assert.equal(again.body.data.notes, 'Has a plough guy');
   });
 
+  it('files the pin under the customer signed up from it', async () => {
+    const world = h.world();
+    const token = await login(h.server(), world.emails.sales);
+    const made = await call(h.server(), 'POST', '/leads/pins', { token, body: knock() });
+    const signedUp = await makeCustomer(world.branches.kingston, world.users.sales, { address_line1: '1 Signup Rd' });
+
+    const linked = await call(h.server(), 'PATCH', `/leads/pins/${made.body.data.id}`, {
+      token,
+      body: { customer_id: signedUp.customer_id },
+    });
+    assert.equal(linked.status, 200, JSON.stringify(linked.body));
+    assert.equal(linked.body.data.customer_id, signedUp.customer_id);
+    assert.equal(linked.body.data.status, 'lead');
+
+    // Not a customer from another branch.
+    const other = await call(h.server(), 'POST', '/leads/pins', { token, body: knock() });
+    const elsewhere = await makeCustomer(world.branches.halifax, world.users.corporate, { address_line1: '2 Away St' });
+    const refused = await call(h.server(), 'PATCH', `/leads/pins/${other.body.data.id}`, {
+      token,
+      body: { customer_id: elsewhere.customer_id },
+    });
+    assert.equal(refused.status, 404);
+  });
+
   it("keeps each branch's pins to itself", async () => {
     const world = h.world();
     const kingston = await login(h.server(), world.emails.sales);

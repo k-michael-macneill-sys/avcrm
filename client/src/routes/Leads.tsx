@@ -464,7 +464,7 @@ function signupLink(
     if (value) params.set(key, value);
   }
   if (leadCustomerId) params.set('lead', leadCustomerId);
-  return `/customers/new?${params.toString()}`;
+  return `/customers/add?${params.toString()}`;
 }
 
 function NewKnock({
