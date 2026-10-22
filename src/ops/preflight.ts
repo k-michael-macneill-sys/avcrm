@@ -252,15 +252,6 @@ export function inspect(env: Record<string, string | undefined>): Finding[] {
     }
   }
 
-  // --- bookkeeping --------------------------------------------------------
-  if (get('ANTHROPIC_API_KEY') === '') {
-    warn(
-      'ANTHROPIC_API_KEY',
-      'is unset, so receipts and bank statements are not read automatically. ' +
-        'Bookkeeping still takes entries by hand.',
-    );
-  }
-
   // --- keeping the records ------------------------------------------------
   if (get('BACKUP_OFFSITE_CMD') === '') {
     warn(

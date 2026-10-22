@@ -1762,37 +1762,38 @@ credit is claimed from) and its business share: 50% for meals, 100% for
 everything else unless changed. **Capital purchase (CCA)** is for equipment
 and vehicles bought outright: listed for the accountant, never deducted.
 
-**Scanning, with Claude.** With `ANTHROPIC_API_KEY` set, receipts and bank
-statements file themselves (`src/services/bookkeepingAi.ts`):
+**The monthly close.** No AI runs inside the CRM. Once a month, for each
+branch (or company-wide), the Bookkeeping page walks through three steps:
 
-- **Scan receipts** takes one photo or PDF or a pile of them. Each is sent to
-  Claude (`CLAUDE_MODEL`, default `claude-opus-5-5`, low effort, structured
-  outputs, refusals retried on Anthropic's default fallback model) with the
-  category list and the rules: vendor, date, total, GST/HST, category,
-  business share. Claude's answer is constrained to a JSON schema and checked
-  again here. It is filed, unless Claude was unsure, it looks personal, it is
-  in a foreign currency, it is a capital purchase, its date is odd, or it has
-  the same amount and date as an entry already filed: then it is filed with
-  `status = 'review'` and a note saying why. One with no readable total or
-  date is turned away (422) and the page offers **Add by hand** with the file
-  already attached.
-- **Import statement** takes the CSV a bank exports (most reliable) or a PDF
-  statement. It is read in the background (`202`, then the list polls), and
-  every line is kept in `bank_transactions`, classified `deductible`,
-  `personal`, `transfer`, `income` or `review`. A deductible line is matched
-  to a receipt already filed (same amount, five days before to two after,
-  since a card posts after the purchase) or filed as an expense of its own.
-  A line already recorded from an overlapping statement is skipped, so
-  importing the same statement twice adds nothing. A statement whose reading
-  is lost to a restart shows as failed after half an hour, with **Retry**.
-- **To review** lists both kinds of waiting item. Anything in it is out of
-  every total and out of the export until someone files it (`PATCH
-  /expenses/:id` with `status: 'filed'`, or `POST
-  /expenses/bank-transactions/:id/resolve`).
+1. **Scan and send.** Scan the month's receipts into one PDF (the iPhone
+   Notes app's Scan Documents is enough), download the bank and card
+   statements, and give them to an AI chat (ChatGPT, Claude) with the prompt
+   the page shows, which has a **Copy prompt** button. The prompt is generated
+   by `monthlyClosePrompt` in `src/types/monthlyClose.ts` for the chosen
+   branch and month: the business, the T2125 categories, the branch's
+   province's sales tax (only GST/HST is claimable; PST stays in the cost),
+   matching each receipt to its statement line so nothing is counted twice,
+   meals at 50%, capital purchases kept apart, and statement-only costs
+   claimed in full with no ITC. It asks for three parts: a line-by-line CSV,
+   a **CRM SUMMARY** block of `KEY: amount` lines, and a list of anything to
+   check.
+2. **Keep the documents.** **Upload receipts PDF**, **Upload bank / card
+   statement** (as many as there are accounts) and **Upload detail CSV** file
+   them against the month (`bookkeeping_documents`, upload purpose
+   `bookkeeping_document`, PDF or CSV up to 50 MB).
+3. **Enter the totals.** The pop-up takes the pasted CRM SUMMARY and fills
+   itself (`parseCrmSummary`, which reports a line it cannot read rather than
+   guessing, and warns when the month or branch in the summary is not the one
+   being entered). The total deductible is the sum of the categories, worked
+   out on save; the chat's own total is only a check. Stored on
+   `bookkeeping_months`: the amount to claim per category, GST/HST to claim
+   back (ITCs), capital purchases, personal spending, and the business costs
+   that had no receipt.
 
-Without a key the buttons are greyed out and everything else works as
-before. Receipts and statements go to Anthropic's API to be read; API
-traffic is not used for training by default.
+`GET /expenses/months`, `PUT /expenses/months`, `POST
+/expenses/months/documents`, `DELETE /expenses/months/documents/:id` and
+`DELETE /expenses/months/:id`. **Add +** still files a single expense by hand
+for anything outside a monthly close.
 
 **Year-end export.** `GET /expenses/export?year=2026` (the **Year-end
 export** button) streams one ZIP for the accountant (`src/services/yearEndExport.ts`,
@@ -1801,21 +1802,21 @@ written with the small stored-ZIP writer in `src/utils/zip.ts`):
 | File | What |
 | --- | --- |
 | `01-t2125-by-line.csv` | Gross sales (line 8000, from invoices issued) and each T2125 expense line |
-| `02-t2125-by-category.csv` | The same, by category: total paid, GST/HST, net, deductible, ITCs |
+| `02-t2125-by-category.csv` | The same by category, split between monthly closes and single entries |
 | `03-gst-hst-summary.csv` | GST/HST return lines 101, 105, 108 and 109 |
 | `04-revenue.csv` | Invoices issued by branch, payments received by method |
-| `05-expenses.csv` | Every filed expense, with its receipt's file name in the ZIP |
+| `05-monthly-closes.csv` | Every branch's month: each category, the totals, notes, and its files |
 | `06-capital-purchases.csv` | Capital purchases, for CCA |
-| `07-bank-transactions.csv` | Every imported bank line and what it was classified as |
-| `08-not-yet-reviewed.csv` | What is still waiting, left out of every total |
-| `receipts/` | Every receipt for the year, named by date, vendor and amount |
+| `07-single-expenses.csv` | Expenses entered with Add +, with their receipt file names |
+| `months/` | Each month's receipts PDF, statements and detail CSV |
+| `receipts/` | Receipts attached to single expenses |
 
-The business charges GST/HST, so it is treated as a registrant: an
-expense's deductible amount is its cost net of GST/HST times the business
-share, and the GST/HST times the business share is an input tax credit. An
-expense with no GST/HST recorded (a bank line with no receipt) counts in
-full with no ITC. Cells that start like a spreadsheet formula are escaped.
-A branch's own sign-in exports that branch only.
+The README inside it lists what is missing: months with documents but no
+totals, months with totals but no receipts PDF or statement, and how much
+was claimed with no receipt. A single expense's deductible amount is its
+cost net of GST/HST times the business share, and its GST/HST times the
+business share is an input tax credit. Cells that start like a spreadsheet
+formula are escaped. A branch's own sign-in exports that branch only.
 
 ### Cold email
 

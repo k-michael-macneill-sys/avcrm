@@ -83,11 +83,12 @@ const RULES: Record<UploadPurpose, PurposeRule> = {
     contentTypes: ['application/pdf', 'image/jpeg', 'image/png'],
     maxBytes: 12 * 1024 * 1024,
   },
-  // The PDF from online banking, or the CSV export, which reads more reliably.
-  bank_statement: {
-    prefix: 'bank-statements',
+  // A month of receipts scanned to one PDF, a bank or card statement, or the
+  // AI's line-by-line CSV. A month of phone scans runs large.
+  bookkeeping_document: {
+    prefix: 'bookkeeping',
     contentTypes: ['application/pdf', 'text/csv'],
-    maxBytes: 20 * 1024 * 1024,
+    maxBytes: 50 * 1024 * 1024,
   },
 };
 

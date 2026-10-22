@@ -3,16 +3,6 @@ import { z } from 'zod';
 import { requireAuth, requireRole, resolveActor, resolveBranchScope } from '../middleware/auth';
 import type { Request } from 'express';
 import {
-  deleteStatement,
-  importStatement,
-  listReviewTransactions,
-  listStatements,
-  resolveTransaction,
-  retryStatement,
-  scanReceipt,
-} from '../services/bookkeepingAi';
-import { claudeEnabled } from '../services/claude';
-import {
   createExpense,
   deleteExpense,
   EXPENSE_CATEGORY_INFO,
@@ -20,8 +10,9 @@ import {
   listExpenses,
   updateExpense,
 } from '../services/expenses';
+import { addDocument, deleteDocument, deleteMonth, listMonths, saveTotals } from '../services/monthlyClose';
 import { writeYearEndExport } from '../services/yearEndExport';
-import { EXPENSE_CATEGORIES, EXPENSE_STATUSES } from '../types/models';
+import { BOOKKEEPING_DOCUMENT_KINDS, EXPENSE_CATEGORIES } from '../types/models';
 import { logger } from '../utils/logger';
 import { asyncHandler } from '../utils/async';
 import { badRequest, unauthorized } from '../utils/errors';
@@ -52,7 +43,6 @@ const optionalText = (max: number) =>
 
 const listSchema = z.object({
   sort: z.enum(EXPENSE_SORTS).default('recent'),
-  status: z.enum(EXPENSE_STATUSES).optional(),
   category: z.enum(EXPENSE_CATEGORIES).optional(),
   branch_id: z.string().uuid().optional(),
   from: isoDate.optional(),
@@ -90,24 +80,40 @@ const updateSchema = z
     spent_on: isoDate,
     gst_hst: money.refine((v) => v >= 0, { message: 'cannot be negative' }).nullable(),
     deductible_percent: percent,
-    status: z.enum(EXPENSE_STATUSES),
   })
   .partial();
 
-const scanSchema = z.object({
-  receipt_key: z.string().trim().min(1).max(300),
-  branch_id: z.string().uuid().nullable().default(null),
+const month = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'must be a month like 2026-11');
+
+/** Dollars in, whole cents out, so the totals add up to the cent. */
+const cents = z.coerce
+  .number({ invalid_type_error: 'must be an amount' })
+  .min(0, 'cannot be negative')
+  .max(100_000_000)
+  .transform((v) => Math.round(v * 100));
+
+const monthsSchema = z.object({
+  year: z.coerce.number().int().min(2000).max(2100).optional(),
+  branch_id: z.string().uuid().optional(),
 });
 
-const statementSchema = z.object({
+const totalsSchema = z.object({
+  branch_id: z.string().uuid().nullable().default(null),
+  month,
+  category_amounts: z.record(z.enum(EXPENSE_CATEGORIES), cents).default({}),
+  gst_hst_itc: cents.default(0),
+  capital_purchases: cents.default(0),
+  non_deductible: cents.default(0),
+  no_receipt_total: cents.default(0),
+  no_receipt_count: z.coerce.number().int().min(0).max(100_000).default(0),
+  notes: optionalText(2000),
+});
+
+const documentSchema = z.object({
+  branch_id: z.string().uuid().nullable().default(null),
+  month,
+  kind: z.enum(BOOKKEEPING_DOCUMENT_KINDS),
   file_key: z.string().trim().min(1).max(300),
-  branch_id: z.string().uuid().nullable().default(null),
-});
-
-const resolveSchema = z.object({
-  decision: z.enum(['business', 'personal', 'transfer', 'income']),
-  category: z.enum(EXPENSE_CATEGORIES).optional(),
-  deductible_percent: percent.optional(),
 });
 
 const exportSchema = z.object({
@@ -153,71 +159,52 @@ expensesRouter.post(
   }),
 );
 
-/** Whether scanning is on: the page greys the buttons out when it is not. */
-expensesRouter.get('/automation', (_req, res) => {
-  res.json({ data: { enabled: claudeEnabled() } });
-});
-
-/** One receipt, read by Claude and filed: in the books, or waiting for review. */
-expensesRouter.post(
-  '/scan',
-  asyncHandler(async (req, res) => {
-    const body = parse(scanSchema, req.body);
-    if (!req.user) throw unauthorized();
-    body.branch_id = branchFor(req, body.branch_id);
-    res.status(201).json({ data: await scanReceipt(req.user, resolveActor(req), body) });
-  }),
-);
-
+/** The months closed so far, with their documents and totals. */
 expensesRouter.get(
-  '/statements',
+  '/months',
   asyncHandler(async (req, res) => {
-    res.json({ data: await listStatements(resolveBranchScope(req)) });
+    const { year, branch_id } = parse(monthsSchema, req.query);
+    res.json({ data: await listMonths(resolveBranchScope(req, branch_id), year ?? null) });
   }),
 );
 
-/** Starts reading a statement and answers at once; the list shows it as processing. */
-expensesRouter.post(
-  '/statements',
+/** The totals the AI chat worked out for a month, entered or pasted in. */
+expensesRouter.put(
+  '/months',
   asyncHandler(async (req, res) => {
-    const body = parse(statementSchema, req.body);
+    const body = parse(totalsSchema, req.body);
     if (!req.user) throw unauthorized();
     body.branch_id = branchFor(req, body.branch_id);
-    res.status(202).json({ data: await importStatement(req.user, resolveActor(req), body) });
+    res.json({ data: await saveTotals(req.user, resolveActor(req), body) });
   }),
 );
 
+/** A receipts PDF, a statement or the chat's CSV, filed against a month. */
 expensesRouter.post(
-  '/statements/:id/retry',
+  '/months/documents',
   asyncHandler(async (req, res) => {
-    const { id } = parse(idParamSchema, req.params);
-    res.status(202).json({ data: await retryStatement(id, resolveBranchScope(req)) });
+    const body = parse(documentSchema, req.body);
+    if (!req.user) throw unauthorized();
+    body.branch_id = branchFor(req, body.branch_id);
+    res.status(201).json({ data: await addDocument(req.user, resolveActor(req), body) });
   }),
 );
 
 expensesRouter.delete(
-  '/statements/:id',
+  '/months/documents/:id',
   asyncHandler(async (req, res) => {
     const { id } = parse(idParamSchema, req.params);
-    await deleteStatement(id, resolveActor(req), resolveBranchScope(req));
+    await deleteDocument(id, resolveActor(req), resolveBranchScope(req));
     res.status(204).end();
   }),
 );
 
-/** Bank lines Claude was not sure about. */
-expensesRouter.get(
-  '/bank-transactions/review',
-  asyncHandler(async (req, res) => {
-    res.json({ data: await listReviewTransactions(resolveBranchScope(req)) });
-  }),
-);
-
-expensesRouter.post(
-  '/bank-transactions/:id/resolve',
+expensesRouter.delete(
+  '/months/:id',
   asyncHandler(async (req, res) => {
     const { id } = parse(idParamSchema, req.params);
-    const body = parse(resolveSchema, req.body);
-    res.json({ data: await resolveTransaction(id, resolveActor(req), body, resolveBranchScope(req)) });
+    await deleteMonth(id, resolveActor(req), resolveBranchScope(req));
+    res.status(204).end();
   }),
 );
 
@@ -243,7 +230,7 @@ expensesRouter.get(
   }),
 );
 
-/** Corrects an entry, or approves one waiting for review (status: filed). */
+/** Corrects an entry. */
 expensesRouter.patch(
   '/:id',
   asyncHandler(async (req, res) => {

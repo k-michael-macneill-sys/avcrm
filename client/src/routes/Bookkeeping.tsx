@@ -1,7 +1,22 @@
 import * as React from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Download, FileSpreadsheet, Paperclip, Pencil, RotateCw, ScanLine } from 'lucide-react';
-import type { BankStatement, BankTransaction, Branch, Expense, ExpenseCategory } from '../../../src/types/models';
+import { Check, ClipboardCopy, Download, FileText, Paperclip, Pencil, Upload } from 'lucide-react';
+import type {
+  BookkeepingDocument,
+  BookkeepingDocumentKind,
+  BookkeepingMonth,
+  Branch,
+  Expense,
+  ExpenseCategory,
+} from '../../../src/types/models';
+import {
+  amountToCents,
+  centsToAmount,
+  monthlyClosePrompt,
+  parseCrmSummary,
+  SUMMARY_TOTALS,
+  type SummaryTotalField,
+} from '../../../src/types/monthlyClose';
 import { ConfirmDelete } from '@/components/ConfirmDelete';
 import { DataTable } from '@/components/DataTable';
 import { ErrorNotice, Loading } from '@/components/Misc';
@@ -41,13 +56,11 @@ interface ExpenseView extends Omit<Expense, 'created_at' | 'updated_at'> {
   created_at: string;
 }
 
-interface StatementView extends Omit<BankStatement, 'created_at' | 'updated_at' | 'processed_at'> {
-  created_at: string;
-  review_count: number;
-  deductible_count: number;
+interface MonthView extends Omit<BookkeepingMonth, 'created_at' | 'updated_at' | 'totals_entered_at'> {
+  branch_name: string | null;
+  totals_entered_at: string | null;
+  documents: (Omit<BookkeepingDocument, 'created_at'> & { created_at: string })[];
 }
-
-type ReviewLine = Omit<BankTransaction, 'created_at' | 'updated_at'>;
 
 const SORTS = [
   { value: 'recent', label: 'Recent' },
@@ -58,13 +71,12 @@ const SORTS = [
 type Sort = (typeof SORTS)[number]['value'];
 
 const RECEIPT_TYPES = '.pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png';
-const STATEMENT_TYPES = '.pdf,.csv,application/pdf,text/csv';
 const COMPANY_WIDE = 'company';
 
-const SOURCE_LABELS: Record<ExpenseView['source'], string> = {
-  manual: 'Entered',
-  receipt_scan: 'Scanned',
-  bank_statement: 'From bank',
+const DOCUMENT_LABELS: Record<BookkeepingDocumentKind, string> = {
+  receipts: 'Receipts PDF',
+  bank_statement: 'Statement',
+  detail_csv: 'Detail CSV',
 };
 
 /** Whole cents, so a column of totals adds up the way the accountant's will. */
@@ -72,19 +84,32 @@ function cents(value: string | number | null | undefined): number {
   return Math.round(Number(value ?? 0) * 100);
 }
 
+/** Last month, YYYY-MM: the month a close is usually done for. */
+function lastMonth(): string {
+  const d = new Date();
+  d.setDate(1);
+  d.setMonth(d.getMonth() - 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function monthLabel(month: string): string {
+  const [y, m] = month.slice(0, 7).split('-').map(Number) as [number, number];
+  return new Date(y, m - 1, 1).toLocaleDateString('en-CA', { month: 'long', year: 'numeric' });
+}
+
 /**
- * The Business Console's books. Receipts and bank statements are read by
- * Claude and filed on their own; anything it was unsure of waits under "To
- * review" and stays out of the totals until someone approves it. "Add +"
- * still files one by hand, and the year-end export is the package for the
- * accountant.
+ * The Business Console's books. Once a month each branch closes its books in
+ * an AI chat: the page gives the prompt, keeps the receipts PDF and the
+ * statements, and takes the totals the chat works out. Single expenses can
+ * still be entered with "Add +", and the year-end export is the package for
+ * the accountant. No AI runs inside the CRM.
  */
 export function Bookkeeping(): JSX.Element {
   const [params, setParams] = useSearchParams();
   const sort = (SORTS.some((s) => s.value === params.get('sort')) ? params.get('sort') : 'recent') as Sort;
   const [editing, setEditing] = React.useState<ExpenseView | 'new' | null>(null);
-  const [prefillFile, setPrefillFile] = React.useState<File | null>(null);
   const [exporting, setExporting] = React.useState(false);
+  const [entering, setEntering] = React.useState<{ branch_id: string | null; month: string } | null>(null);
 
   const setSort = (value: string): void => {
     const next = new URLSearchParams(params);
@@ -99,51 +124,40 @@ export function Bookkeeping(): JSX.Element {
         api.get<ExpenseView[]>('/expenses', { sort }),
         api.get<CategoryInfo[]>('/expenses/categories'),
         api.get<Branch[]>('/branches'),
-        api.get<{ enabled: boolean }>('/expenses/automation'),
-        api.get<StatementView[]>('/expenses/statements'),
-        api.get<ReviewLine[]>('/expenses/bank-transactions/review'),
+        api.get<MonthView[]>('/expenses/months'),
       ]),
     [sort],
   );
-
-  // While a statement is being read, look again every few seconds.
-  const processing = data?.[4].some((s) => s.status === 'processing') ?? false;
-  React.useEffect(() => {
-    if (!processing) return undefined;
-    const timer = setInterval(reload, 5000);
-    return () => clearInterval(timer);
-  }, [processing, reload]);
 
   if (loading && !data) return <Loading />;
   if (error) return <ErrorNotice message={error} />;
   if (!data) return <Loading />;
 
-  const [all, categories, branches, automation, statements, reviewLines] = data;
-  const expenses = all.filter((e) => e.status === 'filed');
-  const reviewExpenses = all.filter((e) => e.status === 'review');
-  const total = expenses.reduce((sum, e) => sum + cents(e.amount), 0) / 100;
-  const withReceipt = expenses.filter((e) => e.receipt_key).length;
+  const [expenses, categories, branches, months] = data;
   const thisYear = String(new Date().getFullYear());
-  const yearTotal =
-    expenses.filter((e) => e.spent_on.startsWith(thisYear)).reduce((sum, e) => sum + cents(e.amount), 0) / 100;
-  const waiting = reviewExpenses.length + reviewLines.length;
-
-  const addByHand = (file: File | null): void => {
-    setPrefillFile(file);
-    setEditing('new');
-  };
+  const yearMonths = months.filter((m) => m.month.startsWith(thisYear));
+  const yearExpenses = expenses.filter((e) => e.spent_on.startsWith(thisYear));
+  const singleDeductible = (e: ExpenseView) =>
+    e.category === 'capital_purchase' ? 0 : Math.round((cents(e.amount) - cents(e.gst_hst)) * (e.deductible_percent / 100));
+  const deductible =
+    yearMonths.reduce((n, m) => n + cents(m.deductible_total), 0) + yearExpenses.reduce((n, e) => n + singleDeductible(e), 0);
+  const itc =
+    yearMonths.reduce((n, m) => n + cents(m.gst_hst_itc), 0) +
+    yearExpenses.reduce((n, e) => n + Math.round(cents(e.gst_hst) * (e.deductible_percent / 100)), 0);
+  const missingTotals = months.filter((m) => !m.totals_entered_at && m.documents.length).length;
+  const entered = entering ? months.find((m) => m.month.startsWith(entering.month) && m.branch_id === entering.branch_id) ?? null : null;
 
   return (
     <>
       <PageHeader
         title="Bookkeeping"
-        subtitle="Receipts and deductions, sorted by CRA T2125 category"
+        subtitle="Monthly receipts and statements, sorted by CRA T2125 category"
         actions={
           <>
             <Button type="button" variant="secondary" onClick={() => setExporting(true)}>
               <Download className="size-4" /> Year-end export
             </Button>
-            <Button type="button" onClick={() => addByHand(null)}>
+            <Button type="button" variant="secondary" onClick={() => setEditing('new')}>
               Add +
             </Button>
           </>
@@ -151,32 +165,68 @@ export function Bookkeeping(): JSX.Element {
       />
 
       <StatRow>
-        <StatTile label="Deductions logged" value={money(total)} note={`${count(expenses.length)} entries`} />
-        <StatTile label={`This year (${thisYear})`} value={money(yearTotal)} />
+        <StatTile label={`Tax-deductible (${thisYear})`} value={money(deductible / 100)} note="monthly closes and single entries" />
+        <StatTile label={`GST/HST to claim back (${thisYear})`} value={money(itc / 100)} />
+        <StatTile label="Months closed" value={count(yearMonths.filter((m) => m.totals_entered_at).length)} note={`in ${thisYear}`} />
         <StatTile
-          label="Receipts attached"
-          value={`${count(withReceipt)} of ${count(expenses.length)}`}
-          note={expenses.length > withReceipt ? 'CRA can ask for any of them' : undefined}
+          label="Totals still to enter"
+          value={count(missingTotals)}
+          note={missingTotals ? 'documents in, no totals yet' : 'all caught up'}
         />
-        <StatTile label="To review" value={count(waiting)} note={waiting ? 'not in the totals yet' : 'nothing waiting'} />
       </StatRow>
 
-      <div className="mb-4 grid gap-4 lg:grid-cols-2">
-        <ScanReceipts enabled={automation.enabled} branches={branches} onFiled={reload} onAddByHand={addByHand} />
-        <ImportStatement enabled={automation.enabled} branches={branches} statements={statements} onChanged={reload} />
-      </div>
+      <MonthlyClose
+        categories={categories}
+        branches={branches}
+        months={months}
+        onChanged={reload}
+        onEnterTotals={setEntering}
+      />
 
-      {waiting ? (
-        <ToReview
-          expenses={reviewExpenses}
-          lines={reviewLines}
-          categories={categories}
-          onEdit={setEditing}
-          onChanged={reload}
+      <Section title="Monthly closes" className="mb-6">
+        <DataTable
+          rowKey={(row) => row.id}
+          rows={months}
+          emptyMessage="No months closed yet. Start with the monthly close above."
+          columns={[
+            { header: 'Month', cell: (row) => <span className="whitespace-nowrap">{monthLabel(row.month)}</span> },
+            { header: 'Branch', cell: (row) => row.branch_name ?? 'Company-wide' },
+            {
+              header: 'Files',
+              cell: (row) => <span className="text-xs text-muted-foreground">{row.documents.map((d) => DOCUMENT_LABELS[d.kind]).join(', ') || 'None'}</span>,
+            },
+            { header: 'Deductible', numeric: true, cell: (row) => (row.totals_entered_at ? money(row.deductible_total) : '—') },
+            { header: 'GST/HST back', numeric: true, cell: (row) => (row.totals_entered_at ? money(row.gst_hst_itc) : '—') },
+            { header: 'Capital', numeric: true, cell: (row) => (row.totals_entered_at ? money(row.capital_purchases) : '—') },
+            {
+              header: '',
+              cell: (row) => (
+                <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={row.totals_entered_at ? 'ghost' : 'default'}
+                    onClick={() => setEntering({ branch_id: row.branch_id, month: row.month.slice(0, 7) })}
+                  >
+                    {row.totals_entered_at ? <Pencil className="size-3.5" /> : 'Enter totals'}
+                  </Button>
+                  <ConfirmDelete
+                    what={`${monthLabel(row.month)} for ${row.branch_name ?? 'company-wide'}, with its totals and file list`}
+                    onConfirm={() => api.del(`/expenses/months/${row.id}`)}
+                    onDeleted={reload}
+                  />
+                </div>
+              ),
+            },
+          ]}
         />
-      ) : null}
+      </Section>
 
-      <div className="mb-4 flex flex-wrap items-end gap-3">
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">Single expenses</h2>
+          <p className="text-sm text-muted-foreground">One-offs entered by hand with Add +, outside a monthly close.</p>
+        </div>
         <div className="flex flex-col gap-1">
           <Label htmlFor="expense-sort">Sort by</Label>
           <Select value={sort} onValueChange={setSort}>
@@ -199,7 +249,7 @@ export function Bookkeeping(): JSX.Element {
         <DataTable
           rowKey={(row) => row.id}
           rows={expenses}
-          emptyMessage="No deductions logged yet. Scan a receipt, import a statement, or press Add +."
+          emptyMessage="No single expenses. Most months go through the monthly close above."
           columns={[
             { header: 'Receipt', cell: (row) => <ReceiptIndicator expense={row} /> },
             {
@@ -216,7 +266,6 @@ export function Bookkeeping(): JSX.Element {
               ),
             },
             { header: 'Date', cell: (row) => <span className="whitespace-nowrap">{date(row.spent_on)}</span> },
-            { header: 'Source', cell: (row) => <span className="text-xs text-muted-foreground">{SOURCE_LABELS[row.source]}</span> },
             { header: 'GST/HST', numeric: true, cell: (row) => (row.gst_hst === null ? '—' : money(row.gst_hst)) },
             { header: 'Business %', numeric: true, cell: (row) => `${row.deductible_percent}%` },
             { header: 'Amount', numeric: true, cell: (row) => money(row.amount) },
@@ -226,7 +275,7 @@ export function Bookkeeping(): JSX.Element {
       </div>
       <ul className="hidden flex-col gap-2 max-[720px]:flex">
         {expenses.length === 0 ? (
-          <li className="text-sm text-muted-foreground">No deductions logged yet. Scan a receipt or press Add +.</li>
+          <li className="text-sm text-muted-foreground">No single expenses. Most months go through the monthly close above.</li>
         ) : null}
         {expenses.map((row) => (
           <li key={row.id} className="rounded-xl border border-border bg-card/60 p-3">
@@ -244,7 +293,6 @@ export function Bookkeeping(): JSX.Element {
             <div className="mt-2 flex items-center justify-between gap-2">
               <div className="flex items-center gap-3 text-xs text-muted-foreground">
                 <span>{date(row.spent_on)}</span>
-                <span>{SOURCE_LABELS[row.source]}</span>
                 <ReceiptIndicator expense={row} />
               </div>
               <RowActions expense={row} onEdit={setEditing} onDeleted={reload} />
@@ -255,20 +303,427 @@ export function Bookkeeping(): JSX.Element {
 
       <ExpenseDialog
         expense={editing}
-        initialFile={prefillFile}
-        onClose={() => {
-          setEditing(null);
-          setPrefillFile(null);
-        }}
+        initialFile={null}
+        onClose={() => setEditing(null)}
         categories={categories}
         branches={branches}
         onSaved={() => {
           setEditing(null);
-          setPrefillFile(null);
           reload();
         }}
       />
-      <ExportDialog open={exporting} onOpenChange={setExporting} waiting={waiting} />
+      <TotalsDialog
+        target={entering}
+        existing={entered}
+        categories={categories}
+        branches={branches}
+        onClose={() => setEntering(null)}
+        onSaved={() => {
+          setEntering(null);
+          reload();
+        }}
+      />
+      <ExportDialog open={exporting} onOpenChange={setExporting} waiting={missingTotals} />
+    </>
+  );
+}
+
+/**
+ * The month-end routine, in three steps: copy the prompt, file the documents,
+ * enter what the chat worked out.
+ */
+function MonthlyClose({
+  categories,
+  branches,
+  months,
+  onChanged,
+  onEnterTotals,
+}: {
+  categories: CategoryInfo[];
+  branches: Branch[];
+  months: MonthView[];
+  onChanged: () => void;
+  onEnterTotals: (target: { branch_id: string | null; month: string }) => void;
+}): JSX.Element {
+  const { isCorporate, branch: sessionBranch } = useAuth();
+  const [branchChoice, setBranchChoice] = React.useState(COMPANY_WIDE);
+  const [month, setMonth] = React.useState(lastMonth());
+  const [copied, setCopied] = React.useState(false);
+
+  // A branch's own sign-in closes its own books; corporate picks.
+  const branchId = isCorporate ? (branchChoice === COMPANY_WIDE ? null : branchChoice) : (sessionBranch?.id ?? null);
+  const branch = branches.find((b) => b.id === branchId) ?? null;
+  const branchName = branch?.name ?? (isCorporate ? 'Company-wide' : (sessionBranch?.name ?? 'Company-wide'));
+  const province = branch?.province ?? (isCorporate ? null : (sessionBranch?.province ?? null));
+  const prompt = monthlyClosePrompt({ categories, branch_name: branchName, province, month });
+  const current = months.find((m) => m.month.startsWith(month) && m.branch_id === branchId) ?? null;
+
+  const copy = (): void => {
+    void navigator.clipboard?.writeText(prompt).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    });
+  };
+
+  return (
+    <Section title="Monthly close" className="mb-4">
+      <div className="flex flex-col gap-5 text-sm">
+        <div className="flex flex-wrap items-end gap-3">
+          {isCorporate ? (
+            <BranchPicker id="close-branch" value={branchChoice} onChange={setBranchChoice} branches={branches} />
+          ) : null}
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="close-month">Month</Label>
+            <Input id="close-month" type="month" className="w-44" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} />
+          </div>
+          <p className="pb-2 text-muted-foreground">
+            {branchName} · {monthLabel(month)}
+            {current?.totals_entered_at ? ' · totals entered' : ''}
+          </p>
+        </div>
+
+        <ol className="flex flex-col gap-5">
+          <li className="flex flex-col gap-2">
+            <p className="font-medium text-foreground">1. Scan and send</p>
+            <p className="text-muted-foreground">
+              Scan the month's receipts with the iPhone Notes app (Scan Documents) and share them as one PDF. Download the
+              month's bank and credit card statements as PDFs. Then open ChatGPT or Claude, attach the receipts PDF and the
+              statements, and paste this prompt. It is already set for {branchName} and {monthLabel(month)}.
+            </p>
+            <div className="flex flex-col gap-2">
+              <div>
+                <Button type="button" size="sm" onClick={copy}>
+                  {copied ? <Check className="size-3.5" /> : <ClipboardCopy className="size-3.5" />}
+                  {copied ? 'Copied' : 'Copy prompt'}
+                </Button>
+              </div>
+              <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/40 p-3 text-xs leading-relaxed text-foreground">
+                {prompt}
+              </pre>
+            </div>
+          </li>
+
+          <li className="flex flex-col gap-2">
+            <p className="font-medium text-foreground">2. Keep the documents here</p>
+            <p className="text-muted-foreground">
+              Upload the same receipts PDF and statements, and the line-by-line CSV the chat gives you (Part 1, saved as a
+              .csv file), so everything for the month is in one place for the accountant and the CRA.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <DocumentUpload kind="receipts" label="Upload receipts PDF" accept=".pdf,application/pdf" branchId={branchId} month={month} onUploaded={onChanged} />
+              <DocumentUpload kind="bank_statement" label="Upload bank / card statement" accept=".pdf,application/pdf" branchId={branchId} month={month} onUploaded={onChanged} multiple />
+              <DocumentUpload kind="detail_csv" label="Upload detail CSV" accept=".csv,text/csv" branchId={branchId} month={month} onUploaded={onChanged} />
+            </div>
+            {current?.documents.length ? (
+              <ul className="flex flex-col gap-1">
+                {current.documents.map((d) => (
+                  <li key={d.id} className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-1.5">
+                    <button
+                      type="button"
+                      className="flex min-w-0 items-center gap-2 text-left text-primary hover:underline"
+                      onClick={() => void openFile(d.file_key, d.file_name ?? DOCUMENT_LABELS[d.kind])}
+                    >
+                      <FileText className="size-3.5 shrink-0" />
+                      <span className="truncate">
+                        {DOCUMENT_LABELS[d.kind]}: {d.file_name ?? 'file'}
+                      </span>
+                    </button>
+                    <ConfirmDelete what={`this ${DOCUMENT_LABELS[d.kind].toLowerCase()}`} onConfirm={() => api.del(`/expenses/months/documents/${d.id}`)} onDeleted={onChanged} />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-muted-foreground">Nothing uploaded for this month yet.</p>
+            )}
+          </li>
+
+          <li className="flex flex-col gap-2">
+            <p className="font-medium text-foreground">3. Enter the totals</p>
+            <p className="text-muted-foreground">
+              Copy the chat's CRM SUMMARY block (Part 2) and paste it into the form; it fills itself in. Check Part 3 for
+              anything the chat could not read.
+            </p>
+            <div>
+              <Button type="button" onClick={() => onEnterTotals({ branch_id: branchId, month })}>
+                {current?.totals_entered_at ? 'Change the totals' : 'Enter the totals'}
+              </Button>
+            </div>
+          </li>
+        </ol>
+      </div>
+    </Section>
+  );
+}
+
+function DocumentUpload({
+  kind,
+  label,
+  accept,
+  branchId,
+  month,
+  onUploaded,
+  multiple = false,
+}: {
+  kind: BookkeepingDocumentKind;
+  label: string;
+  accept: string;
+  branchId: string | null;
+  month: string;
+  onUploaded: () => void;
+  multiple?: boolean;
+}): JSX.Element {
+  const input = React.useRef<HTMLInputElement>(null);
+  const { run, pending, error } = useSubmit(onUploaded);
+
+  const send = (files: File[]): void =>
+    run(async () => {
+      for (const file of files) {
+        // Browsers disagree on what a .csv is; the server takes text/csv.
+        const blob = file.name.toLowerCase().endsWith('.csv') ? new Blob([file], { type: 'text/csv' }) : file;
+        const key = await uploadBlob('bookkeeping_document', blob, file.name);
+        await api.post('/expenses/months/documents', { branch_id: branchId, month, kind, file_key: key });
+      }
+      if (input.current) input.current.value = '';
+    });
+
+  return (
+    <div className="flex flex-col gap-1">
+      <input
+        ref={input}
+        type="file"
+        accept={accept}
+        multiple={multiple}
+        className="hidden"
+        onChange={(e) => {
+          const files = [...(e.target.files ?? [])];
+          if (files.length) send(files);
+        }}
+      />
+      <Button type="button" variant="secondary" disabled={pending} onClick={() => input.current?.click()}>
+        <Upload className="size-4" /> {pending ? 'Uploading…' : label}
+      </Button>
+      {error ? <span className="max-w-64 text-xs text-critical">{error}</span> : null}
+    </div>
+  );
+}
+
+type TotalsForm = {
+  categories: Partial<Record<ExpenseCategory, string>>;
+  totals: Record<SummaryTotalField, string>;
+  no_receipt_count: string;
+  notes: string;
+};
+
+function emptyForm(existing: MonthView | null): TotalsForm {
+  return {
+    categories: { ...(existing?.category_amounts ?? {}) },
+    totals: {
+      deductible_total: existing?.totals_entered_at ? existing.deductible_total : '',
+      gst_hst_itc: existing?.totals_entered_at ? existing.gst_hst_itc : '',
+      capital_purchases: existing?.totals_entered_at ? existing.capital_purchases : '',
+      non_deductible: existing?.totals_entered_at ? existing.non_deductible : '',
+      no_receipt_total: existing?.totals_entered_at ? existing.no_receipt_total : '',
+    },
+    no_receipt_count: existing?.totals_entered_at ? String(existing.no_receipt_count) : '',
+    notes: existing?.notes ?? '',
+  };
+}
+
+/** The pop-up for a month's totals: paste the chat's summary, check, save. */
+function TotalsDialog({
+  target,
+  existing,
+  categories,
+  branches,
+  onClose,
+  onSaved,
+}: {
+  target: { branch_id: string | null; month: string } | null;
+  existing: MonthView | null;
+  categories: CategoryInfo[];
+  branches: Branch[];
+  onClose: () => void;
+  onSaved: () => void;
+}): JSX.Element {
+  return (
+    <Dialog open={target !== null} onOpenChange={(next) => !next && onClose()}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        {target ? (
+          <TotalsFormBody
+            key={`${target.branch_id}-${target.month}`}
+            target={target}
+            existing={existing}
+            categories={categories}
+            branchName={branches.find((b) => b.id === target.branch_id)?.name ?? existing?.branch_name ?? 'Company-wide'}
+            onCancel={onClose}
+            onSaved={onSaved}
+          />
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function TotalsFormBody({
+  target,
+  existing,
+  categories,
+  branchName,
+  onCancel,
+  onSaved,
+}: {
+  target: { branch_id: string | null; month: string };
+  existing: MonthView | null;
+  categories: CategoryInfo[];
+  branchName: string;
+  onCancel: () => void;
+  onSaved: () => void;
+}): JSX.Element {
+  const [form, setForm] = React.useState<TotalsForm>(() => emptyForm(existing));
+  const [pasted, setPasted] = React.useState('');
+  const [notice, setNotice] = React.useState<{ tone: 'good' | 'warn'; text: string } | null>(null);
+  const { run, pending, error } = useSubmit(onSaved);
+  const expenseCategories = categories.filter((c) => c.code !== 'capital_purchase');
+
+  const categorySum = expenseCategories.reduce((n, c) => n + (amountToCents(form.categories[c.code] || '0') ?? 0), 0);
+  const statedTotal = amountToCents(form.totals.deductible_total || '');
+  const mismatch = statedTotal !== null && statedTotal !== categorySum;
+
+  const fill = (): void => {
+    const parsed = parseCrmSummary(pasted, categories);
+    const found = Object.keys(parsed.categories).length + Object.keys(parsed.totals).length;
+    if (!found) {
+      setNotice({ tone: 'warn', text: 'No summary found. Paste the whole CRM SUMMARY block (Part 2), including the lines like FUEL: 123.45.' });
+      return;
+    }
+    setForm({
+      categories: Object.fromEntries(
+        expenseCategories.map((c) => [c.code, parsed.categories[c.code] !== undefined ? centsToAmount(parsed.categories[c.code]!) : '']),
+      ),
+      totals: Object.fromEntries(
+        SUMMARY_TOTALS.map((t) => [t.field, parsed.totals[t.field] !== undefined ? centsToAmount(parsed.totals[t.field]!) : '']),
+      ) as Record<SummaryTotalField, string>,
+      no_receipt_count: parsed.no_receipt_count !== null ? String(parsed.no_receipt_count) : '',
+      notes: parsed.notes ?? '',
+    });
+    const warnings: string[] = [];
+    if (parsed.month && parsed.month !== target.month) warnings.push(`The summary is for ${parsed.month}, not ${target.month}.`);
+    if (parsed.branch && parsed.branch.toLowerCase() !== branchName.toLowerCase()) {
+      warnings.push(`The summary says ${parsed.branch}, not ${branchName}.`);
+    }
+    if (parsed.problems.length) warnings.push(`Could not read: ${parsed.problems.join('; ')}`);
+    setNotice(
+      warnings.length
+        ? { tone: 'warn', text: warnings.join(' ') }
+        : { tone: 'good', text: `Filled in ${found} amounts. Check them against the chat before saving.` },
+    );
+  };
+
+  const amountField = (id: string, label: string, value: string, onChange: (v: string) => void, help?: string) => (
+    <div className="flex flex-col gap-1">
+      <Label htmlFor={id}>{label}</Label>
+      <Input id={id} inputMode="decimal" placeholder="0.00" autoComplete="off" value={value} onChange={(e) => onChange(e.target.value)} />
+      {help ? <span className="text-xs text-muted-foreground">{help}</span> : null}
+    </div>
+  );
+
+  const save = (event: React.FormEvent): void => {
+    event.preventDefault();
+    const clean = (v: string) => v.replace(/[$,\s]/g, '') || '0';
+    run(() =>
+      api.put('/expenses/months', {
+        branch_id: target.branch_id,
+        month: target.month,
+        category_amounts: Object.fromEntries(
+          expenseCategories.filter((c) => (form.categories[c.code] ?? '').trim()).map((c) => [c.code, clean(form.categories[c.code]!)]),
+        ),
+        gst_hst_itc: clean(form.totals.gst_hst_itc),
+        capital_purchases: clean(form.totals.capital_purchases),
+        non_deductible: clean(form.totals.non_deductible),
+        no_receipt_total: clean(form.totals.no_receipt_total),
+        no_receipt_count: form.no_receipt_count.trim() || '0',
+        notes: form.notes.trim() || null,
+      }),
+    );
+  };
+
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>
+          Totals for {monthLabel(target.month)}, {branchName}
+        </DialogTitle>
+        <DialogDescription>Paste the chat's CRM SUMMARY to fill this in, or type the numbers from it.</DialogDescription>
+      </DialogHeader>
+
+      <form onSubmit={save} className="flex flex-col gap-4 text-sm">
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="summary-paste">Paste the CRM SUMMARY (Part 2)</Label>
+          <Textarea
+            id="summary-paste"
+            rows={4}
+            value={pasted}
+            onChange={(e) => setPasted(e.target.value)}
+            placeholder={'BRANCH: ...\nMONTH: ...\nFUEL: 412.50\n...'}
+            className="font-mono text-xs"
+          />
+          <div>
+            <Button type="button" variant="secondary" size="sm" disabled={!pasted.trim()} onClick={fill}>
+              Fill in from summary
+            </Button>
+          </div>
+          {notice ? <p className={notice.tone === 'good' ? 'text-good' : 'text-warning'}>{notice.text}</p> : null}
+        </div>
+
+        <div className="grid gap-3 rounded-xl border border-border p-3 sm:grid-cols-2">
+          <div className="flex flex-col gap-1">
+            <Label>Total tax-deductible expenses</Label>
+            <p className="text-lg font-semibold tabular-nums text-foreground">{money(categorySum / 100)}</p>
+            <span className={mismatch ? 'text-xs text-warning' : 'text-xs text-muted-foreground'}>
+              {mismatch
+                ? `The chat's total was ${money((statedTotal ?? 0) / 100)}: the categories below do not add up to it. Check them.`
+                : 'The sum of the categories below.'}
+            </span>
+          </div>
+          {amountField('totals-itc', 'GST/HST to claim back (ITCs)', form.totals.gst_hst_itc, (v) => setForm((f) => ({ ...f, totals: { ...f.totals, gst_hst_itc: v } })), 'From receipts only. Never PST.')}
+          {amountField('totals-capital', 'Capital purchases (for CCA)', form.totals.capital_purchases, (v) => setForm((f) => ({ ...f, totals: { ...f.totals, capital_purchases: v } })), 'Equipment and vehicles, before GST/HST.')}
+          {amountField('totals-personal', 'Personal / not deductible', form.totals.non_deductible, (v) => setForm((f) => ({ ...f, totals: { ...f.totals, non_deductible: v } })))}
+          {amountField('totals-noreceipt', 'Business costs with no receipt', form.totals.no_receipt_total, (v) => setForm((f) => ({ ...f, totals: { ...f.totals, no_receipt_total: v } })), 'Claimed in full, no GST/HST back.')}
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="totals-noreceipt-count">How many with no receipt</Label>
+            <Input id="totals-noreceipt-count" inputMode="numeric" placeholder="0" value={form.no_receipt_count} onChange={(e) => setForm((f) => ({ ...f, no_receipt_count: e.target.value.replace(/[^\d]/g, '') }))} />
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <p className="font-medium text-foreground">Amount to claim by category</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {expenseCategories.map((c) =>
+              amountField(
+                `totals-${c.code}`,
+                `${c.label} (${c.cra_line})`,
+                form.categories[c.code] ?? '',
+                (v) => setForm((f) => ({ ...f, categories: { ...f.categories, [c.code]: v } })),
+              ),
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="totals-notes">Notes for the accountant</Label>
+          <Textarea id="totals-notes" rows={2} value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} placeholder="Optional" />
+        </div>
+
+        {error ? <ErrorNotice message={error} /> : null}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" disabled={pending} onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={pending}>
+            {pending ? 'Saving…' : 'Save totals'}
+          </Button>
+        </div>
+      </form>
     </>
   );
 }
@@ -327,328 +782,6 @@ function BranchPicker({
         </SelectContent>
       </Select>
     </div>
-  );
-}
-
-const OFF_MESSAGE = 'Scanning is off until an Anthropic API key (ANTHROPIC_API_KEY) is set on the server.';
-
-type ScanState =
-  | { status: 'scanning' }
-  | { status: 'filed' | 'review'; amount: string; label: string }
-  | { status: 'failed'; message: string };
-
-/** Pick one receipt or a pile of them; each is read and filed in turn. */
-function ScanReceipts({
-  enabled,
-  branches,
-  onFiled,
-  onAddByHand,
-}: {
-  enabled: boolean;
-  branches: Branch[];
-  onFiled: () => void;
-  onAddByHand: (file: File) => void;
-}): JSX.Element {
-  const [branch, setBranch] = React.useState(COMPANY_WIDE);
-  const [results, setResults] = React.useState<{ file: File; state: ScanState }[]>([]);
-  const [busy, setBusy] = React.useState(false);
-  const input = React.useRef<HTMLInputElement>(null);
-
-  const scanAll = async (files: File[]): Promise<void> => {
-    setBusy(true);
-    setResults(files.map((file) => ({ file, state: { status: 'scanning' } })));
-    for (const [i, file] of files.entries()) {
-      let state: ScanState;
-      try {
-        const key = await uploadBlob('receipt', file, file.name);
-        const result = await api.post<{ expense: ExpenseView; outcome: 'filed' | 'review' }>('/expenses/scan', {
-          receipt_key: key,
-          branch_id: branch === COMPANY_WIDE ? null : branch,
-        });
-        state = {
-          status: result.outcome,
-          amount: result.expense.amount,
-          label: [result.expense.vendor, result.expense.category_label].filter(Boolean).join(' · '),
-        };
-      } catch (err) {
-        state = { status: 'failed', message: err instanceof Error ? err.message : String(err) };
-      }
-      setResults((r) => r.map((row, j) => (j === i ? { ...row, state } : row)));
-      onFiled();
-    }
-    setBusy(false);
-    if (input.current) input.current.value = '';
-  };
-
-  return (
-    <Section title="Scan receipts">
-      <div className="flex flex-col gap-3 text-sm">
-        <p className="text-muted-foreground">
-          Photos or PDFs, as many as you like. Claude reads each one and files it with its category, GST/HST and business
-          share. Anything it is unsure of waits under To review.
-        </p>
-        <div className="flex flex-wrap items-end gap-3">
-          <BranchPicker id="scan-branch" value={branch} onChange={setBranch} branches={branches} />
-          <input
-            ref={input}
-            type="file"
-            multiple
-            accept={RECEIPT_TYPES}
-            className="hidden"
-            onChange={(e) => {
-              const files = [...(e.target.files ?? [])];
-              if (files.length) void scanAll(files);
-            }}
-          />
-          <Button type="button" disabled={!enabled || busy} onClick={() => input.current?.click()}>
-            <ScanLine className="size-4" /> {busy ? 'Scanning…' : 'Scan receipts'}
-          </Button>
-        </div>
-        {!enabled ? <p className="text-xs text-muted-foreground">{OFF_MESSAGE}</p> : null}
-        {results.length ? (
-          <ul className="flex flex-col gap-1.5">
-            {results.map(({ file, state }, i) => (
-              <li key={`${file.name}-${i}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
-                <span className="min-w-0 truncate">{file.name}</span>
-                {state.status === 'scanning' ? (
-                  <span className="text-muted-foreground">Reading…</span>
-                ) : state.status === 'failed' ? (
-                  <span className="flex items-center gap-2">
-                    <span className="text-critical">{state.message}</span>
-                    <Button type="button" size="sm" variant="secondary" onClick={() => onAddByHand(file)}>
-                      Add by hand
-                    </Button>
-                  </span>
-                ) : (
-                  <span className={state.status === 'review' ? 'text-warning' : 'text-foreground'}>
-                    {money(state.amount)} · {state.label} · {state.status === 'review' ? 'to review' : 'filed'}
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </div>
-    </Section>
-  );
-}
-
-function ImportStatement({
-  enabled,
-  branches,
-  statements,
-  onChanged,
-}: {
-  enabled: boolean;
-  branches: Branch[];
-  statements: StatementView[];
-  onChanged: () => void;
-}): JSX.Element {
-  const [branch, setBranch] = React.useState(COMPANY_WIDE);
-  const input = React.useRef<HTMLInputElement>(null);
-  const { run, pending, error } = useSubmit(onChanged);
-
-  const send = (file: File): void =>
-    run(async () => {
-      // Browsers disagree on what a .csv is; the server takes text/csv.
-      const blob = file.name.toLowerCase().endsWith('.csv') ? new Blob([file], { type: 'text/csv' }) : file;
-      const key = await uploadBlob('bank_statement', blob, file.name);
-      await api.post('/expenses/statements', { file_key: key, branch_id: branch === COMPANY_WIDE ? null : branch });
-      if (input.current) input.current.value = '';
-    });
-
-  return (
-    <Section title="Bank and card statements">
-      <div className="flex flex-col gap-3 text-sm">
-        <p className="text-muted-foreground">
-          The CSV your bank exports reads most reliably; a PDF statement works too. Every line is recorded; business costs
-          are filed, matched to receipts already scanned, and anything unclear waits under To review.
-        </p>
-        <div className="flex flex-wrap items-end gap-3">
-          <BranchPicker id="statement-branch" value={branch} onChange={setBranch} branches={branches} />
-          <input
-            ref={input}
-            type="file"
-            accept={STATEMENT_TYPES}
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) send(file);
-            }}
-          />
-          <Button type="button" disabled={!enabled || pending} onClick={() => input.current?.click()}>
-            <FileSpreadsheet className="size-4" /> {pending ? 'Uploading…' : 'Import statement'}
-          </Button>
-        </div>
-        {!enabled ? <p className="text-xs text-muted-foreground">{OFF_MESSAGE}</p> : null}
-        {error ? <ErrorNotice message={error} /> : null}
-        {statements.length ? (
-          <ul className="flex flex-col gap-1.5">
-            {statements.slice(0, 8).map((s) => (
-              <StatementRow key={s.id} statement={s} onChanged={onChanged} />
-            ))}
-          </ul>
-        ) : null}
-      </div>
-    </Section>
-  );
-}
-
-function StatementRow({ statement: s, onChanged }: { statement: StatementView; onChanged: () => void }): JSX.Element {
-  const { run, pending, error } = useSubmit(onChanged);
-  const period = s.period_start && s.period_end ? `${date(s.period_start)} – ${date(s.period_end)}` : null;
-  return (
-    <li className="rounded-lg border border-border px-3 py-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0">
-          <p className="truncate text-foreground">{s.account_label ?? s.file_name ?? 'Statement'}</p>
-          <p className="text-xs text-muted-foreground">
-            {s.status === 'processing'
-              ? 'Reading… this can take a minute or two.'
-              : s.status === 'failed'
-                ? (s.error ?? 'Could not be read.')
-                : [period, `${s.transaction_count} lines`, `${s.deductible_count} business`, s.review_count ? `${s.review_count} to review` : null]
-                    .filter(Boolean)
-                    .join(' · ')}
-          </p>
-        </div>
-        <div className="flex items-center gap-1">
-          {s.status === 'failed' ? (
-            <Button type="button" size="sm" variant="secondary" disabled={pending} onClick={() => run(() => api.post(`/expenses/statements/${s.id}/retry`))}>
-              <RotateCw className="size-3.5" /> Retry
-            </Button>
-          ) : null}
-          {s.status !== 'processing' ? (
-            <ConfirmDelete
-              what="this statement and the expenses filed from it (scanned receipts stay)"
-              onConfirm={() => api.del(`/expenses/statements/${s.id}`)}
-              onDeleted={onChanged}
-            />
-          ) : null}
-        </div>
-      </div>
-      {error ? <ErrorNotice message={error} /> : null}
-    </li>
-  );
-}
-
-function ToReview({
-  expenses,
-  lines,
-  categories,
-  onEdit,
-  onChanged,
-}: {
-  expenses: ExpenseView[];
-  lines: ReviewLine[];
-  categories: CategoryInfo[];
-  onEdit: (e: ExpenseView) => void;
-  onChanged: () => void;
-}): JSX.Element {
-  return (
-    <Section title={`To review (${expenses.length + lines.length})`} className="mb-4">
-      <p className="mb-3 text-sm text-muted-foreground">
-        Claude was not sure about these, so they are left out of the totals and the year-end export until you check them.
-      </p>
-      <ul className="flex flex-col gap-2">
-        {expenses.map((e) => (
-          <li key={e.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border px-3 py-2 text-sm">
-            <div className="min-w-0">
-              <p className="text-foreground">
-                {money(e.amount)} · {e.vendor ?? e.category_label} · {date(e.spent_on)}
-              </p>
-              <p className="text-xs text-warning">{e.review_note ?? 'Check the details.'}</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <ReceiptIndicator expense={e} />
-              <Button type="button" size="sm" onClick={() => onEdit(e)}>
-                Check and file
-              </Button>
-              <ConfirmDelete
-                what={`this ${money(e.amount)} entry`}
-                onConfirm={() => api.del(`/expenses/${e.id}`)}
-                onDeleted={onChanged}
-              />
-            </div>
-          </li>
-        ))}
-        {lines.map((line) => (
-          <ReviewLineRow key={line.id} line={line} categories={categories} onChanged={onChanged} />
-        ))}
-      </ul>
-    </Section>
-  );
-}
-
-function ReviewLineRow({
-  line,
-  categories,
-  onChanged,
-}: {
-  line: ReviewLine;
-  categories: CategoryInfo[];
-  onChanged: () => void;
-}): JSX.Element {
-  const [category, setCategory] = React.useState<string>(line.category ?? '');
-  const { run, pending, error } = useSubmit(onChanged);
-  const resolve = (decision: 'business' | 'personal' | 'transfer' | 'income') =>
-    run(() =>
-      api.post(`/expenses/bank-transactions/${line.id}/resolve`, {
-        decision,
-        ...(decision === 'business' ? { category } : {}),
-      }),
-    );
-
-  return (
-    <li className="rounded-lg border border-border px-3 py-2 text-sm">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-foreground">
-            {money(line.amount)} {line.direction === 'credit' ? 'in' : 'out'} · {line.vendor ?? line.description} ·{' '}
-            {date(line.posted_on)}
-          </p>
-          <p className="text-xs text-muted-foreground">Bank line: {line.description}</p>
-          {line.note ? <p className="text-xs text-warning">{line.note}</p> : null}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {line.direction === 'debit' ? (
-            <>
-              <Select value={category} onValueChange={setCategory}>
-                <SelectTrigger className="w-48" aria-label="Category">
-                  <SelectValue placeholder="Category" />
-                </SelectTrigger>
-                <SelectContent>
-                  {categories.map((c) => (
-                    <SelectItem key={c.code} value={c.code}>
-                      {c.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button type="button" size="sm" disabled={pending || !category} onClick={() => resolve('business')}>
-                Business
-              </Button>
-              <Button type="button" size="sm" variant="secondary" disabled={pending} onClick={() => resolve('personal')}>
-                Personal
-              </Button>
-              <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={() => resolve('transfer')}>
-                Transfer
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button type="button" size="sm" disabled={pending} onClick={() => resolve('income')}>
-                Income
-              </Button>
-              <Button type="button" size="sm" variant="secondary" disabled={pending} onClick={() => resolve('transfer')}>
-                Transfer / refund
-              </Button>
-            </>
-          )}
-        </div>
-      </div>
-      {error ? <ErrorNotice message={error} /> : null}
-    </li>
   );
 }
 
@@ -750,7 +883,6 @@ function ExpenseForm({
 
   const chosen = categories.find((c) => c.code === category);
   const isOther = category === 'other';
-  const reviewing = existing?.status === 'review';
   const clean = (v: string) => v.replace(/[$,\s]/g, '');
 
   const submit = (event: React.FormEvent): void => {
@@ -767,7 +899,7 @@ function ExpenseForm({
     };
     run(async () => {
       if (existing) {
-        await api.patch(`/expenses/${existing.id}`, { ...fields, spent_on: spentOn, status: 'filed' });
+        await api.patch(`/expenses/${existing.id}`, { ...fields, spent_on: spentOn });
       } else {
         const receiptKey = file ? await uploadBlob('receipt', file, file.name) : null;
         await api.post('/expenses', { ...fields, receipt_key: receiptKey });
@@ -778,13 +910,9 @@ function ExpenseForm({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>{existing ? (reviewing ? 'Check and file' : 'Edit deduction') : 'Add a deduction'}</DialogTitle>
+        <DialogTitle>{existing ? 'Edit deduction' : 'Add a deduction'}</DialogTitle>
         <DialogDescription>
-          {reviewing
-            ? (existing.review_note ?? 'Check what Claude read, correct anything wrong, and file it.')
-            : existing
-              ? 'Correct anything that is wrong.'
-              : 'Attach the receipt, pick what it was for, and enter the amount.'}
+          {existing ? 'Correct anything that is wrong.' : 'Attach the receipt, pick what it was for, and enter the amount.'}
         </DialogDescription>
       </DialogHeader>
 
@@ -901,7 +1029,7 @@ function ExpenseForm({
             Cancel
           </Button>
           <Button type="submit" disabled={pending || !category || !amount.trim()}>
-            {pending ? (file ? 'Uploading…' : 'Saving…') : reviewing ? 'Approve and file' : 'Save'}
+            {pending ? (file ? 'Uploading…' : 'Saving…') : 'Save'}
           </Button>
         </div>
       </form>
@@ -916,6 +1044,7 @@ function ExportDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Months with documents in but no totals entered. */
   waiting: number;
 }): JSX.Element {
   const now = new Date();
@@ -931,7 +1060,8 @@ function ExportDialog({
           <DialogTitle>Year-end export</DialogTitle>
           <DialogDescription>
             One ZIP for the accountant: T2125 totals by line and category, the GST/HST return figures, revenue from your
-            invoices, every expense and bank line, capital purchases for CCA, and every receipt.
+            invoices, every monthly close with its receipts PDF and statements, capital purchases for CCA, and every
+            single expense with its receipt.
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-3 text-sm">
@@ -952,8 +1082,8 @@ function ExportDialog({
           </div>
           {waiting ? (
             <p className="text-warning">
-              {waiting} item{waiting === 1 ? ' is' : 's are'} still waiting for review and will be left out of the totals.
-              Review {waiting === 1 ? 'it' : 'them'} first for complete numbers.
+              {waiting} month{waiting === 1 ? ' has' : 's have'} documents but no totals entered yet, so the totals will be
+              short. Enter {waiting === 1 ? 'it' : 'them'} first for complete numbers.
             </p>
           ) : null}
           {error ? <ErrorNotice message={error} /> : null}

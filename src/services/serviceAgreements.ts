@@ -43,7 +43,6 @@ export interface AgreementInput {
   contract_type_id: string;
   billing_plan_id: string;
   package: 'basic' | 'premium';
-  trigger_cm: number;
   season_start: string;
   season_end: string;
   assigned_operator_id: string | null;
@@ -268,7 +267,8 @@ async function resolve(
       billing_plan_id: input.billing_plan_id,
       tax_code_id: input.tax_code_id,
       package: input.package,
-      trigger_cm: input.trigger_cm,
+      // Every agreement is 5 cm now; the form no longer asks.
+      trigger_cm: DEFAULT_TRIGGER_CM,
       season_start: input.season_start,
       season_end: input.season_end,
       assigned_operator_id: input.assigned_operator_id,
@@ -410,7 +410,6 @@ async function formOf(quoteId: string, db: Knex): Promise<AgreementForm> {
     contract_type_id: quote.contract_type_id!,
     billing_plan_id: quote.billing_plan_id!,
     package: quote.package ?? 'basic',
-    trigger_cm: quote.trigger_cm === null ? DEFAULT_TRIGGER_CM : Number(quote.trigger_cm),
     season_start: quote.season_start,
     season_end: quote.season_end,
     assigned_operator_id: quote.assigned_operator_id,
@@ -468,6 +467,22 @@ export interface SignInput {
 }
 
 /**
+ * Every agreement says how the customer pays. One written before the form
+ * asked has to be given a payment type before anyone signs it: it decides
+ * whether there is a card to authorize, and what the agreement prints.
+ */
+export async function assertPaymentTypeChosen(quoteId: string, db: Knex = defaultDb): Promise<void> {
+  const quote = (await db('quotes').where({ id: quoteId }).first('payment_type', 'billing_plan_id')) as
+    | { payment_type: PaymentType | null; billing_plan_id: string | null }
+    | undefined;
+  if (quote?.billing_plan_id && !quote.payment_type) {
+    throw badRequest('Choose how the customer pays: edit the agreement and pick a payment type first', [
+      { path: 'payment_type', message: 'Required' },
+    ]);
+  }
+}
+
+/**
  * Which boxes must be signed. The card authorization only where a card pays:
  * a YIA customer has already paid, and cheque, e-transfer and cash are paid by hand.
  */
@@ -488,6 +503,7 @@ export async function signAgreement(
   db: Knex = defaultDb,
 ): Promise<ContractWithChecklist> {
   await assertAgreementInScope(quoteId, scope, db);
+  await assertPaymentTypeChosen(quoteId, db);
   const terms = await loadQuoteTerms(quoteId, db);
   if (!terms) throw notFound('That quote is not a service agreement');
   if (terms.contract_type.agreement_medium === 'paper') {
@@ -549,6 +565,7 @@ export async function recordPaperAgreement(
   db: Knex = defaultDb,
 ): Promise<ContractWithChecklist> {
   await assertAgreementInScope(quoteId, scope, db);
+  await assertPaymentTypeChosen(quoteId, db);
   const terms = await loadQuoteTerms(quoteId, db);
   if (!terms) throw notFound('That quote is not a service agreement');
   if (terms.contract_type.agreement_medium !== 'paper') {

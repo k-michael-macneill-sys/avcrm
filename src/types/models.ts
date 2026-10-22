@@ -173,8 +173,8 @@ export const UPLOAD_PURPOSES = [
   'service_report_pdf',
   /** A photo or scan of a receipt, filed against a bookkeeping entry. */
   'receipt',
-  /** A bank or card statement, PDF or the CSV the bank exports, read for deductions. */
-  'bank_statement',
+  /** A month's receipts PDF, a bank or card statement, or the AI's line-by-line CSV. */
+  'bookkeeping_document',
 ] as const;
 export type UploadPurpose = (typeof UPLOAD_PURPOSES)[number];
 
@@ -239,23 +239,9 @@ export const EXPENSE_CATEGORIES = [
 ] as const;
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
 
-/** Filed counts in the books; review is waiting for someone to check what Claude read. */
-export const EXPENSE_STATUSES = ['filed', 'review'] as const;
-export type ExpenseStatus = (typeof EXPENSE_STATUSES)[number];
-
-/** How an expense got into the books. */
-export const EXPENSE_SOURCES = ['manual', 'receipt_scan', 'bank_statement'] as const;
-export type ExpenseSource = (typeof EXPENSE_SOURCES)[number];
-
-export const BANK_STATEMENT_STATUSES = ['processing', 'done', 'failed'] as const;
-export type BankStatementStatus = (typeof BANK_STATEMENT_STATUSES)[number];
-
-/**
- * What a line on a bank statement turned out to be. Only `deductible` lines
- * become expenses; `review` waits for a person to decide.
- */
-export const BANK_TRANSACTION_CLASSES = ['deductible', 'personal', 'transfer', 'income', 'review'] as const;
-export type BankTransactionClass = (typeof BANK_TRANSACTION_CLASSES)[number];
+/** The files kept with a month's books. */
+export const BOOKKEEPING_DOCUMENT_KINDS = ['receipts', 'bank_statement', 'detail_csv'] as const;
+export type BookkeepingDocumentKind = (typeof BOOKKEEPING_DOCUMENT_KINDS)[number];
 
 /** Where somebody said yes to hearing from us by email. */
 export const OPT_IN_SOURCES = ['google_ads', 'door_to_door'] as const;
@@ -886,52 +872,52 @@ export interface Expense {
   gst_hst: string | null;
   /** The business share, 0–100. Meals are 50; a capital purchase's is its business use. */
   deductible_percent: number;
-  status: ExpenseStatus;
-  source: ExpenseSource;
-  /** Why it is waiting for review, or what Claude noticed. */
-  review_note: string | null;
-  /** The bank line it was filed from or matched to. */
-  bank_transaction_id: string | null;
   created_by_user_id: string | null;
   created_at: Date;
   updated_at: Date;
 }
 
-export interface BankStatement {
+/**
+ * One branch's books for one month, closed outside the CRM: the receipts and
+ * statements go to an AI chat with the prompt from the Bookkeeping page, and
+ * the totals it works out are entered here. Money is a string, to the cent.
+ */
+export interface BookkeepingMonth {
   id: string;
+  /** Null for the company-wide accounts. */
   branch_id: string | null;
+  /** The first of the month, YYYY-MM-DD. */
+  month: string;
+  /** Amount to claim per expense category: net of GST/HST, after the business share. */
+  category_amounts: Partial<Record<ExpenseCategory, string>>;
+  /** The sum of category_amounts. */
+  deductible_total: string;
+  /** GST/HST paid that can be claimed back as input tax credits. */
+  gst_hst_itc: string;
+  /** Equipment and vehicles bought outright, before GST/HST: for CCA. */
+  capital_purchases: string;
+  /** Personal and other spending that is not a business cost. */
+  non_deductible: string;
+  /** Business costs with only a statement line, no receipt: claimed in full, no ITC. */
+  no_receipt_total: string;
+  no_receipt_count: number;
+  notes: string | null;
+  /** When someone last entered the totals; null while only documents are in. */
+  totals_entered_at: Date | null;
+  created_by_user_id: string | null;
+  updated_by_user_id: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface BookkeepingDocument {
+  id: string;
+  month_id: string;
+  kind: BookkeepingDocumentKind;
   file_key: string;
   file_name: string | null;
-  status: BankStatementStatus;
-  error: string | null;
-  account_label: string | null;
-  period_start: string | null;
-  period_end: string | null;
-  transaction_count: number;
-  created_by_user_id: string | null;
-  processed_at: Date | null;
+  uploaded_by_user_id: string | null;
   created_at: Date;
-  updated_at: Date;
-}
-
-export interface BankTransaction {
-  id: string;
-  statement_id: string;
-  branch_id: string | null;
-  posted_on: string;
-  description: string;
-  /** Always positive; `direction` says which way it went. */
-  amount: string;
-  direction: 'debit' | 'credit';
-  classification: BankTransactionClass;
-  category: ExpenseCategory | null;
-  deductible_percent: number;
-  vendor: string | null;
-  note: string | null;
-  /** The expense it was filed as, or matched to. */
-  expense_id: string | null;
-  created_at: Date;
-  updated_at: Date;
 }
 
 export interface EmailLead {

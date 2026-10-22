@@ -6,6 +6,7 @@ import { unauthorized } from '../utils/errors';
 import {
   agreementPreviewPdf,
   assertAgreementInScope,
+  assertPaymentTypeChosen,
   getAgreementForm,
   getAgreementModel,
   recordPaperAgreement,
@@ -36,7 +37,6 @@ export const agreementBodySchema = z.object({
   contract_type_id: z.string().uuid(),
   billing_plan_id: z.string().uuid(),
   package: z.enum(['basic', 'premium']),
-  trigger_cm: z.number().min(0).max(100),
   season_start: isoDate,
   season_end: isoDate,
   assigned_operator_id: z.string().uuid().nullable().default(null),
@@ -142,6 +142,7 @@ serviceAgreementsRouter.post(
     if (!req.user) throw unauthorized();
     const scope = scopeOf(req);
     await assertAgreementInScope(id, scope);
+    await assertPaymentTypeChosen(id);
     const result = await requestSignature(id, scope, req.user.id);
     res.status(201).json({ data: { url: result.url, sent_to: result.request.sent_to, expires_at: result.request.expires_at } });
   }),

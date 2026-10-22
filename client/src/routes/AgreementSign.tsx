@@ -95,6 +95,31 @@ export function AgreementSign(): JSX.Element {
     );
   }
 
+  // Written before the form asked how the customer pays: that comes first.
+  if (!model.payment_type) {
+    return (
+      <>
+        {header}
+        <Section title="Payment type needed" className="mb-4">
+          <div className="flex flex-col gap-3 text-sm">
+            <p className="text-muted-foreground">
+              This agreement was written before the form asked how the customer pays. Pick a payment type (credit card,
+              Visa debit, cheque, e-transfer, cash, or YIA for paid in full) before it is signed or sent.
+            </p>
+            <div>
+              <Button asChild>
+                <Link to={`/agreements/${quoteId}/edit`}>
+                  <Pencil className="size-4" /> Choose a payment type
+                </Link>
+              </Button>
+            </div>
+          </div>
+        </Section>
+        <ServiceAgreementDocument model={model} />
+      </>
+    );
+  }
+
   return (
     <>
       {header}

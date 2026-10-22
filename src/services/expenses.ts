@@ -1,7 +1,7 @@
 import type { Knex } from 'knex';
 import { db as defaultDb } from '../db/client';
 import type { AuthenticatedUser, BranchScope } from '../types/auth';
-import type { Expense, ExpenseCategory, ExpenseSource, ExpenseStatus } from '../types/models';
+import type { Expense, ExpenseCategory } from '../types/models';
 import { badRequest, notFound } from '../utils/errors';
 import { recordAudit, type AuditActor } from './audit';
 
@@ -146,7 +146,6 @@ export type ExpenseSort = (typeof EXPENSE_SORTS)[number];
 
 export interface ExpenseFilters {
   sort: ExpenseSort;
-  status?: ExpenseStatus;
   category?: ExpenseCategory;
   branch_id?: string;
   /** Inclusive YYYY-MM-DD. */
@@ -188,7 +187,6 @@ export async function listExpenses(
 ): Promise<ExpenseView[]> {
   const query = expenseQuery(db);
 
-  if (filters.status) query.where('expenses.status', filters.status);
   if (filters.category) query.where('expenses.category', filters.category);
   if (filters.branch_id) query.where('expenses.branch_id', filters.branch_id);
   if (filters.from) query.where('expenses.spent_on', '>=', filters.from);
@@ -235,10 +233,6 @@ export interface CreateExpenseInput {
   gst_hst?: number | null;
   /** Defaults to 50 for meals and 100 for everything else. */
   deductible_percent?: number | null;
-  status?: ExpenseStatus;
-  source?: ExpenseSource;
-  review_note?: string | null;
-  bank_transaction_id?: string | null;
 }
 
 /** Half of a meal, all of anything else, unless someone says otherwise. */
@@ -259,7 +253,7 @@ function assertTax(amount: number, gstHst: number | null | undefined): void {
  * receipt — otherwise any key they had seen (a signature, a crew member's
  * licence) could be filed against an expense and read back through it.
  */
-export async function receiptFor(
+async function receiptFor(
   key: string,
   user: AuthenticatedUser,
   db: Knex,
@@ -307,10 +301,6 @@ export async function createExpense(
         receipt_file_name: receipt?.file_name ?? null,
         gst_hst: input.gst_hst === null || input.gst_hst === undefined ? null : input.gst_hst.toFixed(2),
         deductible_percent: input.deductible_percent ?? defaultDeductiblePercent(input.category),
-        status: input.status ?? 'filed',
-        source: input.source ?? 'manual',
-        review_note: input.review_note ?? null,
-        bank_transaction_id: input.bank_transaction_id ?? null,
         created_by_user_id: user.id,
       })
       .returning('*');
@@ -342,14 +332,9 @@ export interface UpdateExpenseInput {
   spent_on?: string;
   gst_hst?: number | null;
   deductible_percent?: number;
-  /** `filed` approves an entry waiting for review. */
-  status?: ExpenseStatus;
 }
 
-/**
- * Corrects an entry, or approves one Claude filed for review. Approving
- * clears the review note: once a person has looked, it is their entry.
- */
+/** Corrects an entry. */
 export async function updateExpense(
   id: string,
   actor: AuditActor,
@@ -384,14 +369,10 @@ export async function updateExpense(
     if (input.branch_id !== undefined && scope.kind === 'all') patch.branch_id = input.branch_id;
     if (input.deductible_percent !== undefined) patch.deductible_percent = input.deductible_percent;
     else if (input.category && input.category !== before.category) patch.deductible_percent = defaultDeductiblePercent(category);
-    if (input.status !== undefined) {
-      patch.status = input.status;
-      if (input.status === 'filed') patch.review_note = null;
-    }
 
     const [after] = await trx('expenses').where({ id }).update(patch).returning('*');
     await recordAudit(actor, {
-      action: before.status === 'review' && input.status === 'filed' ? 'expense.approved' : 'expense.updated',
+      action: 'expense.updated',
       entity_type: 'expense',
       entity_id: id,
       before,
