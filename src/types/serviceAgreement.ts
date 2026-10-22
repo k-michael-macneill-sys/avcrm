@@ -20,6 +20,34 @@ export type PlanKind = (typeof PLAN_KINDS)[number];
 export const TAG_KINDS = ['yia', 'route_code', 'referral'] as const;
 export type TagKind = (typeof TAG_KINDS)[number];
 
+/**
+ * How the customer pays, as the rep records it on the form. The last is not
+ * a way of paying but a way of billing: YIA (Year In Advance) is the season
+ * paid in full, so the agreement shows one payment and no monthly schedule.
+ */
+export const PAYMENT_TYPES = ['credit_card', 'visa_debit', 'cheque', 'e_transfer', 'cash', 'yia'] as const;
+export type PaymentType = (typeof PAYMENT_TYPES)[number];
+
+export const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
+  credit_card: 'Credit card',
+  visa_debit: 'Visa debit',
+  cheque: 'Cheque',
+  e_transfer: 'E-transfer',
+  cash: 'Cash',
+  yia: 'YIA (paid in full)',
+};
+
+/**
+ * Whether the agreement is paid from a card on file, and so needs the card
+ * authorization signed and a card taken after signing. A YIA season has
+ * nothing left to charge; cheque, e-transfer and cash are paid by hand. An
+ * older agreement with no payment type keeps the card it always asked for.
+ */
+export function takesCard(planKind: PlanKind, paymentType: PaymentType | null): boolean {
+  if (planKind === 'seasonal_yia') return false;
+  return paymentType === null || paymentType === 'credit_card' || paymentType === 'visa_debit';
+}
+
 export const PHONE_TYPES = ['mobile', 'home', 'work', 'other'] as const;
 export type PhoneType = (typeof PHONE_TYPES)[number];
 
@@ -626,6 +654,11 @@ export interface AgreementModel {
   length: { one: boolean; two: boolean; other: boolean; other_label: string | null };
   schedule: { label: string; due_on: string; amount: string; total: string; season: number }[];
   paid_in_full: boolean;
+  /** How the customer pays; null on an agreement written before it was asked. */
+  payment_type: PaymentType | null;
+  payment_type_label: string | null;
+  /** Paid from a card on file: the card authorization box is signed, and a card taken after. */
+  takes_card: boolean;
   pricing_lines: { label: string; value: string }[];
   tax_label: string;
   rep_name: string | null;

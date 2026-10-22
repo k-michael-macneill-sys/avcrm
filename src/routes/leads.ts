@@ -86,6 +86,7 @@ const updateSchema = z
     status: z.enum(PIN_STATUSES).optional(),
     notes: optionalText(2000).optional(),
     lead: leadContactSchema.nullable().optional(),
+    customer_id: z.string().uuid().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to change' });
 

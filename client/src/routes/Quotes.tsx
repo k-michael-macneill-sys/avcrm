@@ -34,7 +34,7 @@ export function Quotes(): JSX.Element {
         actions={
           // A quote is written on the agreement: the same form that signs a customer up.
           <Button asChild>
-            <Link to="/customers/new?for=quote">
+            <Link to="/customers/add">
               <Plus className="size-4" /> Create new quote
             </Link>
           </Button>

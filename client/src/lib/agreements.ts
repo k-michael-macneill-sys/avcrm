@@ -10,7 +10,7 @@ import type {
   ServiceRoute,
   TaxCode,
 } from '../../../src/types/models';
-import type { NoteKind, PhoneType } from '../../../src/types/serviceAgreement';
+import type { NoteKind, PaymentType, PhoneType } from '../../../src/types/serviceAgreement';
 
 /** Shapes the service agreement and customer summary endpoints return. */
 
@@ -63,6 +63,7 @@ export interface AgreementFormValues {
   scope_item_ids: string[];
   addons: { addon_service_id: string; price: string }[];
   tag_ids: string[];
+  payment_type: PaymentType | null;
   normal_price: string;
   discount: string;
   referral_credit: string | null;

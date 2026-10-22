@@ -4,6 +4,7 @@ import {
   computePricing,
   DEFAULT_TRIGGER_CM,
   toCents,
+  type PaymentType,
   type Pricing,
   type ScheduleTerms,
 } from '../types/serviceAgreement';
@@ -37,6 +38,7 @@ export interface QuoteTerms {
   early_termination_fee: number;
   referral_credit: number;
   referred_by_customer_id: string | null;
+  payment_type: PaymentType | null;
 }
 
 interface QuoteRow {
@@ -53,6 +55,7 @@ interface QuoteRow {
   early_termination_fee: string | null;
   referral_credit: string | null;
   referred_by_customer_id: string | null;
+  payment_type: PaymentType | null;
 }
 
 export async function loadQuoteTerms(quoteId: string, db: Knex): Promise<QuoteTerms | null> {
@@ -107,6 +110,7 @@ export async function loadQuoteTerms(quoteId: string, db: Knex): Promise<QuoteTe
     early_termination_fee: toCents(quote.early_termination_fee ?? plan.early_termination_fee) ?? 0,
     referral_credit: toCents(quote.referral_credit) ?? 0,
     referred_by_customer_id: quote.referred_by_customer_id,
+    payment_type: quote.payment_type,
   };
 }
 

@@ -6,8 +6,11 @@ import {
   DEFAULT_TRIGGER_CM,
   defaultSeason,
   formatMoney,
+  PAYMENT_TYPE_LABELS,
+  PAYMENT_TYPES,
   PricingError,
   toCents,
+  type PaymentType,
   type Pricing,
 } from '../../../src/types/serviceAgreement';
 import { ErrorNotice, Loading } from '@/components/Misc';
@@ -106,6 +109,7 @@ function startingValues(summary: CustomerSummary, lookups: Lookups): AgreementFo
     scope_item_ids: lookups.scope_items.filter((s) => s.code === 'driveway').map((s) => s.id),
     addons: [],
     tag_ids: [],
+    payment_type: null,
     normal_price: '',
     discount: '0',
     referral_credit: null,
@@ -145,29 +149,21 @@ function Form({
   const isReferral = !!referralTag && values.tag_ids.includes(referralTag.id);
   const perUnit = plan?.kind.startsWith('seasonal') ? 'per season' : 'per month';
 
-  // YIA and the pay-in-full plan are one fact: ticking one sets the other.
-  const choosePlan = (planId: string): void => {
-    const chosen = lookups.billing_plans.find((p) => p.id === planId);
+  // YIA as the payment type and the pay-in-full plan are one fact: choosing
+  // YIA switches the billing to paid in full, and anything else switches it back.
+  const yiaPlan = lookups.billing_plans.find((p) => p.kind === 'seasonal_yia');
+  const paymentTypes = PAYMENT_TYPES.filter((t) => t !== 'yia' || yiaPlan);
+  const choosePayment = (type: PaymentType): void => {
     setValues((v) => {
+      const current = lookups.billing_plans.find((p) => p.id === v.billing_plan_id);
+      const fallback = lookups.billing_plans.find((p) => p.kind === 'seasonal_installments' && p.active) ?? lookups.billing_plans.find((p) => p.kind !== 'seasonal_yia' && p.active);
+      const planId =
+        type === 'yia' ? (yiaPlan?.id ?? v.billing_plan_id) : current?.kind === 'seasonal_yia' ? (fallback?.id ?? '') : v.billing_plan_id;
       const tags = v.tag_ids.filter((id) => id !== yiaTag?.id);
-      return { ...v, billing_plan_id: planId, tag_ids: chosen?.kind === 'seasonal_yia' && yiaTag ? [...tags, yiaTag.id] : tags };
+      return { ...v, payment_type: type, billing_plan_id: planId, tag_ids: type === 'yia' && yiaTag ? [...tags, yiaTag.id] : tags };
     });
   };
-  const toggleTag = (tagId: string, on: boolean): void => {
-    if (tagId === yiaTag?.id) {
-      const target = lookups.billing_plans.find((p) => p.kind === (on ? 'seasonal_yia' : 'seasonal_installments'));
-      if (target) return choosePlan(target.id);
-    }
-    setValues((v) => ({
-      ...v,
-      tag_ids: on ? [...v.tag_ids, tagId] : v.tag_ids.filter((id) => id !== tagId),
-      ...(tagId === referralTag?.id
-        ? on
-          ? { referral_credit: v.referral_credit ?? '10.00' }
-          : { referral_credit: null, referred_by_customer_id: null }
-        : {}),
-    }));
-  };
+  const paidInFull = plan?.kind === 'seasonal_yia';
 
   let pricing: Pricing | null = null;
   let pricingProblem: string | null = null;
@@ -233,13 +229,34 @@ function Form({
               />
             </div>
             <div className={field}>
-              <Label>Billing</Label>
+              <Label>Payment Type</Label>
               <Choice
-                value={values.billing_plan_id}
-                onChange={choosePlan}
-                options={lookups.billing_plans.map((p) => ({ value: p.id, label: p.label }))}
-                ariaLabel="Billing plan"
+                value={values.payment_type ?? ''}
+                onChange={(v) => choosePayment(v as PaymentType)}
+                options={[
+                  ...(values.payment_type ? [] : [{ value: '', label: 'Choose how they pay' }]),
+                  ...paymentTypes.map((t) => ({ value: t, label: PAYMENT_TYPE_LABELS[t] })),
+                ]}
+                ariaLabel="Payment type"
               />
+            </div>
+            <div className={field}>
+              <Label>Billing</Label>
+              {paidInFull ? (
+                <>
+                  <div className="flex h-9 items-center rounded-lg border border-dashed border-input bg-muted/40 px-3 text-sm" aria-readonly="true">
+                    {plan?.label ?? 'Paid in full'}
+                  </div>
+                  <span className="text-xs text-muted-foreground">YIA: the season paid in full, no monthly payments</span>
+                </>
+              ) : (
+                <Choice
+                  value={values.billing_plan_id}
+                  onChange={(v) => set('billing_plan_id', v)}
+                  options={lookups.billing_plans.filter((p) => p.kind !== 'seasonal_yia').map((p) => ({ value: p.id, label: p.label }))}
+                  ariaLabel="Billing plan"
+                />
+              )}
             </div>
             <div className={field}>
               <Label>Package</Label>
@@ -352,40 +369,6 @@ function Form({
           </div>
         </Section>
 
-        <Section title="Tags">
-          <div className="flex flex-col gap-2">
-            {lookups.contract_tags.map((tag) => (
-              <label key={tag.id} className="flex items-start gap-2 text-sm">
-                <Checkbox
-                  className="mt-0.5"
-                  checked={values.tag_ids.includes(tag.id)}
-                  onCheckedChange={(on) => toggleTag(tag.id, on === true)}
-                />
-                <span>
-                  <span className="font-medium">{tag.label}</span>
-                  <span className="block text-xs text-muted-foreground">
-                    {tag.kind === 'yia'
-                      ? 'Year In Advance: paid for the season up front. The agreement shows one payment, and there is no monthly billing.'
-                      : tag.kind === 'referral'
-                        ? 'Referred by another customer, who gets a monthly referral credit while this customer is on paid service.'
-                        : tag.kind === 'route_code'
-                          ? 'The route code has been added to the route.'
-                          : null}
-                  </span>
-                </span>
-              </label>
-            ))}
-            {isReferral ? (
-              <ReferrerPicker
-                branchId={summary.branch.id}
-                customerId={summary.customer.id}
-                value={values.referred_by_customer_id}
-                onChange={(id) => set('referred_by_customer_id', id)}
-              />
-            ) : null}
-          </div>
-        </Section>
-
         <Section title="Pricing Information">
           <div className={grid}>
             <div className={field}>
@@ -408,6 +391,16 @@ function Form({
                     : undefined
               }
             />
+            {isReferral ? (
+              <div className={cn(field, 'sm:col-span-2 lg:col-span-3')}>
+                <ReferrerPicker
+                  branchId={summary.branch.id}
+                  customerId={summary.customer.id}
+                  value={values.referred_by_customer_id}
+                  onChange={(id) => set('referred_by_customer_id', id)}
+                />
+              </div>
+            ) : null}
             {isReferral ? (
               <div className={field}>
                 <Label>Referral Credit (per month, to the referrer)</Label>
@@ -516,7 +509,7 @@ function Form({
           <Button asChild variant="secondary">
             <Link to={`/customers/${summary.customer.id}`}>Cancel</Link>
           </Button>
-          <Button type="button" disabled={pending || !pricing} onClick={save}>
+          <Button type="button" disabled={pending || !pricing || !values.payment_type} onClick={save}>
             {pending ? 'Saving…' : contractType?.agreement_medium === 'paper' ? 'Save and print agreement' : 'Save and review agreement'}
           </Button>
         </div>
@@ -635,7 +628,7 @@ function ReferrerPicker({
   );
 
   return (
-    <div className="ml-6 flex flex-col gap-2 rounded-xl border border-border bg-card/40 p-3">
+    <div className="flex flex-col gap-2 rounded-xl border border-border bg-card/40 p-3">
       <Label htmlFor="referrer">Referred by</Label>
       {chosen.data ? (
         <div className="flex items-center gap-2 text-sm">

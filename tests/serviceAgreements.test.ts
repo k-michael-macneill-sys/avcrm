@@ -208,6 +208,34 @@ describe('the service agreement', () => {
       assert.deepEqual(yia.body.data.tag_ids, [yiaTag]);
     });
 
+    it('keeps a YIA payment type and the pay-in-full plan together', async () => {
+      const world = h.world();
+      const made = await makeCustomer(world.branches.kingston, world.users.sales);
+      const token = await login(h.server(), world.emails.sales);
+      const yiaPlan = await idOf('billing_plans', 'seasonal_yia');
+      const post = async (overrides: Record<string, unknown>) =>
+        call(h.server(), 'POST', `/customers/${made.customer_id}/agreements`, {
+          token,
+          body: await form(made.property_id, overrides),
+        });
+
+      const monthlyYia = await post({ payment_type: 'yia' });
+      assert.equal(monthlyYia.status, 400);
+      assert.ok(monthlyYia.body.error.details.some((d: { path: string }) => d.path === 'payment_type'));
+
+      const paidInFullByCash = await post({ billing_plan_id: yiaPlan, payment_type: 'cash' });
+      assert.equal(paidInFullByCash.status, 400);
+      assert.match(paidInFullByCash.body.error.message, /YIA/);
+
+      const yia = await post({ billing_plan_id: yiaPlan, payment_type: 'yia' });
+      assert.equal(yia.status, 201, JSON.stringify(yia.body));
+      assert.equal(yia.body.data.payment_type, 'yia');
+      assert.deepEqual(yia.body.data.tag_ids, [await idOf('contract_tags', 'yia')]);
+
+      const unknown = await post({ payment_type: 'bitcoin' });
+      assert.equal(unknown.status, 400);
+    });
+
     it('needs to know who referred a referral customer', async () => {
       const world = h.world();
       const made = await makeCustomer(world.branches.kingston, world.users.sales);
@@ -381,6 +409,25 @@ describe('the service agreement', () => {
       assert.match(email.body, /The Kingston team\nDrift Property Services\n\(519\) 221-6191 \| kingston@drift\.test/);
       const welcome = await table('message_log').where({ customer_id, template_code: 'customer_welcome' }).first();
       assert.match(welcome.body, /For anything urgent, call or text \(519\) 221-6191\./);
+    });
+
+    it('asks a customer paying by hand for no card authorization', async () => {
+      for (const payment_type of ['cheque', 'e_transfer', 'cash']) {
+        const { quote_id, token } = await setup({ payment_type }, { first_name: `Hand${payment_type.replace('_', '')}` });
+        const doc = (await call(h.server(), 'GET', `/agreements/${quote_id}/document`, { token })).body.data;
+        assert.equal(doc.takes_card, false);
+        assert.equal(doc.paid_in_full, false, 'still paid month by month');
+        assert.ok(doc.payment_type_label);
+        const reply = await sign(token, quote_id, ['commitment', 'service_commitment']);
+        assert.equal(reply.status, 201, JSON.stringify(reply.body));
+      }
+
+      const card = await setup({ payment_type: 'visa_debit' }, { first_name: 'Debbie' });
+      const doc = (await call(h.server(), 'GET', `/agreements/${card.quote_id}/document`, { token: card.token })).body.data;
+      assert.equal(doc.takes_card, true);
+      assert.equal(doc.payment_type_label, 'Visa debit');
+      const unsigned = await sign(card.token, card.quote_id, ['commitment', 'service_commitment']);
+      assert.equal(unsigned.status, 400, 'a card payer still signs the card authorization');
     });
 
     it('refuses while a required box is empty', async () => {

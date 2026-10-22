@@ -228,6 +228,8 @@ export interface PinUpdate {
   status?: PinStatus;
   notes?: string | null;
   lead?: LeadContact | null;
+  /** The customer this house was signed up as, from the sign-up screen. */
+  customer_id?: string;
 }
 
 /**
@@ -270,6 +272,16 @@ export async function updatePin(
         input.notes ?? pin.notes,
         trx,
       );
+    }
+
+    // Signed up from the pin: the house is theirs, and a lead now.
+    if (input.customer_id && !pin.customer_id && !patch.customer_id) {
+      const customer = await applyBranchScope(trx('customers'), 'branch_id', scope)
+        .andWhere({ id: input.customer_id, branch_id: pin.branch_id })
+        .first('id');
+      if (!customer) throw notFound('Customer not found in this pin’s branch');
+      patch.customer_id = input.customer_id;
+      patch.status = 'lead';
     }
 
     const [updated] = await trx('lead_pins').where({ id }).update(patch).returning('*');

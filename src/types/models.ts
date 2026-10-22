@@ -8,6 +8,8 @@
  * the TypeScript unions and the Zod schemas in the routes.
  */
 
+import type { PaymentType } from './serviceAgreement';
+
 /**
  * corporate: every branch, all of the office work.
  * sales: knocks doors and signs customers up, in one branch.
@@ -417,6 +419,8 @@ export interface Quote {
   assigned_operator_id: string | null;
   service_route_id: string | null;
   route_code: string | null;
+  /** How the customer pays. Null on an agreement written before the form asked. */
+  payment_type: PaymentType | null;
   discount: string;
   trigger_cm: string | null;
   referral_credit: string | null;

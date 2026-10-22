@@ -11,27 +11,49 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { PHONE_TYPE_LABELS } from '@/lib/agreements';
+import { PHONE_TYPE_LABELS, type CustomerSummary } from '@/lib/agreements';
 import * as api from '@/lib/api';
 import { useQuery } from '@/lib/useQuery';
 import { useSubmit } from '@/lib/useSubmit';
 
 /**
  * A new customer: who they are and where we clear, and then straight on to
- * the contract form. Takes the same address prefill as the door sign-up
- * (?address_line1=&city=&province=&postal_code=&lat=&lng=).
+ * the contract form. Every sign-up comes through here, the door included:
+ * the leads map hands over the house it was tapped on
+ * (?address_line1=&city=&province=&postal_code=&lat=&lng=), the pin
+ * (?pin=), and the lead already on file for it (?lead=).
  */
 export function AddCustomer(): JSX.Element {
-  const { isCorporate, isBranch, branch: myBranch } = useAuth();
   const [params] = useSearchParams();
-  const navigate = useNavigate();
+  const leadId = params.get('lead');
   const branches = useQuery(() => api.get<Branch[]>('/branches'), []);
+  const lead = useQuery(
+    () => (leadId ? api.get<CustomerSummary>(`/customers/${leadId}/summary`) : Promise.resolve(null)),
+    [leadId],
+  );
+
+  if (branches.loading || lead.loading) return <Loading />;
+  if (lead.error) return <ErrorNotice message={lead.error} />;
+  return <CustomerForm branches={branches.data ?? []} lead={lead.data ?? null} params={params} />;
+}
+
+function CustomerForm({
+  branches,
+  lead,
+  params,
+}: {
+  branches: Branch[];
+  lead: CustomerSummary | null;
+  params: URLSearchParams;
+}): JSX.Element {
+  const { isCorporate, isBranch, branch: myBranch } = useAuth();
+  const navigate = useNavigate();
   const [v, setV] = React.useState({
     branch_id: '',
-    first_name: '',
-    last_name: '',
-    email: '',
-    phone: '',
+    first_name: lead?.customer.first_name ?? '',
+    last_name: lead?.customer.last_name ?? '',
+    email: lead?.customer.email ?? '',
+    phone: lead?.customer.phone ?? '',
     phone_type: 'mobile' as PhoneType,
     address_line1: params.get('address_line1') ?? '',
     city: params.get('city') ?? '',
@@ -42,43 +64,62 @@ export function AddCustomer(): JSX.Element {
   const set = (key: keyof typeof v, value: string) => setV((s) => ({ ...s, [key]: value }));
   const { run, pending, error } = useSubmit();
 
-  const list = branches.data ?? [];
-  const branchId = v.branch_id || myBranch?.id || (list.length === 1 ? list[0]!.id : '');
+  // A lead already has a branch, and keeps it.
+  const list = branches;
+  const branchId = lead?.branch.id || v.branch_id || myBranch?.id || (list.length === 1 ? list[0]!.id : '');
   const branch = list.find((b) => b.id === branchId);
   const branchCity = isBranch ? (myBranch?.default_city ?? null) : null;
-
-  if (branches.loading) return <Loading />;
+  // Saved once: a retry after a later step fails carries on from here rather than writing a second customer.
+  const savedCustomer = React.useRef<string | null>(lead?.customer.id ?? null);
 
   const save = () =>
     run(async () => {
       const email = v.email.trim() || null;
       const phone = v.phone.trim() || null;
-      const customer = await api.post<Customer>('/customers', {
-        ...(isCorporate ? { branch_id: branchId } : {}),
+      const contact = {
         first_name: v.first_name,
         last_name: v.last_name,
         email,
         phone,
         preferred_contact: email && phone ? 'both' : email ? 'email' : 'sms',
-        status: 'lead',
-      });
+      };
+      let customerId = savedCustomer.current;
+      if (customerId) {
+        // A lead's details are often thin; what the rep has now is the latest word.
+        await api.patch<Customer>(`/customers/${customerId}`, contact);
+      } else {
+        const customer = await api.post<Customer>('/customers', {
+          ...(isCorporate ? { branch_id: branchId } : {}),
+          ...contact,
+          status: 'lead',
+        });
+        customerId = savedCustomer.current = customer.id;
+      }
       if (phone && v.phone_type !== 'mobile') {
-        await api.put(`/customers/${customer.id}/phones`, {
+        await api.put(`/customers/${customerId}/phones`, {
           phones: [{ number: phone, phone_type: v.phone_type, is_primary: true }],
         });
       }
-      const lat = Number(params.get('lat'));
-      const lng = Number(params.get('lng'));
-      await api.post<Property>('/properties', {
-        customer_id: customer.id,
-        address_line1: v.address_line1,
-        ...(branchCity ? {} : { city: v.city }),
-        province: v.province || branch?.province || '',
-        postal_code: v.postal_code,
-        access_notes: v.access_notes.trim() || null,
-        ...(params.get('lat') && Number.isFinite(lat) && Number.isFinite(lng) ? { latitude: lat, longitude: lng } : {}),
-      });
-      navigate(`/customers/${customer.id}/contracts/new`);
+      // The lead's house may already be on file from the map.
+      const summary = await api.get<CustomerSummary>(`/customers/${customerId}/summary`);
+      const sameStreet = (p: Property) => p.address_line1.trim().toLowerCase() === v.address_line1.trim().toLowerCase();
+      if (!summary.properties.some(sameStreet)) {
+        const lat = Number(params.get('lat'));
+        const lng = Number(params.get('lng'));
+        await api.post<Property>('/properties', {
+          customer_id: customerId,
+          address_line1: v.address_line1,
+          ...(branchCity ? {} : { city: v.city }),
+          province: v.province || branch?.province || '',
+          postal_code: v.postal_code,
+          access_notes: v.access_notes.trim() || null,
+          ...(params.get('lat') && Number.isFinite(lat) && Number.isFinite(lng) ? { latitude: lat, longitude: lng } : {}),
+        });
+      }
+      // The map pin this started from becomes this customer's house.
+      const pin = params.get('pin');
+      if (pin && !lead) await api.patch(`/leads/pins/${pin}`, { customer_id: customerId });
+      navigate(`/customers/${customerId}/contracts/new`);
     });
 
   const text = (key: keyof typeof v, label: string, type = 'text') => (
@@ -93,14 +134,9 @@ export function AddCustomer(): JSX.Element {
       <PageHeader
         title="Add customer"
         subtitle="Their details and service address. The contract comes next."
-        actions={
-          <Button asChild variant="secondary">
-            <Link to="/customers/new">Door sign-up (PDF agreement)</Link>
-          </Button>
-        }
       />
       <div className="flex max-w-3xl flex-col gap-4">
-        {isCorporate && list.length > 1 ? (
+        {isCorporate && list.length > 1 && !lead ? (
           <Section title="Branch">
             <Select value={branchId} onValueChange={(id) => set('branch_id', id)}>
               <SelectTrigger aria-label="Branch" className="max-w-xs">
