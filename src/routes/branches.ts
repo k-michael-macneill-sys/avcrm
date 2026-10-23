@@ -25,6 +25,7 @@ const createSchema = z.object({
   status: z.enum(BRANCH_STATUSES).default('active'),
   contact_phone: z.string().trim().max(40).nullable().optional(),
   contact_email: z.string().trim().email().max(200).nullable().optional(),
+  default_trigger_cm: z.number().min(0).max(100).transform((v) => v.toFixed(1)).optional(),
 });
 
 const updateSchema = z.object({
@@ -35,6 +36,8 @@ const updateSchema = z.object({
   manager_user_id: z.string().uuid().nullable().optional(),
   contact_phone: z.string().trim().max(40).nullable().optional(),
   contact_email: z.string().trim().email().max(200).nullable().optional(),
+  /** Where a new agreement's snowfall trigger starts; the rep can still change it. */
+  default_trigger_cm: z.number().min(0).max(100).transform((v) => v.toFixed(1)).optional(),
 });
 
 /** Operators see their own branch; corporate sees all of them. */
