@@ -121,6 +121,7 @@ function BranchCard({ branches, onDone }: { branches: Branch[]; onDone: () => vo
           { header: 'Province', cell: (b) => b.province },
           { header: 'Manager', cell: (b) => (b.manager_user_id ? 'Named' : '—') },
           { header: 'Status', cell: (b) => b.status },
+          { header: 'Snow trigger', cell: (b) => `${Number(b.default_trigger_cm)} cm` },
           { header: 'Phone', cell: (b) => b.contact_phone ?? '—' },
           { header: 'Email', cell: (b) => b.contact_email ?? '—' },
           {
@@ -137,9 +138,10 @@ function BranchCard({ branches, onDone }: { branches: Branch[]; onDone: () => vo
       <Dialog open={editing !== null} onOpenChange={(next) => !next && setEditing(null)}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>{editing?.name} contact details</DialogTitle>
+            <DialogTitle>{editing?.name} settings</DialogTitle>
             <DialogDescription>
-              Printed on this branch’s contracts, and where replies to its emails go.
+              The phone and email print on this branch’s contracts, and replies to its emails go there. The snowfall
+              trigger is where a new agreement starts; the rep can still change it per customer.
             </DialogDescription>
           </DialogHeader>
           {editing ? (
@@ -154,6 +156,12 @@ function BranchCard({ branches, onDone }: { branches: Branch[]; onDone: () => vo
                   placeholder: '(306) 570-5877',
                 },
                 {
+                  name: 'default_trigger_cm',
+                  label: 'Snowfall trigger for new agreements (cm)',
+                  value: String(Number(editing.default_trigger_cm)),
+                  placeholder: '5',
+                },
+                {
                   name: 'contact_email',
                   label: 'Email',
                   type: 'email',
@@ -166,6 +174,7 @@ function BranchCard({ branches, onDone }: { branches: Branch[]; onDone: () => vo
                 api.patch(`/branches/${editing.id}`, {
                   contact_phone: values.contact_phone?.trim() || null,
                   contact_email: values.contact_email?.trim() || null,
+                  ...(values.default_trigger_cm?.trim() ? { default_trigger_cm: Number(values.default_trigger_cm) } : {}),
                 })
               }
               onDone={() => {

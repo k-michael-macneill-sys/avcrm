@@ -276,6 +276,8 @@ export interface Branch {
    * own sign-in writes. Null for a branch that covers several towns.
    */
   default_city: string | null;
+  /** The snowfall depth (cm) a new agreement starts at; the rep can change it per customer. */
+  default_trigger_cm: string;
   /** The phone and email the branch's agreements print. */
   contact_phone: string | null;
   contact_email: string | null;

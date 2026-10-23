@@ -55,7 +55,7 @@ export interface CustomerSummary {
   credit: string;
   payment_method: { brand: string | null; last4: string; provider: string | null } | null;
   sms_assigned_to: { id: string; name: string } | null;
-  branch: { id: string; name: string; province: string };
+  branch: { id: string; name: string; province: string; default_trigger_cm: string };
 }
 
 export async function getCustomerSummary(id: string, scope: BranchScope, db: Knex = defaultDb): Promise<CustomerSummary> {
@@ -144,10 +144,11 @@ export async function getCustomerSummary(id: string, scope: BranchScope, db: Kne
           { id: string; first_name: string; last_name: string } | undefined
         >)
       : Promise.resolve(undefined),
-    db('branches').where({ id: customer.branch_id }).first('id', 'name', 'province') as Promise<{
+    db('branches').where({ id: customer.branch_id }).first('id', 'name', 'province', 'default_trigger_cm') as Promise<{
       id: string;
       name: string;
       province: string;
+      default_trigger_cm: string;
     }>,
   ]);
 

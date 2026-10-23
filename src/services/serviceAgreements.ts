@@ -43,6 +43,8 @@ export interface AgreementInput {
   contract_type_id: string;
   billing_plan_id: string;
   package: 'basic' | 'premium';
+  /** Snowfall (cm) that triggers a visit. Left out, it is the branch's own starting depth. */
+  trigger_cm?: number | null;
   season_start: string;
   season_end: string;
   assigned_operator_id: string | null;
@@ -260,6 +262,13 @@ async function resolve(
     throw badRequest(problems.map((p) => p.message).join('. ') + '.', problems);
   }
 
+  // The rep's depth, or the branch's own (Regina clears from 2 cm).
+  const branchTrigger = (await db('branches').where({ id: customer.branch_id }).first('default_trigger_cm')) as
+    | { default_trigger_cm: string }
+    | undefined;
+  const triggerCm =
+    input.trigger_cm ?? (branchTrigger ? Number(branchTrigger.default_trigger_cm) : DEFAULT_TRIGGER_CM);
+
   return {
     values: {
       property_id: input.property_id,
@@ -267,8 +276,7 @@ async function resolve(
       billing_plan_id: input.billing_plan_id,
       tax_code_id: input.tax_code_id,
       package: input.package,
-      // Every agreement is 5 cm now; the form no longer asks.
-      trigger_cm: DEFAULT_TRIGGER_CM,
+      trigger_cm: triggerCm,
       season_start: input.season_start,
       season_end: input.season_end,
       assigned_operator_id: input.assigned_operator_id,
@@ -410,6 +418,7 @@ async function formOf(quoteId: string, db: Knex): Promise<AgreementForm> {
     contract_type_id: quote.contract_type_id!,
     billing_plan_id: quote.billing_plan_id!,
     package: quote.package ?? 'basic',
+    trigger_cm: quote.trigger_cm === null ? DEFAULT_TRIGGER_CM : Number(quote.trigger_cm),
     season_start: quote.season_start,
     season_end: quote.season_end,
     assigned_operator_id: quote.assigned_operator_id,

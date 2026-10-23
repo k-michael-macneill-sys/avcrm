@@ -38,6 +38,16 @@ describe('signing in by branch', () => {
     return reply.body.data.token as string;
   }
 
+  it('starts Regina’s agreements at 2 cm and the other branches at 5 cm', async () => {
+    for (const choice of ['Regina', 'Kingston', 'Cranbrook', 'Alberta']) await branchToken(choice);
+    const rows = (await db('branches').whereIn('name', ['Regina', 'Kingston', 'Cranbrook', 'Alberta']).select('name', 'default_trigger_cm')) as {
+      name: string;
+      default_trigger_cm: string;
+    }[];
+    const trigger = Object.fromEntries(rows.map((r) => [r.name, Number(r.default_trigger_cm)]));
+    assert.deepEqual(trigger, { Regina: 2, Kingston: 5, Cranbrook: 5, Alberta: 5 });
+  });
+
   it('offers the four branches and ADMIN', async () => {
     const reply = await call(h.server(), 'GET', '/auth/sign-in/choices');
     assert.deepEqual(reply.body.data, ['Cranbrook', 'Kingston', 'Alberta', 'Regina', 'ADMIN']);

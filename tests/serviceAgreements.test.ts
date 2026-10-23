@@ -443,10 +443,19 @@ describe('the service agreement', () => {
       assert.equal(sent.status, 400);
     });
 
-    it('is always for 5 cm, whatever the request says', async () => {
-      const { form: saved, quote_id } = await setup({ trigger_cm: 2 });
-      assert.equal(saved.trigger_cm, undefined, 'the form no longer has the field');
-      assert.equal(Number((await table('quotes').where({ id: quote_id }).first()).trigger_cm), 5);
+    it('starts at the branch’s own snowfall trigger, and takes the rep’s', async () => {
+      const kingston = h.world().branches.kingston;
+      const { form: defaulted } = await setup({}, { first_name: 'Dee' });
+      assert.equal(defaulted.trigger_cm, 5, 'Kingston starts at 5 cm');
+
+      await table('branches').where({ id: kingston }).update({ default_trigger_cm: '2.0' });
+      const { form: two } = await setup({}, { first_name: 'Tess' });
+      assert.equal(two.trigger_cm, 2, 'a branch set to 2 cm starts there');
+
+      const { form: chosen, quote_id } = await setup({ trigger_cm: 3 }, { first_name: 'Cass' });
+      assert.equal(chosen.trigger_cm, 3, 'the rep can change it');
+      const doc = (await call(h.server(), 'GET', `/agreements/${quote_id}/document`, { token: await login(h.server(), h.world().emails.sales) })).body.data;
+      assert.match(doc.wording.agreement_period, /3 cm/);
     });
 
     it('refuses while a required box is empty', async () => {

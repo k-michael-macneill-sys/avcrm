@@ -37,6 +37,8 @@ export interface BranchSetup {
   timezone: string;
   /** Null: the branch covers several towns, so the city is typed each time. */
   default_city: string | null;
+  /** The snowfall depth (cm) the branch's agreements start at. */
+  default_trigger_cm: string;
   /** Printed on the branch's agreements. */
   contact_phone: string;
   contact_email: string;
@@ -48,6 +50,7 @@ export const SIGN_IN_BRANCHES: BranchSetup[] = [
     province: 'BC',
     timezone: 'America/Edmonton',
     default_city: 'Cranbrook',
+    default_trigger_cm: '5.0',
     contact_phone: '(403) 915-0530',
     contact_email: 'benatwood02@gmail.com',
   },
@@ -56,6 +59,7 @@ export const SIGN_IN_BRANCHES: BranchSetup[] = [
     province: 'ON',
     timezone: 'America/Toronto',
     default_city: 'Kingston',
+    default_trigger_cm: '5.0',
     contact_phone: '(519) 221-6191',
     contact_email: 'm.macneill@drift-ps.com',
   },
@@ -64,6 +68,7 @@ export const SIGN_IN_BRANCHES: BranchSetup[] = [
     province: 'AB',
     timezone: 'America/Edmonton',
     default_city: null,
+    default_trigger_cm: '5.0',
     contact_phone: '(587) 257-9211',
     contact_email: 'm.macneill@drift-ps.com',
   },
@@ -72,6 +77,8 @@ export const SIGN_IN_BRANCHES: BranchSetup[] = [
     province: 'SK',
     timezone: 'America/Regina',
     default_city: 'Regina',
+    // Carter clears from 2 cm.
+    default_trigger_cm: '2.0',
     contact_phone: '(306) 570-5877',
     contact_email: 'Carter.o@drift-ps.com',
   },

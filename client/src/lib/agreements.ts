@@ -47,7 +47,7 @@ export interface CustomerSummary {
   credit: string;
   payment_method: { brand: string | null; last4: string; provider: string | null } | null;
   sms_assigned_to: { id: string; name: string } | null;
-  branch: { id: string; name: string; province: string };
+  branch: { id: string; name: string; province: string; default_trigger_cm: string };
 }
 
 export interface AgreementFormValues {
@@ -55,6 +55,7 @@ export interface AgreementFormValues {
   contract_type_id: string;
   billing_plan_id: string;
   package: 'basic' | 'premium';
+  trigger_cm: number;
   season_start: string;
   season_end: string;
   assigned_operator_id: string | null;

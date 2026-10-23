@@ -37,6 +37,7 @@ export const agreementBodySchema = z.object({
   contract_type_id: z.string().uuid(),
   billing_plan_id: z.string().uuid(),
   package: z.enum(['basic', 'premium']),
+  trigger_cm: z.number().min(0).max(100).nullable().optional(),
   season_start: isoDate,
   season_end: isoDate,
   assigned_operator_id: z.string().uuid().nullable().default(null),
